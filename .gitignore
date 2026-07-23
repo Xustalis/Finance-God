@@ -14,14 +14,22 @@
 # Qoder
 .qoder/
 
-# Node (if any tooling is added later)
+# Node
 node_modules/
-package-lock.json
 
-# Python (if any scripts are added later)
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
 
 # Build artifacts
 dist/
@@ -31,6 +39,10 @@ build/
 # Environment
 .env
 .env.*
+!.env.example
 
+# Docker volumes
+pgdata/
 
+# Misc
 111111.txt
