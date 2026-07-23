@@ -1,41 +1,35 @@
-"""Version tracking utilities for all versioned domain objects.
+"""版本化工具 - 全链路版本追溯"""
 
-Per PRD BR-03: All core objects must have version fields for full traceability.
-Every domain object (portfolio, strategy, mandate, etc.) carries an integer
-version that increments on each mutation, enabling audit trails and
-optimistic-concurrency checks.
-"""
+import uuid
+from datetime import datetime, timezone
 
-
-def compute_next_version(current_version: int) -> int:
-    """Return the next sequential version number.
-
-    Args:
-        current_version: The current version (must be >= 0).
-
-    Returns:
-        current_version + 1.
-
-    Raises:
-        ValueError: If current_version is negative.
-    """
-    if current_version < 0:
-        raise ValueError(f"Version must be non-negative, got {current_version}")
-    return current_version + 1
+from pydantic import BaseModel
 
 
-def validate_version_chain(versions: list[int]) -> bool:
-    """Check that versions form a consecutive sequence starting from 1.
+class VersionInfo(BaseModel):
+    """版本信息"""
+    version: int
+    created_at: datetime
+    entity_type: str
+    entity_id: uuid.UUID
 
-    This is used to verify the integrity of a version history — e.g. when
-    loading all versions of a strategy from the database.
 
-    Args:
-        versions: Ordered list of version numbers.
+class TraceChain(BaseModel):
+    """版本追溯链"""
+    profile_version: int | None = None
+    mandate_version: int | None = None
+    strategy_version: int | None = None
+    portfolio_version: int | None = None
+    market_context_id: str | None = None
+    holding_snapshot_version: int | None = None
+    user_state_snapshot_id: str | None = None
 
-    Returns:
-        True if versions == [1, 2, ..., n], False otherwise.
-    """
-    if not versions:
-        return False
-    return versions == list(range(1, len(versions) + 1))
+
+def generate_request_correlation_id() -> str:
+    """生成请求关联ID, 用于串联一次完整操作链"""
+    return str(uuid.uuid4())
+
+
+def utc_now() -> datetime:
+    """获取UTC当前时间"""
+    return datetime.now(timezone.utc)

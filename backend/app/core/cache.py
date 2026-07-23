@@ -1,75 +1,45 @@
-"""In-memory cache layer — replaces Redis for MVP single-instance deployment.
-
-Uses cachetools.TTLCache for automatic expiration. Two pre-configured global
-instances are provided:
-
-- ``app_cache``: general-purpose cache (5 min TTL, 4096 slots)
-- ``market_data_cache``: short-lived market data (60 s TTL, 2048 slots)
-
-When the application scales beyond a single instance, replace the backing
-store with Redis while keeping the same ``MemoryCache`` interface.
-"""
-
-from __future__ import annotations
-
-from typing import Any
+"""内存缓存 - 替代 Redis (MVP单机)"""
 
 from cachetools import TTLCache
+from typing import Any
+
+# 默认 TTL 300s；需要不同 TTL 时使用独立 cache 桶
+_DEFAULT_TTL = 300
+_cache: TTLCache = TTLCache(maxsize=1000, ttl=_DEFAULT_TTL)
+_ttl_caches: dict[int, TTLCache] = {}
 
 
-class MemoryCache:
-    """Simple TTL-based in-memory cache.
-
-    Args:
-        maxsize: Maximum number of entries.
-        ttl: Default time-to-live in seconds.
-    """
-
-    def __init__(self, maxsize: int = 1024, ttl: int = 300) -> None:
-        self._cache: TTLCache = TTLCache(maxsize=maxsize, ttl=ttl)
-        self._default_ttl = ttl
-
-    def get(self, key: str) -> Any | None:
-        """Return the cached value or ``None`` if missing / expired."""
-        return self._cache.get(key)
-
-    def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Store a value.
-
-        If *ttl* is provided it overrides the cache default for this entry only.
-        cachetools.TTLCache does not support per-key TTL natively, so when a
-        custom TTL is supplied we create a temporary TTLCache wrapper.  For
-        simplicity in the MVP we just use the default TTL — the *ttl* param
-        is accepted for API compatibility and logged but not enforced per-key.
-        """
-        # TTLCache is thread-safe for basic operations under CPython GIL.
-        self._cache[key] = value
-
-    def delete(self, key: str) -> None:
-        """Remove a key. No-op if the key does not exist."""
-        self._cache.pop(key, None)
-
-    def clear(self) -> None:
-        """Remove all entries."""
-        self._cache.clear()
-
-    def keys(self) -> list[str]:
-        """Return a snapshot of all current keys."""
-        return list(self._cache.keys())
-
-    def __contains__(self, key: str) -> bool:
-        return key in self._cache
-
-    def __len__(self) -> int:
-        return len(self._cache)
+def _get_cache(ttl: int | None = None) -> TTLCache:
+    if ttl is None or ttl == _DEFAULT_TTL:
+        return _cache
+    if ttl not in _ttl_caches:
+        _ttl_caches[ttl] = TTLCache(maxsize=500, ttl=ttl)
+    return _ttl_caches[ttl]
 
 
-# ---------------------------------------------------------------------------
-# Global cache instances
-# ---------------------------------------------------------------------------
+def cache_get(key: str) -> Any | None:
+    # 先查默认桶，再查自定义 TTL 桶
+    if key in _cache:
+        return _cache[key]
+    for c in _ttl_caches.values():
+        if key in c:
+            return c[key]
+    return None
 
-app_cache = MemoryCache(maxsize=4096, ttl=300)
-"""General-purpose application cache (5 min TTL)."""
 
-market_data_cache = MemoryCache(maxsize=2048, ttl=60)
-"""Short-lived cache for market data (60 s TTL)."""
+def cache_set(key: str, value: Any, ttl: int | None = None) -> None:
+    # 避免同一 key 残留在其他桶
+    cache_delete(key)
+    _get_cache(ttl)[key] = value
+
+
+def cache_delete(key: str) -> None:
+    _cache.pop(key, None)
+    for c in _ttl_caches.values():
+        c.pop(key, None)
+
+
+def cache_clear() -> None:
+    _cache.clear()
+    for c in _ttl_caches.values():
+        c.clear()
