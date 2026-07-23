@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Qoder
+.qoder/
+
+# Node (if any tooling is added later)
+node_modules/
+package-lock.json
+
+# Python (if any scripts are added later)
+__pycache__/
+*.pyc
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.log
+
+# Environment
+.env
+.env.*
