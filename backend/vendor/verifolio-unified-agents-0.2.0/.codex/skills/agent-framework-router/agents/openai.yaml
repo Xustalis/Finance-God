@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Framework Router"
+  short_description: "Discover and validate project research agents and skills."
+  default_prompt: "Use $agent-framework-router to list and validate available research agents and skills."

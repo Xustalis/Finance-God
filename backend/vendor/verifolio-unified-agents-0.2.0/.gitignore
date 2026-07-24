@@ -1,0 +1,16 @@
+.DS_Store
+.venv/
+.panda-venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+node_modules/
+dist/
+.playwright-cli/
+*.tsbuildinfo
+
+# Local credentials and model-run artefacts must not be committed.
+agent_framework/.env
+agent_framework/live-runs/

@@ -1,0 +1,1110 @@
+[
+  {
+    "agent_id": "tradingagents:fundamentals_analyst",
+    "title": "Fundamentals Analyst",
+    "source": "TradingAgents",
+    "description": "Assess operating fundamentals and financial disclosures. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": true,
+    "priority": 20,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:market_analyst",
+    "title": "Market Analyst",
+    "source": "TradingAgents",
+    "description": "Assess market structure and indicators present in the evidence. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": true,
+    "priority": 21,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:sentiment_analyst",
+    "title": "Sentiment Analyst",
+    "source": "TradingAgents",
+    "description": "Assess sentiment direction, confidence, and limitations. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "sentiment"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 22,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:news_analyst",
+    "title": "News Analyst",
+    "source": "TradingAgents",
+    "description": "Assess company, macroeconomic, and event-driven evidence. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": true,
+    "priority": 23,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:bull_researcher",
+    "title": "Support Researcher",
+    "source": "TradingAgents",
+    "description": "Build the strongest support case while exposing its assumptions. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": true,
+    "priority": 40,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:bear_researcher",
+    "title": "Counter Researcher",
+    "source": "TradingAgents",
+    "description": "Build the strongest counter-case and challenge unsupported optimism. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": true,
+    "priority": 41,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:research_manager",
+    "title": "Research Manager",
+    "source": "TradingAgents",
+    "description": "Synthesize contested research and identify unresolved evidence gaps. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "governance"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 60,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:trader",
+    "title": "Implementation Reviewer",
+    "source": "TradingAgents",
+    "description": "Translate research into implementation questions and control requirements without a trade. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "implementation"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 61,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:aggressive_debator",
+    "title": "Aggressive Risk Analyst",
+    "source": "TradingAgents",
+    "description": "Examine upside exposure and opportunity cost under explicit assumptions. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "risk_debate"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 50,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:neutral_debator",
+    "title": "Neutral Risk Analyst",
+    "source": "TradingAgents",
+    "description": "Compare upside and downside evidence without privileging either case. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "risk_debate"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 51,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:conservative_debator",
+    "title": "Conservative Risk Analyst",
+    "source": "TradingAgents",
+    "description": "Stress downside scenarios, missing evidence, concentration, and liquidity. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "risk_debate"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 52,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "tradingagents:portfolio_manager",
+    "title": "Governance Reviewer",
+    "source": "TradingAgents",
+    "description": "Compile governance preconditions and outstanding risks for a human decision-maker. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "governance"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 70,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/tradingagents/tradingagents/agents",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Software_Developer",
+    "title": "Software Developer",
+    "source": "FinRobot",
+    "description": "Analyze and implement bounded Python software tasks. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "software_development"
+    ],
+    "routing_tags": [
+      "python"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Data_Analyst",
+    "title": "Data Analyst",
+    "source": "FinRobot",
+    "description": "Analyze supplied structured data and explain reproducible findings. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "data_analysis",
+      "research"
+    ],
+    "routing_tags": [
+      "data_analysis"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Programmer",
+    "title": "Programmer",
+    "source": "FinRobot",
+    "description": "Design and implement bounded programming tasks. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "software_development"
+    ],
+    "routing_tags": [
+      "python"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Accountant",
+    "title": "Accountant",
+    "source": "FinRobot",
+    "description": "Assess accounting evidence, reconciliations, and disclosure quality. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "accounting"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Statistician",
+    "title": "Statistician",
+    "source": "FinRobot",
+    "description": "Assess statistical methods, uncertainty, and robustness. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "data_analysis",
+      "research"
+    ],
+    "routing_tags": [
+      "statistics"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:IT_Specialist",
+    "title": "IT Specialist",
+    "source": "FinRobot",
+    "description": "Diagnose bounded infrastructure and integration tasks. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "diagnostics",
+      "software_development"
+    ],
+    "routing_tags": [
+      "infrastructure"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Artificial_Intelligence_Engineer",
+    "title": "Artificial Intelligence Engineer",
+    "source": "FinRobot",
+    "description": "Design and review bounded AI implementation tasks. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "software_development"
+    ],
+    "routing_tags": [
+      "ai"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Financial_Analyst",
+    "title": "Financial Analyst",
+    "source": "FinRobot",
+    "description": "Analyze financial evidence and communicate its limitations. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "financials"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Market_Analyst",
+    "title": "FinRobot Market Analyst",
+    "source": "FinRobot",
+    "description": "Analyze supplied company, market, and news evidence. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "market_context"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:library:Expert_Investor",
+    "title": "Investment Report Reviewer",
+    "source": "FinRobot",
+    "description": "Synthesize an evidence-bound financial analysis report for review. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "report"
+    ],
+    "asset_kinds": [],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 100,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot/agents/agent_library.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:CompanyOverviewAgent",
+    "title": "Company Overview",
+    "source": "FinRobot",
+    "description": "Build a sourced company identity, business-model, and operating overview. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "company_deep_dive"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/company_overview_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:CompetitorAnalysisAgent",
+    "title": "Competitive Landscape",
+    "source": "FinRobot",
+    "description": "Assess competitors and the evidence for durable competitive advantages. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "company_deep_dive",
+      "competitive_review"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 31,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/competitor_analysis_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:InvestmentOverviewAgent",
+    "title": "Investment Thesis Review",
+    "source": "FinRobot",
+    "description": "Assess the evidence for and against a stated investment thesis. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "thesis_review"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 45,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/investment_overview_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:MajorTakeawaysAgent",
+    "title": "Major Takeaways",
+    "source": "FinRobot",
+    "description": "Extract the most decision-relevant supported and contested findings. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "report"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 65,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/major_takeaways_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:NewsSummaryAgent",
+    "title": "News Summary",
+    "source": "FinRobot",
+    "description": "Summarize supplied news evidence and distinguish events from interpretation. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "news_review"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 32,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/news_summary_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:RiskAnalystAgent",
+    "title": "Equity Risk Analyst",
+    "source": "FinRobot",
+    "description": "Identify evidence-backed company, market, and financial risks. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "risk_review"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 48,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/risks_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:TaglineAnalystAgent",
+    "title": "Research Tagline",
+    "source": "FinRobot",
+    "description": "Produce a concise neutral characterization grounded in the research record. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "report"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 66,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/tagline_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:ValuationOverviewAgent",
+    "title": "Valuation Context",
+    "source": "FinRobot",
+    "description": "Explain deterministic valuation inputs and sensitivities without a price target. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "valuation_review"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 44,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/equity_agents/valuation_overview_agent.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "finrobot:equity:fmp-stable-metrics",
+    "title": "FMP Stable Equity Metrics",
+    "source": "FinRobot",
+    "description": "Generate deterministic financial metrics through the isolated compatibility process. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "finrobot_metrics",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "data_analysis",
+      "research"
+    ],
+    "routing_tags": [
+      "financials"
+    ],
+    "asset_kinds": [
+      "equity"
+    ],
+    "required_resources": [
+      "fmp",
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": false,
+    "always_active": false,
+    "priority": 10,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/finrobot/finrobot_equity/core/src/modules/financial_data_processor.py",
+    "license": "Apache-2.0"
+  },
+  {
+    "agent_id": "quantskills:agent-correlation-break-research",
+    "title": "Correlation Break Monitor",
+    "source": "QuantSkills",
+    "description": "Measure changes in cross-asset correlation structure from controlled data. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "deterministic_monitor",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "portfolio_stress"
+    ],
+    "asset_kinds": [
+      "portfolio"
+    ],
+    "required_resources": [
+      "future_dominant_corr"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 10,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-correlation-break-research/AGENTS.md",
+    "license": "GPL-3.0 contract; independent local implementation"
+  },
+  {
+    "agent_id": "quantskills:agent-crowding-risk-monitor",
+    "title": "Crowding Risk Monitor",
+    "source": "QuantSkills",
+    "description": "Measure funding and event evidence associated with crowding risk. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "deterministic_monitor",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "crowding_review"
+    ],
+    "asset_kinds": [
+      "equity",
+      "fund",
+      "market",
+      "portfolio"
+    ],
+    "required_resources": [
+      "lhb_list",
+      "margin"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 10,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-crowding-risk-monitor/AGENTS.md",
+    "license": "GPL-3.0 contract; independent local implementation"
+  },
+  {
+    "agent_id": "quantskills:agent-derivatives-skew-sentiment-monitor",
+    "title": "Derivatives Volatility Monitor",
+    "source": "QuantSkills",
+    "description": "Compare implied and historical volatility evidence without a trading signal. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "deterministic_monitor",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "derivatives_review"
+    ],
+    "asset_kinds": [
+      "equity",
+      "fund",
+      "market"
+    ],
+    "required_resources": [
+      "option_implied_volatility",
+      "option_underlying_volatility"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 10,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-derivatives-skew-sentiment-monitor/AGENTS.md",
+    "license": "GPL-3.0 contract; independent local implementation"
+  },
+  {
+    "agent_id": "quantskills:agent-market-regime-monitor",
+    "title": "Market Regime Monitor",
+    "source": "QuantSkills",
+    "description": "Describe market-regime evidence from prices, funding, events, and volatility. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "deterministic_monitor",
+    "minimum_profile": "research",
+    "task_types": [
+      "research"
+    ],
+    "routing_tags": [
+      "market_context"
+    ],
+    "asset_kinds": [
+      "equity",
+      "fund",
+      "market",
+      "portfolio"
+    ],
+    "required_resources": [
+      "lhb_list",
+      "margin",
+      "market_bars",
+      "option_underlying_volatility"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 10,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-market-regime-monitor/AGENTS.md",
+    "license": "GPL-3.0 contract; independent local implementation"
+  },
+  {
+    "agent_id": "quantskills:agent-for-liangshuyuan-tasks",
+    "title": "Panda Trading Workflow",
+    "source": "QuantSkills",
+    "description": "Route bounded quantitative-development work through analysis, development, and testing. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "quant_development"
+    ],
+    "routing_tags": [
+      "panda_trading"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/AGENTS.md",
+    "license": "MIT"
+  },
+  {
+    "agent_id": "quantskills:agent-quantspace",
+    "title": "QuantSpace Workflow",
+    "source": "QuantSkills",
+    "description": "Plan and review reusable quantitative research, backtests, and reports. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "backtest",
+      "quant_development"
+    ],
+    "routing_tags": [
+      "quantspace"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-quantspace/AGENTS.md",
+    "license": "GPL-3.0 contract; independent local implementation"
+  },
+  {
+    "agent_id": "quantskills:agent-ssquant",
+    "title": "SSQuant Workflow",
+    "source": "QuantSkills",
+    "description": "Diagnose SSQuant data, strategy, backtest, reporting, and guarded CTP tasks. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "backtest",
+      "diagnostics",
+      "live_trading",
+      "quant_development"
+    ],
+    "routing_tags": [
+      "ssquant"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [
+      "ctp_start",
+      "order_cancel",
+      "order_entry"
+    ],
+    "authorization_by_task": {
+      "live_trading": [
+        "ctp_start",
+        "order_cancel",
+        "order_entry"
+      ]
+    },
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-ssquant/AGENTS.md",
+    "license": "GPL-3.0 contract; independent local implementation"
+  },
+  {
+    "agent_id": "quantskills:liangshuyuan:analyst-agent",
+    "title": "Task Analyst",
+    "source": "QuantSkills",
+    "description": "Convert a supplied task into explicit requirements, boundaries, and ambiguities. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "quant_development"
+    ],
+    "routing_tags": [
+      "requirements"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/analyst-agent/SKILL.md",
+    "license": "MIT"
+  },
+  {
+    "agent_id": "quantskills:liangshuyuan:dev-alpha-agent",
+    "title": "Alpha Developer",
+    "source": "QuantSkills",
+    "description": "Design and validate bounded alpha-factor implementation work. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "quant_development"
+    ],
+    "routing_tags": [
+      "alpha"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/dev-alpha-agent/SKILL.md",
+    "license": "MIT"
+  },
+  {
+    "agent_id": "quantskills:liangshuyuan:dev-build-agent",
+    "title": "Quant Tool Developer",
+    "source": "QuantSkills",
+    "description": "Design and validate bounded reusable quantitative tools. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "quant_development"
+    ],
+    "routing_tags": [
+      "build"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/dev-build-agent/SKILL.md",
+    "license": "MIT"
+  },
+  {
+    "agent_id": "quantskills:liangshuyuan:main-agent",
+    "title": "Quant Development Orchestrator",
+    "source": "QuantSkills",
+    "description": "Coordinate requirements, development, testing, and delivery reports. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "quant_development"
+    ],
+    "routing_tags": [
+      "orchestration"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": true,
+    "priority": 20,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/main-agent/SKILL.md",
+    "license": "MIT"
+  },
+  {
+    "agent_id": "quantskills:liangshuyuan:test-agent",
+    "title": "Quant QA",
+    "source": "QuantSkills",
+    "description": "Design and evaluate tests without modifying the implementation under test. Use supplied evidence only. Separate facts from inferences, expose unknowns, and do not carry out or claim trading, pricing, sizing, suitability, publishing, or external actions.",
+    "adapter": "prompt",
+    "minimum_profile": "workspace",
+    "task_types": [
+      "quant_development",
+      "testing"
+    ],
+    "routing_tags": [
+      "testing"
+    ],
+    "asset_kinds": [],
+    "required_resources": [
+      "workspace"
+    ],
+    "external_actions": [],
+    "authorization_by_task": {},
+    "auto_select": true,
+    "always_active": false,
+    "priority": 30,
+    "source_path": "agent_framework/src/research_runtime/definitions.py",
+    "upstream_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/test-agent/SKILL.md",
+    "license": "MIT"
+  }
+]

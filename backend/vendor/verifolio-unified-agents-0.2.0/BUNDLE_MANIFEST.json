@@ -1,0 +1,23 @@
+{
+  "name": "verifolio-unified-agents",
+  "version": "0.2.0",
+  "agents": {
+    "total": 44,
+    "prompt": 39,
+    "deterministic_monitor": 4,
+    "finrobot_metrics": 1
+  },
+  "skill_descriptors": 32,
+  "entrypoints": [
+    "verifolio-agent",
+    "verifolio-agent-catalog",
+    "verifolio-agent-mcp"
+  ],
+  "excluded": [
+    "credentials",
+    "virtual environments",
+    "caches",
+    "runtime artifacts",
+    "external execution adapters"
+  ]
+}

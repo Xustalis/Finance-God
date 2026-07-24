@@ -1,0 +1,14 @@
+openai>=2.0.0,<3
+langchain>=0.1.0
+langgraph>=1.0.0,<2
+pydantic>=2.0.0,<3
+python-dotenv>=1.0.0,<2
+mcp>=1.27.0,<2
+panda_data>=0.0.12,<1
+starlette>=1.0.0,<2
+uvicorn>=0.30.0,<1
+SQLAlchemy[asyncio]>=2.0.0,<3
+alembic>=1.13.0,<2
+asyncpg>=0.29.0,<1
+aiosqlite>=0.20.0,<1
+./vendor/verifolio-unified-agents-0.2.0/agent_framework

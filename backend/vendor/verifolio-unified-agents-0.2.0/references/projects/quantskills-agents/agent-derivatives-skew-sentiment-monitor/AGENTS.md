@@ -1,0 +1,132 @@
+---
+name: agent-derivatives-skew-sentiment-monitor
+description: "Monitor derivatives sentiment from option implied volatility and underlying historical volatility. Use when a research or trading AI agent needs Pandadata-backed monitoring, evidence-backed interpretation, user-readable reports, watchlists, and review materials without automated order placement."
+metadata:
+  organization: QuantSkills
+  organization_url: https://github.com/quantskills
+  repository: quantskills/agent-derivatives-skew-sentiment-monitor
+  repository_url: https://github.com/quantskills/agent-derivatives-skew-sentiment-monitor
+  project_type: agent
+  collection: pandadata-research-monitor-agents-8
+  license: GPL-3.0
+  category: monitor-agent
+  tags: [derivatives, options, sentiment, pandadata]
+  platforms: [claude-code, codex, openclaw, cursor]
+  language: zh-en
+  status: active
+  validation_level: verified
+  maintainer_type: official
+  requires: [skill-pandadata-api]
+  pandadata_methods: [get_option_implied_volatility, get_option_underlying_volatility]
+  summary_zh: 用期权隐含波动率和标的历史波动率观察衍生品市场风险偏好，不重复已有期权波动率分析 Skill。
+  summary_en: Monitor derivatives sentiment from option implied volatility and underlying historical volatility.
+quantSkills:
+  organization: QuantSkills
+  organization_url: https://github.com/quantskills
+  repository: quantskills/agent-derivatives-skew-sentiment-monitor
+  repository_url: https://github.com/quantskills/agent-derivatives-skew-sentiment-monitor
+  project_type: agent
+  collection: pandadata-research-monitor-agents-8
+  license: GPL-3.0
+  category: monitor-agent
+  tags: [derivatives, options, sentiment, pandadata]
+  platforms: [claude-code, codex, openclaw, cursor]
+  language: zh-en
+  status: active
+  validation_level: verified
+  maintainer_type: official
+  requires: [skill-pandadata-api]
+  pandadata_methods: [get_option_implied_volatility, get_option_underlying_volatility]
+  summary_zh: 用期权隐含波动率和标的历史波动率观察衍生品市场风险偏好，不重复已有期权波动率分析 Skill。
+  summary_en: Monitor derivatives sentiment from option implied volatility and underlying historical volatility.
+---
+
+```json qsh-form
+{
+  "version": 1,
+  "task": {
+    "placeholder": "补充监控窗口、重点事件、希望观察的风险情景或交付要求"
+  },
+  "fields": [
+    {
+      "key": "underlying",
+      "label": "期权标的",
+      "type": "select",
+      "default": "510050.SH",
+      "options": [
+        { "value": "510050.SH", "label": "上证50ETF（510050）" },
+        { "value": "510300.SH", "label": "沪深300ETF（510300）" },
+        { "value": "510500.SH", "label": "中证500ETF（510500）" }
+      ]
+    }
+  ],
+  "prompt_template": "{{#task}}任务与材料：\n{{task}}\n\n{{/task}}{{#attachments}}用户上传的材料（已放入工作区）：\n{{attachments}}\n\n{{/attachments}}请监控期权标的 {{underlying}} 的衍生品情绪，基于隐含波动率、标的历史波动率、IV-HV 差和高隐波合约给出当前判断、升降级情景、失效条件与后续观察清单，不执行交易，输出中文报告。"
+}
+```
+
+# Derivatives Skew Sentiment Monitor
+
+Use this Agent when a user needs a Pandadata-backed research or monitoring answer for:
+
+> Is the options market paying a meaningful premium for risk or event uncertainty?
+
+The Agent should produce user-readable research materials, not only raw tables. Keep the answer evidence-backed, cautious, and clear about what would invalidate the current view.
+
+## User-Facing Workflow
+
+1. State the current answer in plain language.
+2. Show the key evidence and explain why it matters.
+3. Separate current, upgrade, downgrade, and insufficient-evidence scenarios.
+4. Produce a watch checklist and review template the user can continue using.
+5. Keep order execution outside the Agent boundary.
+
+## Primary Watch Focus
+
+隐含波动率、历史波动率、IV-HV 差和高隐波合约。
+
+## Materials To Produce
+
+| Material | Use |
+| --- | --- |
+| `outputs/live/report.html` | Start with the conclusion, evidence charts, scenarios, and invalidation conditions. |
+| `outputs/live/decision_matrix.csv` | Turns base, upgrade, downgrade, and insufficient-evidence cases into next actions. |
+| `outputs/live/monitoring_checklist.csv` | Prioritized watch items for the next review window. |
+| `outputs/live/research_journal_template.md` | Template for evidence, counter-evidence, and rerun conditions. |
+| `outputs/live/handoff_card.md` | Short handoff for another researcher or AI agent. |
+| `outputs/live/data_dictionary.csv` | Tables, fields, and row counts used in the run. |
+
+## Reference Documents
+
+- `references/methodology.md`: Agent logic, metric interpretation, and intended use.
+- `references/data-and-outputs.md`: Public output files under `outputs/live/` and how to use them.
+- `references/agent-boundary.md`: What the Agent can do, what it cannot do, and trading boundaries.
+
+## Python Utility Script
+
+- `scripts/agent_package.py validate`: validate the public Agent package, references, outputs, and chart files.
+- `scripts/agent_package.py summarize`: read `outputs/live/` and emit a JSON summary for another AI agent.
+- `scripts/agent_package.py summarize --brief outputs/live/generated_brief.md`: write a Markdown brief for research notes.
+
+
+Live Pandadata regeneration:
+
+```powershell
+py -3.10 -m pip install -r requirements.txt
+Copy-Item .env.example .env
+py -3.10 scripts/run_pandadata_live.py
+py -3.10 scripts/agent_package.py validate
+```
+
+`run_pandadata_live.py` reads `PANDADATA_USERNAME`, `PANDADATA_PASSWORD`, and optional `PANDADATA_BASE_URL` from the environment or a local `.env` file. It rebuilds the public `outputs/live/` report pack for this Agent only.
+
+## Pandadata Methods
+
+- `get_option_implied_volatility`
+- `get_option_underlying_volatility`
+
+## Boundary
+
+- Use Pandadata or user-provided data only.
+- Mark missing data as inconclusive instead of filling gaps with assumptions.
+- Do not produce unconditional buy/sell commands.
+- Do not connect to broker order execution.

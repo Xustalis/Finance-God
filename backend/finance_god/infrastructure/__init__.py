@@ -1,0 +1,2 @@
+"""Concrete infrastructure adapters."""
+

@@ -1,0 +1,322 @@
+[
+  {
+    "id": "references:projects:ai-trader:skills:ai4trade",
+    "source": "AI-Trader",
+    "title": "ai-trader",
+    "kind": "skill_descriptor",
+    "status": "requires_external_service_review",
+    "source_path": "references/projects/ai-trader/skills/ai4trade/SKILL.md",
+    "prerequisites": [],
+    "notes": "AI-Trader - AI Trading Signal Platform. Publish trading signals, follow traders. Use when user mentions trading signals, copy trading, stock trading, or follow traders."
+  },
+  {
+    "id": "references:projects:ai-trader:skills:copytrade",
+    "source": "AI-Trader",
+    "title": "ai-trader-copytrade",
+    "kind": "skill_descriptor",
+    "status": "requires_external_service_review",
+    "source_path": "references/projects/ai-trader/skills/copytrade/SKILL.md",
+    "prerequisites": [],
+    "notes": "Follow top traders and automatically copy their positions."
+  },
+  {
+    "id": "references:projects:ai-trader:skills:heartbeat",
+    "source": "AI-Trader",
+    "title": "ai-trader-heartbeat",
+    "kind": "skill_descriptor",
+    "status": "requires_external_service_review",
+    "source_path": "references/projects/ai-trader/skills/heartbeat/SKILL.md",
+    "prerequisites": [],
+    "notes": "Poll AI-Trader heartbeat and notifications reliably through the primary pull-based mechanism."
+  },
+  {
+    "id": "references:projects:ai-trader:skills:market-intel",
+    "source": "AI-Trader",
+    "title": "market-intel",
+    "kind": "skill_descriptor",
+    "status": "requires_external_service_review",
+    "source_path": "references/projects/ai-trader/skills/market-intel/SKILL.md",
+    "prerequisites": [],
+    "notes": "Read AI-Trader financial event snapshots and market-intel endpoints. Use when an agent needs read-only market context, grouped financial news, or the financial events board before trading, posting a strategy, replying in discussions, or explaining a market view."
+  },
+  {
+    "id": "references:projects:ai-trader:skills:polymarket",
+    "source": "AI-Trader",
+    "title": "polymarket-public-data",
+    "kind": "skill_descriptor",
+    "status": "requires_external_service_review",
+    "source_path": "references/projects/ai-trader/skills/polymarket/SKILL.md",
+    "prerequisites": [],
+    "notes": "Read Polymarket public market metadata and orderbook prices directly from Polymarket APIs without routing traffic through AI-Trader."
+  },
+  {
+    "id": "references:projects:ai-trader:skills:tradesync",
+    "source": "AI-Trader",
+    "title": "ai-trader-tradesync",
+    "kind": "skill_descriptor",
+    "status": "requires_external_service_review",
+    "source_path": "references/projects/ai-trader/skills/tradesync/SKILL.md",
+    "prerequisites": [],
+    "notes": "Sync your trading positions and trade records to AI-Trader copy trading platform."
+  },
+  {
+    "id": "references:projects:ghostfolio:.agents:skills:angular-developer",
+    "source": "Ghostfolio",
+    "title": "angular-developer",
+    "kind": "skill_descriptor",
+    "status": "guidance_descriptor_available",
+    "source_path": "references/projects/ghostfolio/.agents/skills/angular-developer/SKILL.md",
+    "prerequisites": [],
+    "notes": "Generates Angular code and provides architectural guidance. Trigger when creating projects, components, or services, or for best practices on reactivity (signals, linkedSignal, resource), forms, dependency injection, routing, SSR, accessibility (ARIA), animations, styling (component styles, Tailwind CSS), testing, or CLI tooling."
+  },
+  {
+    "id": "references:projects:ghostfolio:.agents:skills:karpathy-guidelines",
+    "source": "Ghostfolio",
+    "title": "karpathy-guidelines",
+    "kind": "skill_descriptor",
+    "status": "guidance_descriptor_available",
+    "source_path": "references/projects/ghostfolio/.agents/skills/karpathy-guidelines/SKILL.md",
+    "prerequisites": [],
+    "notes": "Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria."
+  },
+  {
+    "id": "references:projects:ghostfolio:.agents:skills:nestjs-best-practices",
+    "source": "Ghostfolio",
+    "title": "nestjs-best-practices",
+    "kind": "skill_descriptor",
+    "status": "guidance_descriptor_available",
+    "source_path": "references/projects/ghostfolio/.agents/skills/nestjs-best-practices/SKILL.md",
+    "prerequisites": [],
+    "notes": "NestJS best practices and architecture patterns for building production-ready applications. This skill should be used when writing, reviewing, or refactoring NestJS code to ensure proper patterns for modules, dependency injection, security, and performance."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:.claude:skills:panda-builder",
+    "source": "QuantSkills",
+    "title": "panda-builder",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/.claude/skills/panda-builder/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要在 panda-trading 项目中创建或验收一个新的 BUILD skill 时，使用此 skill。该 skill 确保目录结构、代码接口、文档格式符合 BUILD 开发与生产规则。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:agents:analyst-agent",
+    "source": "QuantSkills",
+    "title": "analyst-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/analyst-agent/SKILL.md",
+    "prerequisites": [],
+    "notes": "读取 jobs/*.txt 任务文件，解析任务内容，输出结构化 TaskSpec，明确任务边界、逻辑、输入输出和歧义项，供主 Agent 调度使用。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:agents:dev-alpha-agent",
+    "source": "QuantSkills",
+    "title": "dev-alpha-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/dev-alpha-agent/SKILL.md",
+    "prerequisites": [],
+    "notes": "负责开发 Alpha 信号与因子类任务（A 前缀任务），按 Alpha 因子开发与生产规则生成因子代码、回测脚本和文档。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:agents:dev-build-agent",
+    "source": "QuantSkills",
+    "title": "dev-build-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/dev-build-agent/SKILL.md",
+    "prerequisites": [],
+    "notes": "负责开发 BUILD 类量化工具（B 前缀任务），运行 panda-builder skill，按规范生成目录结构、代码接口和文档，并通过 Python 运行验证。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:agents:main-agent",
+    "source": "QuantSkills",
+    "title": "main-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/main-agent/SKILL.md",
+    "prerequisites": [],
+    "notes": "panda-trading 项目的主调度 Agent，负责接收用户任务、编排子 Agent 协作、把控整体开发流程，确保任务按规范完成交付。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:agents:publish-agent",
+    "source": "QuantSkills",
+    "title": "publish-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/publish-agent/SKILL.md",
+    "prerequisites": [],
+    "notes": "任务通过测试后自动发布——将开发产物发布为 quantskills 组织下的独立 skill 仓库（skill- 前缀、GPLv3、多平台入口、免责声明）。父仓库零变更。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:agents:test-agent",
+    "source": "QuantSkills",
+    "title": "test-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/agents/test-agent/SKILL.md",
+    "prerequisites": [],
+    "notes": "负责为已完成开发的 BUILD 或 Alpha 任务生成测试用例并运行，输出结构化 TestReport，包含 Bug 清单。测试 Agent 无权修改任何代码文件。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:public:skills_demo:alpha-a00-five-day-momentum:alpha-a00-five-day-momentum",
+    "source": "QuantSkills",
+    "title": "alpha-a00-five-day-momentum",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/public/skills_demo/alpha-a00-five-day-momentum/alpha-a00-five-day-momentum/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要开发、计算、验证五日动量因子时，使用此 skill。支持因子计算、无未来函数检测、IC/ICIR 回测评估和信号输出。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:public:skills_demo:alpha-a00-five-day-momentum:alpha-a00-five-day-momentum-production",
+    "source": "QuantSkills",
+    "title": "alpha-a00-five-day-momentum-production",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/public/skills_demo/alpha-a00-five-day-momentum/alpha-a00-five-day-momentum-production/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要读取五日动量 Alpha 的生产计算结果时，使用此 skill。该 skill 只读取已生成的 Parquet 结果，不在调用时重新计算因子。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:public:skills_demo:build-b00-price-change-flag:build-b00-price-change-flag",
+    "source": "QuantSkills",
+    "title": "build-b00-price-change-flag",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/public/skills_demo/build-b00-price-change-flag/build-b00-price-change-flag/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要识别股票涨跌幅异常状态时，使用此 skill。该 BUILD 提供涨跌幅异常标记能力，可被 agent 或 Alpha 调用。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:public:skills_demo:build-b00-price-change-flag:build-b00-price-change-flag-production",
+    "source": "QuantSkills",
+    "title": "build-b00-price-change-flag-production",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/public/skills_demo/build-b00-price-change-flag/build-b00-price-change-flag-production/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要读取涨跌幅异常标记的生产结果时，使用此 skill。该 skill 读取已生成的 Parquet 结果，不重复执行重计算流程。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:skills:panda-builder",
+    "source": "QuantSkills",
+    "title": "panda-builder",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/skills/panda-builder/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要在 panda-trading 项目中创建或验收一个新的 BUILD skill 时，使用此 skill。该 skill 确保目录结构、代码接口、文档格式符合 BUILD 开发与生产规则。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:src:build:build-b11-auto-stop-loss-take-profit:开发产物",
+    "source": "QuantSkills",
+    "title": "build-B11-auto-stop-loss-take-profit",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/src/build/build-b11-auto-stop-loss-take-profit/开发产物/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要对 A 股和期货持仓做自动止盈止损与仓位管理时，使用此 skill。支持次日高开止盈、次日低开止损、持仓超期强平、单票仓位上限控制。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-for-liangshuyuan-tasks:src:build:build-b12-intraday-position-manager:开发产物",
+    "source": "QuantSkills",
+    "title": "build-B12-intraday-position-manager",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-for-liangshuyuan-tasks/src/build/build-b12-intraday-position-manager/开发产物/SKILL.md",
+    "prerequisites": [],
+    "notes": "当需要对日内多品种持仓做动态仓位管理时，使用此 skill。支持 A股/A股ETF/股指期货/商品期货/港股+ETF；区分 T+1/T+0、昨仓/今仓、保证金/现金，输出标准 8 字段调仓指令。"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:analyze",
+    "source": "QuantSkills",
+    "title": "analyze",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/analyze/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need factor diagnostics, IC/grouped return analysis, attribution, robustness checks, or time-series distribution and stationarity checks."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:backtest",
+    "source": "QuantSkills",
+    "title": "backtest",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/backtest/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need vectorized strategy execution, portfolio weighting, portfolio-level filters, transaction cost helpers, exit A/B analysis, overlay metrics, or multi-strategy return blending."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:compute",
+    "source": "QuantSkills",
+    "title": "compute",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/compute/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need strategy-agnostic OHLCV indicators, math utilities, generic factor examples, regime slicing, resampling, or label makers."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:ingest",
+    "source": "QuantSkills",
+    "title": "ingest",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/ingest/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need PandaData/PandaAI market data, reference data, adjustment factors, futures tick downloads, or symbol conversion."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:ml",
+    "source": "QuantSkills",
+    "title": "ml",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/ml/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need optional PyCaret model training, ML factor generation, inference wrappers, feature importance, or sparse LASSO weight generation."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:report",
+    "source": "QuantSkills",
+    "title": "report",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/report/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need HTML reports, Markdown strategy reports, PNG chart helpers, or report files under the research reports directory."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:research",
+    "source": "QuantSkills",
+    "title": "research",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/research/SKILL.md",
+    "prerequisites": [],
+    "notes": ">"
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-quantspace:skills:store",
+    "source": "QuantSkills",
+    "title": "store",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-quantspace/skills/store/SKILL.md",
+    "prerequisites": [],
+    "notes": "Use when tasks need local Parquet market data storage, pool management, research artifacts, backtest records, or model metadata."
+  },
+  {
+    "id": "references:projects:quantskills-agents:agent-ssquant:skills:ssquant",
+    "source": "QuantSkills",
+    "title": "ssquant-agent",
+    "kind": "skill_descriptor",
+    "status": "requires_source_runtime",
+    "source_path": "references/projects/quantskills-agents/agent-ssquant/skills/ssquant/SKILL.md",
+    "prerequisites": [],
+    "notes": "Compatibility skill entry for the SSQuant Agent futures workflow. Use when an agent runtime only discovers local capabilities through SKILL.md but the actual public QUANTSKILLS package is quantskills/agent-ssquant with AGENTS.md as the main contract."
+  }
+]
