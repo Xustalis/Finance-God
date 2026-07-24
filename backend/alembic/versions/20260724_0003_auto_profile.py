@@ -24,7 +24,8 @@ def downgrade() -> None:
             "pending_profile_evidence",
             sa.JSON(),
             nullable=False,
-            server_default=sa.text("'{}'::json"),
+            # 普通字符串字面量在 PostgreSQL 与 SQLite 上均可作为 JSON 列默认值
+            server_default=sa.text("'{}'"),
         ),
     )
     op.alter_column(
