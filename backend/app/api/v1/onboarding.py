@@ -21,7 +21,7 @@ from app.models.user import User
 from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
 from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question, user_facing_error_detail
 from app.services import emotion_lexicon
-from app.services.profile_rules import assess_profile, rank_directions
+from app.services.profile_rules import assess_profile, match_style, rank_directions
 from app.services.question_bank import select_question
 
 router = APIRouter()
@@ -313,16 +313,36 @@ async def update_objective_profile(
     body: ObjectiveProfileInput,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    adapter_registry: AIAdapterRegistry = Depends(get_ai_adapter_registry),
 ) -> ApiResponse:
     session = await owned_session(db, session_id, user.id)
     if session.status != "active" or session.step != "objective_profile":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is not active")
-    session.objective_profile = body.model_dump(mode="json")
+    objective_profile = body.model_dump(mode="json")
+    session.objective_profile = objective_profile
     session.step = "conversation"
-    session.current_dimension = PROFILE_DIMENSIONS[0]
-    session.current_question = INITIAL_RISK_QUESTION
+
+    # 首问由 AI 依据客观画像生成；调用失败时回落到极小兜底问题，不阻断会话建立。
+    opening_dimension = ProfileDimension(PROFILE_DIMENSIONS[0])
+    opening_question = INITIAL_RISK_QUESTION
+    try:
+        orchestrator = adapter_registry.resolve_text(
+            provider=session.provider_name,
+            model_name=session.model_name,
+            system_prompt=session.prompt_content,
+        )
+        opening_question, opening_dimension = await orchestrator.opening_question(
+            objective_profile=objective_profile,
+        )
+    except (LookupError, AIProviderError, TimeoutError) as exc:
+        logger.warning(
+            "Opening question fell back to template on session %s: %s", session_id, exc
+        )
+
+    session.current_dimension = opening_dimension.value
+    session.current_question = opening_question
     session.question_history = [
-        {"round": 0, "dimension": PROFILE_DIMENSIONS[0], "question": INITIAL_RISK_QUESTION}
+        {"round": 0, "dimension": opening_dimension.value, "question": opening_question}
     ]
     session.completeness = 0.4
     await db.flush()
@@ -523,19 +543,40 @@ async def add_message(
                 }
             )
     elif turn.next_question is None or returned_next_dimension != projected_dimension:
-        turn = turn.model_copy(
-            update={
-                "should_continue": True,
-                "end_reason": None,
-                "next_question": select_question(
-                    projected_dimension,
-                    followup_count=int(followup_counts_snapshot.get(projected_dimension, 0)),
-                    asked_questions=asked_questions,
-                    user_excerpt=body.content,
-                ),
-                "next_question_dimension": ProfileDimension(projected_dimension),
-            }
+        # 仍需继续。优先采用 AI 生成的下一问，只要它面向一个仍需覆盖的合法维度；
+        # 仅当 AI 未给出可用问题（空/非法/已问满）时，才回落到极小模板兜底。
+        if returned_next_dimension == target_snapshot:
+            effective_followup = proposed_followup_count
+        elif returned_next_dimension is not None:
+            effective_followup = int(followup_counts_snapshot.get(returned_next_dimension, 0))
+        else:
+            effective_followup = 2
+        ai_question_acceptable = (
+            turn.next_question is not None
+            and returned_next_dimension in PROFILE_DIMENSIONS
+            and returned_next_dimension not in skipped_dimensions_snapshot
+            and effective_followup < 2
         )
+        if ai_question_acceptable:
+            # 采纳 AI 的下一问；仅当其 should_continue/end_reason 与继续状态不一致时归一化。
+            if not turn.should_continue or turn.end_reason is not None:
+                turn = turn.model_copy(
+                    update={"should_continue": True, "end_reason": None}
+                )
+        else:
+            turn = turn.model_copy(
+                update={
+                    "should_continue": True,
+                    "end_reason": None,
+                    "next_question": select_question(
+                        projected_dimension,
+                        followup_count=int(followup_counts_snapshot.get(projected_dimension, 0)),
+                        asked_questions=asked_questions,
+                        user_excerpt=body.content,
+                    ),
+                    "next_question_dimension": ProfileDimension(projected_dimension),
+                }
+            )
     evidence_value = turn.profile_delta.get(turn.target_dimension)
     confirmed = dict(session.profile_evidence)
     if evidence_value is not None:
@@ -555,6 +596,9 @@ async def add_message(
         session.current_dimension = None
         session.current_question = None
     else:
+        # 保证 current_dimension 与 current_question 一致（可能是 AI 选定的维度，而非
+        # refresh_progress 按服务端顺序投影的维度），下一轮回答才能正确归属。
+        session.current_dimension = turn.next_question_dimension.value
         session.current_question = turn.next_question
         # JSON 字段需整体重新赋值以触发变更检测（参照 counts/scores 的拷贝模式）
         question_entries = list(session.question_history)
@@ -742,6 +786,13 @@ async def complete_session(
 
 
 def serialize_profile(profile: InvestmentProfile) -> dict:
+    style = match_style(
+        profile.objective_profile,
+        profile.risk_level,
+        (profile.dimension_scores or {}).get("risk_capacity", 0),
+        profile.profile_evidence,
+        profile.education_only,
+    )
     return {
         "id": profile.id,
         "user_id": profile.user_id,
@@ -758,6 +809,13 @@ def serialize_profile(profile: InvestmentProfile) -> dict:
         "completeness": profile.completeness,
         "education_only": profile.education_only,
         "report_summary": profile.report_summary,
+        "style_code": style.style_code,
+        "style_logic": style.style_logic,
+        "style_name": style.style_name,
+        "style_summary": style.style_summary,
+        "master_name": style.master_name,
+        "master_name_en": style.master_name_en,
+        "master_match_reason": style.match_reason,
     }
 
 

@@ -300,6 +300,13 @@ class ProfileResponse(BaseModel):
     completeness: float
     education_only: bool
     report_summary: ProfileReportSummary
+    style_code: str
+    style_logic: str
+    style_name: str
+    style_summary: str
+    master_name: str
+    master_name_en: str
+    master_match_reason: str
 
 
 class DirectionRecommendationResponse(BaseModel):

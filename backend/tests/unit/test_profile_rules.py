@@ -1,6 +1,6 @@
 import re
 
-from app.services.profile_rules import assess_profile, rank_directions
+from app.services.profile_rules import assess_profile, match_style, rank_directions
 
 
 OBJECTIVE = {
@@ -136,3 +136,60 @@ def test_minor_output_is_chinese_education_only_and_non_actionable() -> None:
         assert "金融教育" in item["reason"]
         assert "不可执行" in item["reason"]
         assert re.search(r"[\u4e00-\u9fff]", item["reason"])
+
+
+def _style_of(**overrides) -> str:
+    objective = {
+        "investment_experience": "intermediate",
+        "fund_horizon": "5_plus_years",
+        "loss_reaction": "hold",
+        "emergency_fund_months": 8,
+    } | overrides.pop("objective", {})
+    return match_style(
+        objective,
+        overrides.get("risk_level", "moderate"),
+        overrides.get("risk_capacity", 50),
+        overrides.get("profile_evidence", {}),
+        overrides.get("education_only", False),
+    ).style_code
+
+
+def test_match_style_maps_each_of_five_styles() -> None:
+    assert _style_of(objective={"investment_experience": "none", "loss_reaction": "hold"}) == "market_growth"
+    assert _style_of(objective={"loss_reaction": "buy_more"}) == "value_return"
+    assert _style_of(
+        risk_level="growth", risk_capacity=90,
+        objective={"loss_reaction": "buy_more", "investment_experience": "advanced"},
+        profile_evidence={"investment_goal": 1.0},
+    ) == "growth_discovery"
+    assert _style_of(
+        objective={"loss_reaction": "reduce"},
+        profile_evidence={"liquidity_need": 1.0},
+    ) == "multi_asset"
+    assert _style_of(
+        risk_capacity=95,
+        objective={"investment_experience": "advanced", "fund_horizon": "under_1_year", "loss_reaction": "sell_all"},
+        profile_evidence={"investment_knowledge": 1.0},
+    ) == "trend_discipline"
+
+
+def test_match_style_minor_is_market_growth_learning_anchor() -> None:
+    match = match_style(
+        {"investment_experience": "advanced", "fund_horizon": "under_1_year", "loss_reaction": "sell_all"},
+        "growth", 95, {"investment_knowledge": 1.0}, True,
+    )
+    assert match.style_code == "market_growth"
+    assert match.master_name == "约翰·博格"
+    assert "学习标杆" in match.match_reason
+
+
+def test_match_style_reason_is_chinese_and_promises_nothing() -> None:
+    match = match_style(
+        {"investment_experience": "intermediate", "fund_horizon": "5_plus_years", "loss_reaction": "buy_more", "emergency_fund_months": 8},
+        "moderate", 50, {}, False,
+    )
+    assert match.style_code == "value_return"
+    assert re.search(r"[\u4e00-\u9fff]", match.match_reason)
+    assert "巴菲特" in match.match_reason
+    for banned in ("收益", "保证", "稳赚", "必赚"):
+        assert banned not in match.match_reason

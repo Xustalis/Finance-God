@@ -309,6 +309,21 @@ def test_minor_profile_is_education_only(client: TestClient) -> None:
     assert all("不可执行" in item["reason"] for item in completed["recommendations"])
 
 
+def test_completed_profile_exposes_style_master_match(client: TestClient) -> None:
+    token, _ = register(client, "style@example.com")
+    completed = _finish_profile(client, token, adult_profile())
+    profile = completed["profile"]
+    assert profile["style_code"] in {
+        "market_growth", "value_return", "growth_discovery", "multi_asset", "trend_discipline",
+    }
+    assert profile["style_name"]
+    assert profile["style_logic"]
+    assert profile["style_summary"]
+    assert profile["master_name"]
+    assert profile["master_name_en"]
+    assert profile["master_match_reason"]
+
+
 def test_completed_session_releases_live_session_slot(client: TestClient) -> None:
     token, _ = register(client, "repeat-onboarding@example.com")
     completed = _finish_profile(client, token, adult_profile())

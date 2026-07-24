@@ -217,3 +217,131 @@ def rank_directions(
             }
         )
     return results
+
+
+STYLE_PROFILES = {
+    "market_growth": {
+        "style_logic": "市场增长型",
+        "style_name": "长期市场参与者",
+        "style_summary": "不猜谁会赢，长期持有整个市场，分享经济增长",
+        "master_name": "约翰·博格",
+        "master_name_en": "John Bogle",
+    },
+    "value_return": {
+        "style_logic": "价值回归型",
+        "style_name": "价值耐心寻找者",
+        "style_summary": "寻找价格低于真实价值的好资产，耐心等待市场重新认识它",
+        "master_name": "沃伦·巴菲特",
+        "master_name_en": "Warren Buffett",
+    },
+    "growth_discovery": {
+        "style_logic": "成长发现型",
+        "style_name": "成长机会发现者",
+        "style_summary": "寻找未来可能快速成长、但尚未被充分发现的企业",
+        "master_name": "彼得·林奇",
+        "master_name_en": "Peter Lynch",
+    },
+    "multi_asset": {
+        "style_logic": "多资产配置型",
+        "style_name": "多资产平衡者",
+        "style_summary": "不把希望押在一种资产上，用不同资产应对不同环境",
+        "master_name": "瑞·达利欧",
+        "master_name_en": "Ray Dalio",
+    },
+    "trend_discipline": {
+        "style_logic": "趋势交易型",
+        "style_name": "趋势纪律执行者",
+        "style_summary": "根据价格趋势和规则行动，并严格控制亏损",
+        "master_name": "埃德·塞科塔",
+        "master_name_en": "Ed Seykota",
+    },
+}
+
+# 同分兜底：越靠前优先级越高（偏向更稳健/简单的类别）
+STYLE_PRIORITY = ("market_growth", "value_return", "multi_asset", "growth_discovery", "trend_discipline")
+
+STYLE_REASON_TEMPLATES = {
+    "market_growth": "你的资金计划为{horizon}、亏损时倾向{loss}，这与博格主张的长期持有整个市场、少折腾的理念一致。",
+    "value_return": "你的资金计划为{horizon}、亏损时倾向{loss}，这与巴菲特强调的价值判断与情绪纪律一致。",
+    "growth_discovery": "你的资金计划为{horizon}、亏损时倾向{loss}，这与林奇寻找被低估成长机会的做法一致。",
+    "multi_asset": "你的资金计划为{horizon}、亏损时倾向{loss}，这与达利欧用多资产分散应对不同环境的思路一致。",
+    "trend_discipline": "你的资金计划为{horizon}、亏损时倾向{loss}，这与塞科塔顺势而为并严格止损的纪律一致。",
+}
+EDUCATION_STYLE_REASON = "作为学习标杆，博格倡导的低成本指数与长期定投，适合先建立稳健的投资常识。"
+
+
+@dataclass(frozen=True)
+class StyleMatch:
+    style_code: str
+    style_logic: str
+    style_name: str
+    style_summary: str
+    master_name: str
+    master_name_en: str
+    match_reason: str
+
+
+def _build_style_match(code: str, objective: dict, education_only: bool) -> StyleMatch:
+    meta = STYLE_PROFILES[code]
+    if education_only:
+        reason = EDUCATION_STYLE_REASON
+    else:
+        horizon, _experience, loss_reaction, _reserve = objective_text(objective)
+        reason = STYLE_REASON_TEMPLATES[code].format(horizon=horizon, loss=loss_reaction)
+    return StyleMatch(style_code=code, match_reason=reason, **meta)
+
+
+def match_style(
+    objective: dict,
+    risk_level: str,
+    risk_capacity: float,
+    profile_evidence: dict | None,
+    education_only: bool,
+) -> StyleMatch:
+    if education_only:
+        return _build_style_match("market_growth", objective, education_only=True)
+    experience = objective.get("investment_experience")
+    horizon = objective.get("fund_horizon")
+    loss_reaction = objective.get("loss_reaction")
+    reserve_months = max(0, int(objective.get("emergency_fund_months", 0) or 0))
+    evidence = profile_evidence or {}
+    knowledge = float(evidence.get("investment_knowledge", 0.0))
+    goal = float(evidence.get("investment_goal", 0.0))
+    liquidity = float(evidence.get("liquidity_need", 0.0))
+    rc = float(risk_capacity or 0)
+    scores = {
+        "market_growth": (
+            {"none": 30, "beginner": 22, "intermediate": 6, "advanced": 0}.get(experience, 0)
+            + {"5_plus_years": 18, "3_5_years": 10, "1_3_years": 2, "under_1_year": -8}.get(horizon, 0)
+            + {"hold": 16, "reduce": 6, "buy_more": 2, "sell_all": -6}.get(loss_reaction, 0)
+            + (1 - knowledge) * 10
+        ),
+        "value_return": (
+            {"intermediate": 22, "advanced": 16, "beginner": 6, "none": 0}.get(experience, 0)
+            + {"5_plus_years": 18, "3_5_years": 12, "1_3_years": 2, "under_1_year": -10}.get(horizon, 0)
+            + {"buy_more": 20, "hold": 12, "reduce": 2, "sell_all": -8}.get(loss_reaction, 0)
+            + {"moderate": 6, "growth": 4, "conservative": 2}.get(risk_level, 0)
+        ),
+        "growth_discovery": (
+            {"growth": 20, "moderate": 6, "conservative": -6}.get(risk_level, 0)
+            + (rc / 100) * 15
+            + {"buy_more": 18, "hold": 6}.get(loss_reaction, 0)
+            + {"advanced": 14, "intermediate": 10, "beginner": 2}.get(experience, 0)
+            + goal * 12
+        ),
+        "multi_asset": (
+            {"reduce": 22, "hold": 6, "sell_all": 2}.get(loss_reaction, 0)
+            + liquidity * 16
+            + {"moderate": 12, "conservative": 6, "growth": 2}.get(risk_level, 0)
+            + (6 if reserve_months >= 6 else 0)
+        ),
+        "trend_discipline": (
+            {"advanced": 26, "intermediate": 8}.get(experience, 0)
+            + (rc / 100) * 16
+            + {"under_1_year": 18, "1_3_years": 10, "3_5_years": 0, "5_plus_years": -8}.get(horizon, 0)
+            + {"sell_all": 14, "reduce": 12}.get(loss_reaction, 0)
+            + knowledge * 10
+        ),
+    }
+    best = max(STYLE_PRIORITY, key=lambda code: (scores[code], -STYLE_PRIORITY.index(code)))
+    return _build_style_match(best, objective, education_only=False)

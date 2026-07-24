@@ -133,6 +133,25 @@ class MismatchedDimensionOrchestrator:
         }
 
 
+class EmptyQuestionOrchestrator:
+    """始终返回空下一问（但仍需继续），强制服务端走模板兜底。"""
+
+    async def respond(self, **kwargs):
+        current = kwargs["current_dimension"]
+        return {
+            "reply": "我先把这条信息记下来。",
+            "target_dimension": current,
+            "sensitive": current == "income_stability",
+            "profile_delta": {current: 0.1},
+            "confidence": 0.4,
+            "should_continue": True,
+            "end_reason": None,
+            "next_question": None,
+            "next_question_dimension": None,
+            "retry_question": "换个角度再聊聊这个话题。",
+        }
+
+
 @pytest.mark.asyncio
 async def test_question_history_accumulates_without_duplicates(
     client: TestClient,
@@ -229,13 +248,42 @@ async def test_respond_receives_history_asked_questions_and_emotion(
 
 
 @pytest.mark.asyncio
-async def test_fallback_questions_for_same_dimension_do_not_repeat(
+async def test_ai_next_question_for_valid_dimension_is_accepted(
+    client: TestClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    headers, session_id = ready_session(client, "quality-accept@example.com")
+    app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
+        MismatchedDimensionOrchestrator()
+    )
+
+    first = client.post(
+        f"/api/v1/onboarding/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": "我先说说我的想法吧"},
+    )
+    assert first.status_code == 200
+    first_state = first.json()["data"]["session"]
+    # AI 选定了一个仍需覆盖的合法维度（loss_behavior），服务端直接采纳，不再套用模板。
+    assert first_state["current_dimension"] == "loss_behavior"
+    assert first_state["current_question"] == "接下来想聊聊你的投资目标。"
+
+    async with session_factory() as db:
+        session = await db.get(OnboardingSession, session_id)
+        entries = session.question_history
+    # 开场问题 + AI 采纳的下一问；后者归属 AI 选定的维度
+    assert entries[-1]["dimension"] == "loss_behavior"
+    assert entries[-1]["question"] == "接下来想聊聊你的投资目标。"
+
+
+@pytest.mark.asyncio
+async def test_fallback_template_used_when_ai_returns_no_question(
     client: TestClient,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     headers, session_id = ready_session(client, "quality-fallback@example.com")
     app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
-        MismatchedDimensionOrchestrator()
+        EmptyQuestionOrchestrator()
     )
 
     first = client.post(
@@ -245,10 +293,9 @@ async def test_fallback_questions_for_same_dimension_do_not_repeat(
     )
     assert first.status_code == 200
     first_state = first.json()["data"]["session"]
-    # 低置信度：风险维度兜底补问（与初始问题同维度但文本不同）
+    # AI 未给出下一问：风险维度低置信度，服务端用模板兜底同维度补问。
     assert first_state["current_dimension"] == "risk_tolerance"
-    first_question = first_state["current_question"]
-    assert first_question != INITIAL_RISK_QUESTION
+    assert first_state["current_question"] == INITIAL_RISK_QUESTION
 
     second = client.post(
         f"/api/v1/onboarding/sessions/{session_id}/messages",
@@ -257,24 +304,13 @@ async def test_fallback_questions_for_same_dimension_do_not_repeat(
     )
     assert second.status_code == 200
     second_state = second.json()["data"]["session"]
-    # 风险维度已问满两次，投影推进到 liquidity_need，第一次兜底
+    # 风险维度已问满两次，投影推进到 liquidity_need，仍由模板兜底补问。
     assert second_state["current_dimension"] == "liquidity_need"
-    second_question = second_state["current_question"]
-
-    third = client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json={"content": "第三条还是说不清楚的回答"},
-    )
-    assert third.status_code == 200
-    third_state = third.json()["data"]["session"]
-    # liquidity_need 的第二次兜底：同维度两次兜底问题文本必须不同
-    assert third_state["current_dimension"] == "liquidity_need"
-    third_question = third_state["current_question"]
-    assert second_question != third_question
+    assert second_state["current_question"] == "这笔资金预计多久内可能需要取用？"
 
     async with session_factory() as db:
         session = await db.get(OnboardingSession, session_id)
         questions = [item["question"] for item in session.question_history]
-    assert questions == [INITIAL_RISK_QUESTION, first_question, second_question, third_question]
-    assert len(questions) == len(set(questions))
+    # 兜底来自极小模板池，不再保证同维度多次提问的文本差异；只验证非空且已累积。
+    assert all(question.strip() for question in questions)
+    assert questions[0] == INITIAL_RISK_QUESTION

@@ -518,3 +518,79 @@ def test_novice_prompt_uses_life_scenarios_without_scoring_lack_of_knowledge() -
     assert "生活化场景" in prompt
     assert "一次只问一个概念" in prompt
     assert "不把“不懂”视为低风险" in prompt
+
+
+def test_profile_snapshot_lists_uncertain_dimensions_and_asked_questions() -> None:
+    snapshot = ai.build_profile_snapshot(
+        objective_profile={"age_range": "36-45", "fund_horizon": "5_plus_years"},
+        dimension_scores={"risk_tolerance": 0.7},
+        followup_counts={"liquidity_need": 1},
+        skipped_dimensions=["income_stability"],
+        asked_questions=["你能接受多大波动？"],
+    )
+
+    assert "风险承受" in snapshot
+    # 已较清楚（高置信或已跳过）与仍不确定分开列出
+    assert "收入稳定性(已跳过)" in snapshot
+    assert "流动性需求(已问1次)" in snapshot
+    assert "你能接受多大波动？" in snapshot
+
+
+@pytest.mark.asyncio
+async def test_mock_opening_question_is_deterministic_and_life_anchored() -> None:
+    orchestrator = ai.DeterministicMockOrchestrator()
+
+    question, dimension = await orchestrator.opening_question(
+        objective_profile={"investment_experience": "none"}
+    )
+
+    assert dimension is ai.ProfileDimension.RISK_TOLERANCE
+    assert question == ai.INITIAL_RISK_QUESTION
+    assert "阶段性亏损" in question
+
+
+@pytest.mark.asyncio
+async def test_deepseek_opening_question_parses_structure_and_snapshot() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return deepseek_response(
+            {
+                "opening_question": "这笔钱对你来说，最重要的是能帮你完成什么？",
+                "dimension": "investment_goal",
+            }
+        )
+
+    orchestrator = ai.DeepSeekTextProvider(
+        api_key="test-secret",
+        transport=httpx.MockTransport(handler),
+    ).create(model_name="deepseek-v4-flash", system_prompt="system prompt")
+
+    question, dimension = await orchestrator.opening_question(
+        objective_profile={"age_range": "36-45", "fund_horizon": "5_plus_years"}
+    )
+
+    assert question == "这笔钱对你来说，最重要的是能帮你完成什么？"
+    assert dimension is ai.ProfileDimension.INVESTMENT_GOAL
+    # 开场请求体也携带了画像快照（供 AI 据此定制开场问题）
+    user_message = captured["body"]["messages"][-1]["content"]
+    assert "用户当前画像快照" in user_message
+
+
+@pytest.mark.asyncio
+async def test_deepseek_opening_question_invalid_dimension_defaults_to_first() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {"opening_question": "先聊聊你对这笔钱的打算吧？", "dimension": "financial_goal"}
+        )
+    )
+    orchestrator = ai.DeepSeekTextProvider(
+        api_key="test-secret", transport=transport
+    ).create(model_name="deepseek-v4-flash", system_prompt="system prompt")
+
+    question, dimension = await orchestrator.opening_question(objective_profile={})
+
+    assert question == "先聊聊你对这笔钱的打算吧？"
+    # 非法维度归一化为第一维度（风险承受）
+    assert dimension is ai.ProfileDimension.RISK_TOLERANCE
