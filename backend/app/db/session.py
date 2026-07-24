@@ -1,24 +1,20 @@
-"""数据库会话管理"""
+"""统一数据库引擎、会话工厂与 FastAPI 会话依赖。"""
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from collections.abc import AsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from finance_god.infrastructure.persistence import create_session_factory
 
-engine = create_async_engine(
+engine, async_session_factory = create_session_factory(
     settings.database_url,
     echo=settings.sql_echo,
     pool_size=10,
     max_overflow=20,
 )
 
-async_session_factory = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
-
-
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncIterator[AsyncSession]:
     """依赖注入: 获取数据库会话"""
     async with async_session_factory() as session:
         try:
@@ -27,5 +23,13 @@ async def get_db() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
+
+
+def create_db_session() -> AsyncSession:
+    """为显式 Unit of Work 提供与 FastAPI 相同的会话工厂。"""
+    return async_session_factory()
+
+
+async def dispose_database() -> None:
+    """释放统一连接池。"""
+    await engine.dispose()

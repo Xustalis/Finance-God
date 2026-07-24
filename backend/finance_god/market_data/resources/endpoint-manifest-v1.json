@@ -8,7 +8,7 @@
   "generated_from_local_installed_sdk": true,
   "contains_credentials": false,
   "instrument_master_identity": "finance-god-instrument-master",
-  "instrument_master_version": "b609d40ff1f060c163150ea4790bc4e95da928187ac6adeea399e18daf530644",
+  "instrument_master_version": "f9ebee3d542919e23d91cc0d6077518d6494fd674465118c2b87612fcc7eb55b",
   "endpoints": [
     {
       "endpoint": "get_adj_factor",
@@ -269,7 +269,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "5bd14a70ae2adb84b7c1a47c3594d13462c1941bdc753fa2439376887ab8e4d6"
+        "0e803fcacd2718f0748d44d5dd7cc8893d2b07c25acfc00a01b9b86455a5217a"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -353,7 +353,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "d348b1588ce52a1a702a8da953a8c2e1dc943fecea09d115ec8fdf5852779f4d"
+        "587b37579761b707fc4ca22c1bd38a79b6863d532a412096b7a11ceaa901a4ce"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -554,7 +554,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "bf14427bc2d0b65fde95d61635faefd2e9a36de49754ec184d9e06f87863b6df"
+        "ee40a5f82d619d201ee5c63336ed075117334bc1084583f070468db60b41caea"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -586,7 +586,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "929bc6224710e561bd935553e51fab48abe848136a36917f4b88dfbf156b55d8"
+        "c754afb25f34843eb407445cffd3322bf85bb8b0d3b6b17b293f03d15e763203"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -605,7 +605,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "182e2a570f1453650b1a7a9a7f13c5c419af85b12ca1b49cfaf590e1c6e7481c"
+        "92a72b5ec8252c51414e9003618400ecb64ca083b7c56aa3cec60dcbd6bdc7c3"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -624,7 +624,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "a8bb688dee40f914255ed7011d4b76b4494c67261a75ac8a013870be0f28728c"
+        "606b33cd2ec6b712d7c5d9eb51ca2657a6bb399f9d76058d3d438306660a54d7"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -877,7 +877,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "4f0a90831f94f6cd79bf47c263e60ea3167bfe9d8ba51fb959862031dabb5ea0"
+        "6e0bb5283ae8e665a52e4f15dc6830beba8f620bfa472ea7a1a4b23842d47418"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -922,7 +922,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "1397685412232a06f0bf8921f646b8676efaa2eb0b65fb78393e12bb56de674a"
+        "352cd93aa00f274adbe58a9263efe5b40c17bdfeef614d54d2b56371f120affc"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -993,7 +993,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "ef0589539f781c681c5ad2e8ce2d7409c73a360e462c6fd8e3a67dd2ac0ad376"
+        "9be680883ceb66febc324cceb548c61b534e96c818ec2ff1e7c035051261b20b"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1012,7 +1012,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "905af7daafc3b0bb73e171af0c99b964f317e45cb98d80904fbcb0b8e68b1795"
+        "aa7fa8d7a7e995bdc2a975b3ff47de7bf98f0292f1235d0291757635eddc0224"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1057,7 +1057,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "d582ceca5d5c7361c9c4abef613ec59b92b084b82cf3aa3f3fe6290cef0b9acc"
+        "788192f3d4fff38efa0da0b38b4c0b0bb72260db8a32586f0e9906b426955421"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1076,7 +1076,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "c3801929198f982794c48f457d6abac7679ec44f0dba50744c5471b15a2deec1"
+        "108a86059690f4e92ef71cd1e5e7a57fe4266d55b2d802fcdf225332a6001daa"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1095,7 +1095,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "9301463c0895e009af9a09e37cfc7b682ebfdc4047209ac69e202faa780a46f5"
+        "022f244aaa4171e4823309bf8fddd28d00ef9ca32a1ffe4155f52e1afd5832e8"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1133,9 +1133,9 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "499b7cc635b11418aa69ff0f20a9b5a2525061ca083458a9bfef23f1d7607125",
-        "66be162242a5e32fb78d8b654db566534554478632e73d26533659e57100bf24",
-        "b774c56e268ff75d3dfa9f8400ce17aa9a4a2241da0e77c6d981cab435f74e00"
+        "161ddbea1b12c2bbb62f8165061aecd2812684e9db51dbe23a225b16af3e8f68",
+        "ebfbb8a8cf416bdf76d23db8ed1d9ac09a5cd1a0fb50773fa02d92d29217aa20",
+        "3ba67fa398f50cc40c17efe81438f0c6d25d9fb03f95a36247e0e76d7ecbaa43"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1167,7 +1167,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "ef3874e62682a5fdb7f1669e31bfb556e6e55f283a3de9d0f9d4063a890eeae3"
+        "14ff2ba6d37f1aaee1725beb660b8798ab9b0a84d42f6bd1c930d7f54a5c418e"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1343,7 +1343,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "ff91d92f0b31d894f61c51458eba91084d13bb408a58eda6c892532916916fc8"
+        "bce66b26260c35a01eab023442764e8085c4a8c6f19c95806f75e312ddd96790"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1882,7 +1882,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "0c3c5c38f79786caf29c24d4b9adf39ca2bfcf1a2bc486cc751111f31497f702"
+        "4ce32b71d74512b26551d9bb21eaf8be2ad24b0562e1e53df6b0989e0f08146e"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1927,7 +1927,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "a46d46febea68ef6faf4f961f5e79819640043ea1721812121fd552365dd383a"
+        "fdb568ab5dee2a492a2ba7245a5d39130e5a9059e6688db4629b6c37e702da69"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -1985,7 +1985,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "e2de40958953fccf6f8e5affa5e3f463adbf6e65794515af48805d7837d82e49"
+        "a8fb586f75fc9fb8f3fd83749f77fd256e4196345f7ba44573ef146b04fdceb8"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2017,7 +2017,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "193258d1e22a6b429261e25e133a41f62265b4f1928853d403e397c05a0b6c1a"
+        "d66b5a82056019cca5e67b24313eedc57866b277648eeee2583c381009a2a0f0"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2075,7 +2075,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "39aa591b868045dce747a6dbfbf05aa08f50c74ca066037dc3d8d56c06ce5969"
+        "5160b2a9d1bbd940264d1d1465f8b1a12fd3788b451221571fa825965baf10bf"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2094,7 +2094,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "efcba9cee8448f98c985b970b4048fd461d9f3ce47837eb061ffe4086c39a11f"
+        "f775911d2c41d7794c171a0e0c0ef7a00750d7f9cb8cdebbf6cab11435ca3c06"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2204,7 +2204,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "cb9acdbba464cc10ebe13d5e4920ae454b13a54117e421e238c4402a217b1269"
+        "631f6a2a1d72f0adc3f27f438639b90cd4aefb2be1b492a1b474f880606744e8"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2249,7 +2249,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "317fd175d1af821f09d96d9b7a1d5d0dea05d289aad36d8ed900a85d65c64830"
+        "0b29ae8cabd633b6354f316b94ebb7a5e9677b185545691658721959fbe8100e"
       ],
       "trade_eligible": false,
       "availability": "verified_research_only",
@@ -2542,7 +2542,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "3d23b18e926842d4d21100bc9efe810cb77e06c87832cfdc1d5ace9201b4c65f"
+        "ad54cfb086ff5a67e08734c41179b122dc0d9a9c3e3696d7fcb26f17eaa5eb76"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2743,7 +2743,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "9309a83a0f18c53938d57953c83b442c20f2a083efc44b0cf0c71e08d80f47ee"
+        "875752ce13a9e4ae868363b0ed51d7cf416307fd4eff27301bd5bd8431f61fc3"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2763,7 +2763,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "7922bee065715aaeaaedd0a0b83e5e633798db7ae6a333b3dcc866408a047dc0"
+        "bfe8576de5688740b1f5939b810395f1c0a7ce5c2f8fc3c0ffbc976b9a10f6c3"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2918,9 +2918,9 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "bd0f1e62e108d49deab45da96ce2ce02fbc0c56d7c415b292e2b0342b60984a2",
-        "077a87316a2755312c1002e46353dda9f6acec131e7edf307d4f1b5bd119b2ca",
-        "8884d56ca0baa35883803544387ac25c5e56f29cb1fb9e0aaf78544a87376cf5"
+        "d61040deafb545c9f3207d0125b3bd60acecd20961742b6e435ec5bb6faf43bf",
+        "b2fe9dfd3a0fa727f6244df40cb4b9376644327cc76437e11ca26df5b1a7938d",
+        "f30faf49e6b2f53cd12038b05deed353cd5e4029d7771ca4910035ffbd6a9f36"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2953,7 +2953,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "4ae25d4e91a1760cbb358c223cbe85bb3ea2a81463eb4ce52069f8a5e400b0b9"
+        "4fc378cf902fc192ec42fbeaf513c515726685619e05e7573c375226559b9fef"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -2972,7 +2972,7 @@
         ]
       ],
       "allowed_request_shape_hashes": [
-        "c661b0501dd12bfec2838249284d6bbc01b43e247db15d24f9af6001b8ffd407"
+        "96f5e44e4acbd10f3ea3a84bda4744be6d5de86f4d405c52101dd1829bca5ce5"
       ],
       "trade_eligible": false,
       "availability": "production_available",

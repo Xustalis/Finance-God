@@ -24,7 +24,7 @@ watch(() => market.quotesMap, (map) => {
 // 选中标的 → 加载 K 线
 watch(activeSymbol, (sym) => {
   if (sym) market.loadBars(sym)
-})
+}, { immediate: true })
 
 function onSelectSymbol(symbol: string) {
   activeSymbol.value = symbol

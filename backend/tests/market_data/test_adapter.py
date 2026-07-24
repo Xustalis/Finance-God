@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from finance_god.market_data import (
     AssetClass,
     DataFrequency,
@@ -9,17 +10,16 @@ from finance_god.market_data import (
     FactorQuery,
     InstrumentId,
     MarketDataError,
-    ReleaseState,
     MarketType,
+    ReleaseState,
 )
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
-from .conftest import US_NOW, FakeSDK, adapter, bar, stock_snapshot
+from .conftest import US_NOW, FakeSDK, adapter, bar
 
 
 def test_a_share_snapshot_daily_and_1m_use_verified_endpoints() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     sdk.responses["get_stock_daily"] = [bar("20260723")]
     sdk.responses["get_stock_rt_min"] = [
         bar("20260723 10:31:00"),
@@ -50,12 +50,16 @@ def test_a_share_snapshot_daily_and_1m_use_verified_endpoints() -> None:
         release_state=ReleaseState.RELEASED,
     )
 
-    assert snapshot.items[0].source.endpoint == "get_stock_rt_daily"
+    assert snapshot.items[0].source.endpoint == "get_stock_rt_min"
+    assert snapshot.items[0].source.frequency is DataFrequency.MINUTE_1
+    assert snapshot.items[0].source.data_time.strftime("%Y%m%d %H:%M:%S") == (
+        "20260723 10:31:00"
+    )
     assert daily.items[0].source.endpoint == "get_stock_daily"
     assert minute.items[-1].source.frequency is DataFrequency.MINUTE_1
     called = [name for name, _ in sdk.calls]
     assert called.count("init_token") == 1
-    assert "get_stock_rt_daily" in called
+    assert "get_stock_rt_daily" not in called
     assert "get_stock_daily" in called
     assert "get_stock_rt_min" in called
 
@@ -163,9 +167,11 @@ def test_empty_missing_columns_and_invalid_ohlc_are_explicit_diagnostics() -> No
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
 
     empty = subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
-    sdk.responses["get_stock_rt_daily"] = [{"symbol": "000001.SZ"}]
+    sdk.responses["get_stock_rt_min"] = [{"symbol": "000001.SZ"}]
     missing = subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
-    sdk.responses["get_stock_rt_daily"] = [{**stock_snapshot(), "high": 1.0}]
+    sdk.responses["get_stock_rt_min"] = [
+        {**bar("20260723 10:31:00"), "high": 1.0}
+    ]
     invalid = subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
 
     assert empty.diagnostics[0].code is DiagnosticCode.UNEXPECTED_MISSING
@@ -175,9 +181,9 @@ def test_empty_missing_columns_and_invalid_ohlc_are_explicit_diagnostics() -> No
 
 def test_snapshot_rejects_any_wrong_symbol_without_selecting_a_matching_row() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_rt_daily"] = [
-        stock_snapshot("000001.SZ"),
-        stock_snapshot("600519.SH"),
+    sdk.responses["get_stock_rt_min"] = [
+        bar("20260723 10:31:00", symbol="000001.SZ"),
+        bar("20260723 10:31:00", symbol="600519.SH"),
     ]
     subject = adapter(sdk)
 
@@ -190,6 +196,20 @@ def test_snapshot_rejects_any_wrong_symbol_without_selecting_a_matching_row() ->
     assert result.items == ()
     assert result.diagnostics[0].code is DiagnosticCode.CONFLICT
     assert "different instrument" in result.diagnostics[0].message
+
+
+def test_snapshot_without_expected_date_uses_the_provider_trading_date() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 15:00:00")]
+    subject = adapter(sdk, now=US_NOW)
+
+    result = subject.fetch_snapshot(
+        DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ"),
+        release_state=ReleaseState.RELEASED,
+    )
+
+    assert result.items
+    assert result.items[0].source.trading_date == "20260723"
 
 
 def test_master_and_calendar_normalizers_validate_schema() -> None:
@@ -324,7 +344,7 @@ def test_secrets_and_full_urls_are_redacted_from_errors_and_repr() -> None:
     sdk = FakeSDK()
     username = "very-secret-user"
     password = "very-secret-password"
-    sdk.errors["get_stock_rt_daily"] = PermissionError(
+    sdk.errors["get_stock_rt_min"] = PermissionError(
         f"{password} denied at https://example.test/private?user={username}"
     )
     subject = adapter(sdk, username=username, password=password)

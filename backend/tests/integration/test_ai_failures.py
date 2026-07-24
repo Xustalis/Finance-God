@@ -297,7 +297,7 @@ def test_invalid_ai_dimension_returns_bad_gateway(client: TestClient) -> None:
     assert response.status_code == 502
 
 
-def test_valid_next_question_dimension_from_provider_is_accepted(client: TestClient) -> None:
+def test_mismatched_next_question_dimension_falls_back_to_server_question(client: TestClient) -> None:
     headers, session_id = ready_session(client, "mismatched-next-question@example.com")
     app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
         MismatchedNextDimensionOrchestrator()
@@ -312,11 +312,11 @@ def test_valid_next_question_dimension_from_provider_is_accepted(client: TestCli
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["session"]["turn_count"] == 1
-    # AI 选择了一个仍需覆盖的合法维度（investment_goal），服务端直接采纳其问题，
-    # 不再改写为服务端模板问题。
-    assert data["session"]["current_dimension"] == "investment_goal"
-    assert data["session"]["current_question"] == "接下来想了解你的主要投资目标。"
-    assert data["turn"]["next_question_dimension"] == "investment_goal"
+    assert data["session"]["current_dimension"] == "liquidity_need"
+    assert data["session"]["current_question"] == server_question(
+        "liquidity_need", "I can accept long term volatility"
+    )
+    assert data["turn"]["next_question_dimension"] == "liquidity_need"
     assert data["session"]["profile_evidence"] == {"risk_tolerance": 0.8}
 
 

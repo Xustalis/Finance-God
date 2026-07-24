@@ -32,7 +32,21 @@ dev = [
     "pytest-cov>=4.1.0",
     "httpx>=0.27.0",
     "aiosqlite>=0.19.0",
+    "ruff>=0.15.0",
 ]
+
+[tool.ruff]
+target-version = "py311"
+src = ["app", "finance_god"]
+
+[tool.ruff.lint]
+# Correctness (pyflakes), essential pycodestyle errors, and import ordering.
+# Line-length (E501) is intentionally not enforced to match the codebase's
+# dense style; run `ruff format` separately if reflow is ever desired.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "finance_god"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -6,10 +6,14 @@
 - /api/*（后挂载的 finance_app 兼容路径族）
 """
 
-import pytest
-from fastapi.testclient import TestClient
+import asyncio
 
+import pytest
 import server as finance_server
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from finance_god.infrastructure.persistence.models import Base as FinanceBase
 
 
 def test_v1_auth_me_is_mounted_and_requires_auth(client: TestClient) -> None:
@@ -29,22 +33,72 @@ def test_live_is_reachable_via_api_and_api_finance(client: TestClient) -> None:
     assert finance.json() == {"liveness": "live"}
 
 
-def test_simulation_current_account_without_owner_header_is_handled(
+def test_simulation_current_account_requires_bearer_token(
     client: TestClient,
 ) -> None:
     response = client.get("/api/simulation/accounts/current")
 
-    assert 400 <= response.status_code < 500
-    payload = response.json()
-    # 证明路由已挂载：响应来自 simulation handler 的错误信封
-    # {"error": {"code": ..., "message": ...}}，而非路由缺失时
-    # Starlette/FastAPI 的裸 404（{"detail": "Not Found"}）。
-    # 注意：现有实现（finance_god/api/simulation.py::_respond）将缺失
-    # owner header 的 PermissionError 映射为 404/NOT_FOUND，语义上与
-    # "路由缺失 404" 不同，此处通过错误信封与 message 内容区分。
-    assert "error" in payload
-    assert payload["error"]["code"] == "NOT_FOUND"
-    assert "x-finance-god-owner-id" in payload["error"]["message"]
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_workspace_requires_valid_bearer_token(client: TestClient) -> None:
+    missing = client.get("/api/workspace/watchlists")
+    invalid = client.get(
+        "/api/workspace/watchlists",
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert missing.status_code == 401
+    assert missing.json()["error"]["code"] == "UNAUTHORIZED"
+    assert invalid.status_code == 401
+    assert invalid.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_workspace_uses_jwt_subject_and_isolates_users(
+    client: TestClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asyncio.run(_create_finance_schema(session_factory))
+    monkeypatch.setattr(finance_server, "create_db_session", session_factory)
+    first = client.post(
+        "/api/v1/auth/register",
+        json={"email": "workspace-a@example.com", "password": "correct-horse-123"},
+    ).json()["data"]
+    second = client.post(
+        "/api/v1/auth/register",
+        json={"email": "workspace-b@example.com", "password": "correct-horse-123"},
+    ).json()["data"]
+
+    created = client.post(
+        "/api/workspace/watchlists",
+        json={"name": "A only"},
+        headers={
+            "Authorization": f"Bearer {first['access_token']}",
+            "x-finance-god-owner-id": second["user"]["id"],
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["owner_user_id"] == first["user"]["id"]
+
+    first_list = client.get(
+        "/api/workspace/watchlists",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+    )
+    second_list = client.get(
+        "/api/workspace/watchlists",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert len(first_list.json()) == 1
+    assert second_list.json() == []
+
+
+async def _create_finance_schema(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory.kw["bind"].begin() as connection:
+        await connection.run_sync(FinanceBase.metadata.create_all)
 
 
 class _StubQuotesResult:

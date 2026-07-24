@@ -10,23 +10,52 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.ai_catalog import STEPFUN_PROFILE_MODEL
 from app.config import settings
 from app.core.response import ApiResponse
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.models.onboarding import OnboardingSession, ProfileMessage
 from app.models.ai_config import AIModelConfig, PromptVersion
+from app.models.onboarding import OnboardingSession, ProfileMessage
 from app.models.profile import DirectionRecommendation, InvestmentProfile
 from app.models.user import User
-from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
-from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question, user_facing_error_detail
+from app.schemas.onboarding import (
+    AITurnResult,
+    MessageInput,
+    MessageTurnResponse,
+    ObjectiveProfileInput,
+    ProfileDimension,
+    ProfileWithRecommendationsResponse,
+    SessionResponse,
+    SkipInput,
+)
 from app.services import emotion_lexicon
+from app.services.ai_orchestrator import (
+    INITIAL_RISK_QUESTION,
+    ONBOARDING_SYSTEM_PROMPT,
+    PROFILE_DIMENSIONS,
+    SENSITIVE_DIMENSIONS,
+    AIAdapterRegistry,
+    AIProviderError,
+    get_ai_adapter_registry,
+    user_facing_error_detail,
+)
 from app.services.profile_rules import assess_profile, match_style, rank_directions
 from app.services.question_bank import select_question
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 MESSAGE_CLAIM_LEASE = timedelta(minutes=2)
+
+
+def default_text_provider(registry: AIAdapterRegistry) -> tuple[str, str]:
+    """无显式 AI 配置时优先使用实测最快的 StepFun 画像模型，其次 ARK，
+    否则回退到仅开发环境可用的 mock。返回 (provider, model)。"""
+    if "stepfun" in registry.text_providers:
+        return "stepfun", STEPFUN_PROFILE_MODEL
+    if "ark" in registry.text_providers and settings.ark_model:
+        return "ark", settings.ark_model
+    return "mock", "mock"
 
 
 def asked_question_texts(session: OnboardingSession) -> list[str]:
@@ -244,14 +273,17 @@ async def create_session(
             AIModelConfig.capability == "text", AIModelConfig.enabled.is_(True)
         )
     )
-    if settings.app_env != "development" and (
-        config is None or config.provider == "mock"
-    ):
+    if config is not None:
+        provider_name = config.provider
+        model_name = config.model_name
+    else:
+        provider_name, model_name = default_text_provider(adapter_registry)
+    if settings.app_env != "development" and provider_name == "mock":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Production onboarding requires an enabled non-mock text provider",
         )
-    if config is not None and config.provider not in adapter_registry.text_providers:
+    if provider_name not in adapter_registry.text_providers:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Configured text provider is not available",
@@ -259,8 +291,8 @@ async def create_session(
     session = OnboardingSession(
         user_id=user_id,
         live_key=user_id,
-        provider_name=config.provider if config else "mock",
-        model_name=config.model_name if config else "mock",
+        provider_name=provider_name,
+        model_name=model_name,
         prompt_version=config.prompt_version if config else "v1",
         min_rounds=config.min_rounds if config else 6,
         max_rounds=config.max_rounds if config else 12,
@@ -313,36 +345,16 @@ async def update_objective_profile(
     body: ObjectiveProfileInput,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    adapter_registry: AIAdapterRegistry = Depends(get_ai_adapter_registry),
 ) -> ApiResponse:
     session = await owned_session(db, session_id, user.id)
     if session.status != "active" or session.step != "objective_profile":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is not active")
-    objective_profile = body.model_dump(mode="json")
-    session.objective_profile = objective_profile
+    session.objective_profile = body.model_dump(mode="json")
     session.step = "conversation"
-
-    # 首问由 AI 依据客观画像生成；调用失败时回落到极小兜底问题，不阻断会话建立。
-    opening_dimension = ProfileDimension(PROFILE_DIMENSIONS[0])
-    opening_question = INITIAL_RISK_QUESTION
-    try:
-        orchestrator = adapter_registry.resolve_text(
-            provider=session.provider_name,
-            model_name=session.model_name,
-            system_prompt=session.prompt_content,
-        )
-        opening_question, opening_dimension = await orchestrator.opening_question(
-            objective_profile=objective_profile,
-        )
-    except (LookupError, AIProviderError, TimeoutError) as exc:
-        logger.warning(
-            "Opening question fell back to template on session %s: %s", session_id, exc
-        )
-
-    session.current_dimension = opening_dimension.value
-    session.current_question = opening_question
+    session.current_dimension = PROFILE_DIMENSIONS[0]
+    session.current_question = INITIAL_RISK_QUESTION
     session.question_history = [
-        {"round": 0, "dimension": opening_dimension.value, "question": opening_question}
+        {"round": 0, "dimension": PROFILE_DIMENSIONS[0], "question": INITIAL_RISK_QUESTION}
     ]
     session.completeness = 0.4
     await db.flush()
@@ -470,7 +482,8 @@ async def add_message(
         await release_message_claim(db, session_id, user_message.id)
         # 原始异常仅记录服务端日志，对外返回按错误码映射的固定中文文案
         logger.warning("AI provider error on session %s: code=%s", session_id, exc.code, exc_info=exc)
-        retryable = exc.code in {"DEEPSEEK_TIMEOUT", "DEEPSEEK_UNAVAILABLE", "DEEPSEEK_RATE_LIMITED"}
+        # 适配任意提供方前缀（DEEPSEEK_/ARK_ 等）：瞬时性错误按后缀判定为可重试
+        retryable = exc.code.endswith(("_TIMEOUT", "_UNAVAILABLE", "_RATE_LIMITED"))
         raise HTTPException(
             status_code=(
                 status.HTTP_503_SERVICE_UNAVAILABLE
@@ -543,40 +556,19 @@ async def add_message(
                 }
             )
     elif turn.next_question is None or returned_next_dimension != projected_dimension:
-        # 仍需继续。优先采用 AI 生成的下一问，只要它面向一个仍需覆盖的合法维度；
-        # 仅当 AI 未给出可用问题（空/非法/已问满）时，才回落到极小模板兜底。
-        if returned_next_dimension == target_snapshot:
-            effective_followup = proposed_followup_count
-        elif returned_next_dimension is not None:
-            effective_followup = int(followup_counts_snapshot.get(returned_next_dimension, 0))
-        else:
-            effective_followup = 2
-        ai_question_acceptable = (
-            turn.next_question is not None
-            and returned_next_dimension in PROFILE_DIMENSIONS
-            and returned_next_dimension not in skipped_dimensions_snapshot
-            and effective_followup < 2
+        turn = turn.model_copy(
+            update={
+                "should_continue": True,
+                "end_reason": None,
+                "next_question": select_question(
+                    projected_dimension,
+                    followup_count=int(followup_counts_snapshot.get(projected_dimension, 0)),
+                    asked_questions=asked_questions,
+                    user_excerpt=body.content,
+                ),
+                "next_question_dimension": ProfileDimension(projected_dimension),
+            }
         )
-        if ai_question_acceptable:
-            # 采纳 AI 的下一问；仅当其 should_continue/end_reason 与继续状态不一致时归一化。
-            if not turn.should_continue or turn.end_reason is not None:
-                turn = turn.model_copy(
-                    update={"should_continue": True, "end_reason": None}
-                )
-        else:
-            turn = turn.model_copy(
-                update={
-                    "should_continue": True,
-                    "end_reason": None,
-                    "next_question": select_question(
-                        projected_dimension,
-                        followup_count=int(followup_counts_snapshot.get(projected_dimension, 0)),
-                        asked_questions=asked_questions,
-                        user_excerpt=body.content,
-                    ),
-                    "next_question_dimension": ProfileDimension(projected_dimension),
-                }
-            )
     evidence_value = turn.profile_delta.get(turn.target_dimension)
     confirmed = dict(session.profile_evidence)
     if evidence_value is not None:
@@ -596,9 +588,6 @@ async def add_message(
         session.current_dimension = None
         session.current_question = None
     else:
-        # 保证 current_dimension 与 current_question 一致（可能是 AI 选定的维度，而非
-        # refresh_progress 按服务端顺序投影的维度），下一轮回答才能正确归属。
-        session.current_dimension = turn.next_question_dimension.value
         session.current_question = turn.next_question
         # JSON 字段需整体重新赋值以触发变更检测（参照 counts/scores 的拷贝模式）
         question_entries = list(session.question_history)

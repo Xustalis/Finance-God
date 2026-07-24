@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.api.v1.auth import router as auth_router
 from app.api.v1.admin import router as admin_router
+from app.api.v1.auth import router as auth_router
 from app.api.v1.onboarding import router as onboarding_router
 from app.api.v1.profiles import router as profiles_router
 from app.core.response import STANDARD_ERROR_RESPONSES

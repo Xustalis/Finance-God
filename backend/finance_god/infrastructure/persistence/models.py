@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
-from collections.abc import Callable
 from typing import Any, cast
 
 from sqlalchemy import (
+    DDL,
     Boolean,
     CheckConstraint,
     DateTime,
-    DDL,
     ForeignKey,
     Index,
     Integer,

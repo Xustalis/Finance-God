@@ -11,6 +11,7 @@ export const useAuthStore=defineStore('auth',()=>{
   async function login(email:string,password:string){loading.value=true;try{persist(await authApi.login(email,password))}finally{loading.value=false}}
   async function register(email:string,password:string,name:string){loading.value=true;try{persist(await authApi.register(email,password,name))}finally{loading.value=false}}
   async function hydrate(){if(!token.value)return;try{user.value=await authApi.me();localStorage.setItem(USER,JSON.stringify(user.value))}catch{logout()}}
+  async function updateProfile(payload:{display_name?:string|null;base_currency?:string;region?:string}){const updated=await authApi.updateMe(payload);user.value=updated;localStorage.setItem(USER,JSON.stringify(updated));return updated}
   function logout(){token.value=null;user.value=null;localStorage.removeItem(TOKEN);localStorage.removeItem(USER)}
-  return{token,user,loading,authenticated,isAdmin,login,register,hydrate,logout}
+  return{token,user,loading,authenticated,isAdmin,login,register,hydrate,updateProfile,logout}
 })

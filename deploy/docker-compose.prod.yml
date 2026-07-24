@@ -21,11 +21,13 @@ services:
       context: ../backend
     restart: unless-stopped
     env_file:
-      - .env.production
+      - ${FINANCE_GOD_ENV_FILE:-.env.production}
     environment:
       DATABASE_URL: postgresql+asyncpg://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
       DATABASE_URL_SYNC: postgresql+psycopg2://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
       FINANCE_GOD_DATABASE_URL: postgresql+psycopg2://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
+      PANDA_DATA_USERNAME: ${PANDA_DATA_USERNAME:?PANDA_DATA_USERNAME is required}
+      PANDA_DATA_PASSWORD: ${PANDA_DATA_PASSWORD:?PANDA_DATA_PASSWORD is required}
     depends_on:
       db:
         condition: service_healthy
@@ -38,7 +40,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3)",
         ]
       interval: 10s
       timeout: 5s
@@ -58,7 +60,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/ready >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 6

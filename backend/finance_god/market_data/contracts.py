@@ -256,8 +256,11 @@ class NormalizedSnapshot(BaseModel):
     @model_validator(mode="after")
     def validate_ohlc(self) -> NormalizedSnapshot:
         _validate_source_freshness(self.source, self.freshness)
-        if self.source.frequency is not DataFrequency.SNAPSHOT:
-            raise ValueError("snapshot source frequency must be snapshot")
+        if self.source.frequency not in {
+            DataFrequency.SNAPSHOT,
+            DataFrequency.MINUTE_1,
+        }:
+            raise ValueError("quote source frequency must be snapshot or 1m")
         if self.high < max(self.open, self.last, self.low):
             raise ValueError("high must be greater than or equal to OHLC values")
         if self.low > min(self.open, self.last, self.high):

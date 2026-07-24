@@ -1,5 +1,6 @@
 .PHONY: install install-backend install-frontend db migrate migrate-create \
-	backend frontend dev test lint docker-up docker-down
+	backend frontend dev test lint clean migrate-legacy-env \
+	validate-production-config docker-up docker-down
 
 install: install-backend install-frontend
 
@@ -21,7 +22,10 @@ migrate-create:
 	cd backend && alembic revision --autogenerate -m "$(MSG)"
 
 backend:
-	cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+	cd backend && .venv/bin/python -m app.startup
+
+migrate-legacy-env:
+	cd backend && .venv/bin/python -m app.env_migration
 
 frontend:
 	cd frontend && npm run dev
@@ -31,10 +35,21 @@ dev: db
 	@echo "DB is up. Run 'make migrate' then 'make backend' and 'make frontend' in separate terminals."
 
 test:
-	cd backend && python -m pytest -v
+	cd backend && .venv/bin/python -m pytest -v
 
 lint:
-	cd backend && python -m pyflakes app/ || true
+	cd backend && .venv/bin/python -m ruff check app/ finance_god/
+
+clean:
+	find . \( -path './.git' -o -path './backend/.venv' -o -path './backend/vendor' \
+		-o -path './frontend/node_modules' -o -path './resources' \) -prune -o \
+		-type d \( -name __pycache__ -o -name .mypy_cache -o -name .pytest_cache -o -name .ruff_cache \) \
+		-exec rm -rf {} +
+	rm -rf backend/build backend/finance_god_backend.egg-info frontend/dist .playwright-cli
+
+validate-production-config:
+	deploy/check-production-config.sh deploy/.env.production
+	docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml config --quiet
 
 docker-up:
 	docker compose up -d --build

@@ -20,10 +20,9 @@ def test_covers_all_dimensions() -> None:
     assert set(QUESTION_TEMPLATES) == set(ALL_DIMENSIONS)
 
 
-def test_each_dimension_has_exactly_one_fallback_template() -> None:
-    # 精简后每个维度仅保留 1 条中性兜底问题；正常问诊由 AI 动态生成。
+def test_each_dimension_has_at_least_three_templates() -> None:
     for dimension in ALL_DIMENSIONS:
-        assert len(QUESTION_TEMPLATES[dimension]) == 1, dimension
+        assert len(QUESTION_TEMPLATES[dimension]) >= 3, dimension
 
 
 def test_template_ids_globally_unique() -> None:
@@ -44,13 +43,12 @@ def test_initial_risk_question_preserved() -> None:
     assert INITIAL_RISK_QUESTION in contents
 
 
-def test_select_question_returns_single_fallback_regardless_of_followup() -> None:
-    # 每维度仅 1 条兜底：不同 followup_count / 已问集都返回同一条非空问题。
+def test_followup_returns_different_question() -> None:
     for dimension in ALL_DIMENSIONS:
         first = select_question(dimension, followup_count=0)
         second = select_question(dimension, followup_count=1, asked_questions=[first])
-        assert first == second
-        assert first.strip()
+        assert first != second
+        assert first and second
 
 
 def test_all_asked_still_returns_nonempty() -> None:
@@ -79,6 +77,15 @@ def test_excerpt_truncated_to_limit() -> None:
     excerpt = make_excerpt(long_text)
     assert len(excerpt) <= EXCERPT_LIMIT
     assert excerpt == long_text[:EXCERPT_LIMIT].rstrip()
+
+    template = next(
+        t
+        for t in QUESTION_TEMPLATES[ProfileDimension.RISK_TOLERANCE.value]
+        if "{excerpt}" in t.content
+    )
+    rendered = render_template(template, long_text)
+    assert excerpt in rendered
+    assert long_text not in rendered
 
 
 def test_select_question_nonempty_for_all_followup_counts() -> None:

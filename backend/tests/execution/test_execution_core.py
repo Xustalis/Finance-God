@@ -256,6 +256,25 @@ class MemoryRepository:
         )
 
 
+class MemoryUnitOfWork:
+    def __init__(self, repository: MemoryRepository) -> None:
+        self.repository = repository
+
+    async def __aenter__(self) -> MemoryUnitOfWork:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
+        del exc_type, exc, traceback
+
+    async def commit(self) -> None:
+        return None
+
+
 class Clock:
     def now(self) -> datetime:
         return NOW + timedelta(minutes=1)
@@ -369,7 +388,7 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.transport = Transport()
         self.ledger = Ledger()
         self.service = SimulationExecutionService(
-            repository=self.repository,
+            uow_factory=lambda: MemoryUnitOfWork(self.repository),
             accounts=Accounts(),
             plans=Plans(),
             manual_review=Review(),
@@ -453,6 +472,51 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
 
         await self.service.reconcile(owner_id="owner-1", order_id=unknown.order_id)
         self.assertEqual(self.transport.submit_calls, 1)
+
+    async def test_order_view_exposes_fields_and_timeline(self) -> None:
+        confirmed = await self._confirmed()
+        submitted = await self.service.submit(
+            owner_id="owner-1",
+            draft_id=confirmed.draft.draft_id,
+            idempotency_key="order-key",
+            request_hash=HASH,
+        )
+        await self.service.reconcile(owner_id="owner-1", order_id=submitted.order_id)
+
+        views = await self.service.list_order_views(owner_id="owner-1")
+        self.assertEqual(len(views), 1)
+        view = views[0]
+        self.assertEqual(view.instrument_id, "600519.SSE")
+        self.assertEqual(view.side, "buy")
+        self.assertEqual(view.order_type, "market")
+        self.assertEqual(view.time_in_force, "day")
+        self.assertEqual(view.status, "partially_filled")
+        self.assertEqual(view.cumulative_filled, Decimal("20"))
+        self.assertEqual(view.remaining_quantity, Decimal("80"))
+        self.assertIsNotNone(view.average_fill_price)
+        self.assertEqual(len(view.fills), 1)
+        self.assertIsNotNone(view.confirmed_at)
+        statuses = [entry.status for entry in view.timeline]
+        self.assertIn("confirmed", statuses)
+        self.assertIn("partially_filled", statuses)
+
+        single = await self.service.get_order_view(
+            owner_id="owner-1", order_id=view.order_id
+        )
+        self.assertEqual(single.order_id, view.order_id)
+
+    async def test_order_view_rejects_foreign_owner(self) -> None:
+        confirmed = await self._confirmed()
+        submitted = await self.service.submit(
+            owner_id="owner-1",
+            draft_id=confirmed.draft.draft_id,
+            idempotency_key="order-key",
+            request_hash=HASH,
+        )
+        with self.assertRaises(PermissionError):
+            await self.service.get_order_view(
+                owner_id="intruder", order_id=submitted.order_id
+            )
 
     async def test_unavailable_fund_capability_creates_no_order(self) -> None:
         fund = draft(

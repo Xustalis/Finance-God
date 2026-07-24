@@ -14,7 +14,7 @@ export default defineConfig(({mode})=>{const env={...loadEnv(mode,rootDir,''),..
   server: {
     port: 3000,
     host: true,
-    proxy: { '/api': { target: env.VITE_API_PROXY_TARGET || 'http://localhost:8001', changeOrigin: true } },
+    proxy: { '/api': { target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true } },
   },
   test: {
     environment: 'happy-dom',

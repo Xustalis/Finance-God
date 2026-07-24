@@ -16,7 +16,7 @@ const NAV_ITEMS = [
   { label: '总览', path: '/overview' },
   { label: '行情', path: '/markets' },
   { label: '交易台', path: '/desk' },
-  { label: '组合', path: '/portfolio' },
+  { label: '资产', path: '/portfolio' },
   { label: '订单', path: '/orders' },
   { label: '复盘', path: '/reviews' },
   { label: '数据', path: '/data' },
@@ -41,6 +41,20 @@ const healthClass = computed(() => {
   if (market.healthError || market.health?.readiness === 'not_ready') return 'status-down'
   if (!market.health) return 'status-pending'
   return 'status-ok'
+})
+
+/* 行情刷新频率（设计 §8.2：可选 1/3/5/15/60 秒与暂停） */
+const REFRESH_OPTIONS = [
+  { label: '1 秒', value: '1000' },
+  { label: '3 秒', value: '3000' },
+  { label: '5 秒', value: '5000' },
+  { label: '15 秒', value: '15000' },
+  { label: '60 秒', value: '60000' },
+  { label: '暂停', value: 'pause' },
+]
+const refreshRate = computed<string>({
+  get: () => (market.isPaused ? 'pause' : String(market.pollIntervalMs)),
+  set: (v) => market.setPollInterval(v === 'pause' ? 0 : Number(v)),
 })
 
 function isActive(path: string) {
@@ -105,6 +119,12 @@ onBeforeUnmount(() => {
         <span class="status-dot" />
         <span class="status-text">{{ healthStatus }}</span>
       </div>
+      <label class="refresh-control" title="行情刷新频率">
+        <span class="refresh-label">刷新</span>
+        <select v-model="refreshRate" class="refresh-select" aria-label="行情刷新频率">
+          <option v-for="o in REFRESH_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+      </label>
       <!-- 用户菜单 -->
       <div ref="menuRef" class="user-menu">
         <button class="user-trigger" :aria-expanded="showUserMenu" aria-label="用户菜单" @click.stop="toggleMenu">
@@ -241,6 +261,31 @@ onBeforeUnmount(() => {
 .status-down .status-dot { background: var(--risk); }
 .status-down .status-text { color: var(--risk); }
 .status-pending .status-text { color: var(--muted-ink); }
+
+.refresh-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted-ink);
+}
+.refresh-label {
+  letter-spacing: 0.04em;
+}
+.refresh-select {
+  padding: 3px 6px;
+  background: var(--paper-light);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.refresh-select:focus-visible {
+  outline: 2px solid var(--selection, #2563eb);
+  outline-offset: 1px;
+}
 
 .user-menu {
   position: relative;

@@ -2,7 +2,7 @@
 
 The backend is a single Python process that composes two ASGI applications.
 
-## Two applications, one process
+## One public application, one mounted sub-application
 
 | Application | Code location | Framework | Responsibilities |
 | --- | --- | --- | --- |
@@ -10,17 +10,25 @@ The backend is a single Python process that composes two ASGI applications.
 | `finance_app` | `finance_god/` + `server.py` | Starlette | Normalized PandaData market data (`/market/*`), persisted workspace (`/workspace/*`), simulation trading (`/simulation/*`), and the `/live`, `/ready`, `/health` probes. |
 
 `server.py` builds `finance_app` from the `finance_god` packages (market data,
-workspace routes, simulation wiring, workflow runtime). It also defines a
-standalone Starlette `app` that mounts `finance_app` under `/api` and serves
-the `prototype/` static directory; that standalone app is a reusable component
-and is not deployed on its own.
+workspace routes, simulation wiring, workflow runtime). It does not expose a
+module-level `app` or serve a static prototype; only `app.main:app` is a
+supported ASGI entry point.
 
 ## Production entry point
 
 `uvicorn app.main:app` is the only production entry point. `app/main.py`
 imports `finance_app` and `lifespan` from `server.py`; the FastAPI lifespan
-delegates to the Starlette lifespan, so the workflow runtime, database engine
-and market-data services are initialized and disposed by the single process.
+delegates to the Starlette lifespan, so the workflow runtime and market-data
+services are initialized by the single process. All HTTP modules use the
+`DATABASE_URL` setting and the shared engine/session factory in
+`app/db/session.py`; the outer FastAPI lifespan owns and disposes that pool.
+Local development uses `python -m app.startup` (via `make backend`) so an
+existing listener on port 8000 fails preflight instead of allowing a second
+Finance-God process to start.
+
+The repository-root `.env` is the only implicit local configuration file.
+`app.config` loads it before composing `finance_app`, making the same values
+available to typed settings and direct `os.getenv` adapters.
 
 ## Route mounting and path families
 
@@ -48,16 +56,9 @@ Mount behavior is verified by `tests/integration/test_route_mounting.py` and
 
 ## Identity conventions
 
-The two sub-systems inside `finance_app` resolve identity differently:
-
-- Simulation APIs (`/simulation/*`): every mutating call must send the
-  `x-finance-god-owner-id` request header, plus `idempotency-key`. The header
-  is defined in `finance_god/api/simulation.py` and scopes accounts, orders
-  and fills to one owner.
-- Workspace APIs (`/workspace/*`): the owner is fixed by the
-  `FINANCE_GOD_WORKSPACE_OWNER_ID` environment variable, resolved by
-  `_workspace_owner` in `server.py`. The browser cannot choose the owner;
-  any client-sent owner header is ignored for workspace routes.
+Simulation and workspace APIs both derive their owner from the signed Bearer
+token subject. Client-supplied owner headers are ignored and cannot select
+another user's data.
 
 `/api/v1/*` uses `Authorization: Bearer <access_token>` as described in
 `workbench-integration.md`.

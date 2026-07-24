@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -11,6 +12,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -82,7 +84,7 @@ class VersionedState(FrozenModel):
             raise InvalidStateTransition(type(self).__name__, self.status, target)
 
     def _replace(self, **changes: object) -> Self:
-        values = self.model_dump()
+        values = self.model_dump(exclude_computed_fields=True)
         values.update(changes)
         return type(self).model_validate(values)
 
@@ -814,6 +816,15 @@ class RiskCheckResult(InputVersionedState):
     soft_confirmation: AuditReference | None = None
 
     TRANSITIONS = RISK_CHECK_TRANSITIONS
+
+    @computed_field
+    @property
+    def reason_hash(self) -> str:
+        payload = "|".join(
+            f"{reason.code}:{reason.severity.value}:{reason.message}"
+            for reason in self.reasons
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @model_validator(mode="after")
     def validate_result(self) -> Self:

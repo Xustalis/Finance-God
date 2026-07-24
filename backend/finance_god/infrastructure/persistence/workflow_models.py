@@ -5,10 +5,10 @@ from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import (
+    DDL,
     JSON,
     Boolean,
     CheckConstraint,
-    DDL,
     ForeignKey,
     Index,
     Integer,
@@ -20,7 +20,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .models import Base, UTCDateTime
-
 
 _WORKFLOW_STATUSES = (
     "queued",

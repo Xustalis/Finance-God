@@ -221,7 +221,7 @@ class PandaDataAdapter:
                 "HK/US verified capability is closed-session daily data, not snapshot",
                 None,
             )
-        endpoint = "get_stock_rt_daily"
+        endpoint = "get_stock_rt_min"
         if release_state is not ReleaseState.RELEASED:
             return self._not_released(
                 instrument.symbol,
@@ -230,17 +230,64 @@ class PandaDataAdapter:
             )
         frame = self._request(
             endpoint,
-            {"A_SHARE_STOCK"},
+            {"A_SHARE_STOCK", "frequency=1m"},
             symbol=instrument.provider_symbol,
+            frequency="1m",
         )
-        return self._normalizer.snapshot(
-            records_from_frame(frame, endpoint=endpoint),
+        records = records_from_frame(frame, endpoint=endpoint)
+        trading_date = (
+            _validate_date(expected_date)
+            if expected_date
+            else _reported_trading_date(records)
+            or self._utc_now()
+            .astimezone(ZoneInfo("Asia/Shanghai"))
+            .strftime("%Y%m%d")
+        )
+        bars = self._normalizer.bars(
+            records,
             instrument=instrument,
             endpoint=endpoint,
+            frequency=DataFrequency.MINUTE_1,
             ingested_at=self._utc_now(),
             release_state=release_state,
-            expected_date=_validate_date(expected_date) if expected_date else None,
+            start_date=trading_date,
+            end_date=trading_date,
+            limit=1,
             provider_published_at=provider_published_at,
+        )
+        if not bars.items:
+            quote_diagnostics = tuple(
+                diagnostic(
+                    code=item.code,
+                    scope=instrument.symbol,
+                    message=item.message,
+                    endpoint=item.endpoint,
+                    severity=item.severity,
+                    empty_meaning=item.empty_meaning,
+                    retryable=item.retryable,
+                    details=dict(item.details),
+                )
+                for item in bars.diagnostics
+            )
+            return DataEnvelope((), quote_diagnostics, bars.empty_meaning)
+        latest = bars.items[0]
+        return DataEnvelope(
+            (
+                NormalizedSnapshot(
+                    instrument=latest.instrument,
+                    source=latest.source,
+                    freshness=latest.freshness,
+                    last=latest.close,
+                    open=latest.open,
+                    high=latest.high,
+                    low=latest.low,
+                    previous_close=None,
+                    volume=latest.volume,
+                    amount=latest.amount,
+                ),
+            ),
+            (),
+            EmptyMeaning.NOT_EMPTY,
         )
 
     def fetch_bars(
@@ -1087,6 +1134,17 @@ def _validate_date(value: str) -> str:
     except ValueError as error:
         raise ValueError("date must be a valid calendar date") from error
     return value
+
+
+def _reported_trading_date(records: list[dict[str, Any]]) -> str | None:
+    if not records:
+        return None
+    value = records[0].get("datetime") or records[0].get("date")
+    compact = "".join(character for character in str(value) if character.isdigit())[:8]
+    try:
+        return _validate_date(compact)
+    except ValueError:
+        return None
 
 
 def _bounded_date_range(start_date: str, end_date: str) -> tuple[str, str]:

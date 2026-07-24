@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
+
 from finance_god.market_data import (
     DataFrequency,
     PandaDataAdapter,
@@ -14,8 +15,8 @@ from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
 
 def _live_adapter() -> PandaDataAdapter:
-    backend_root = Path(__file__).resolve().parents[2]
-    load_dotenv(backend_root / ".env", override=False)
+    repository_root = Path(__file__).resolve().parents[3]
+    load_dotenv(repository_root / ".env", override=False)
     return PandaDataAdapter.from_environment()
 
 
@@ -34,7 +35,8 @@ def test_live_a_share_quote_requires_a_real_normalized_item() -> None:
 
     assert quote.items, quote.diagnostics
     assert quote.items[0].source.provider == "PandaData"
-    assert quote.items[0].source.frequency is DataFrequency.SNAPSHOT
+    assert quote.items[0].source.frequency is DataFrequency.MINUTE_1
+    assert quote.items[0].source.endpoint == "get_stock_rt_min"
 
 
 @pytest.mark.skipif(

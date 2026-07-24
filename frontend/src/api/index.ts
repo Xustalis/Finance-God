@@ -6,6 +6,7 @@ export const authApi = {
   login:(email:string,password:string)=>api.post<AuthData>('/auth/login',{email,password}),
   register:(email:string,password:string,display_name:string)=>api.post<AuthData>('/auth/register',{email,password,display_name:display_name||null}),
   me:()=>api.get<User>('/auth/me'),
+  updateMe:(payload:{display_name?:string|null;base_currency?:string;region?:string})=>api.patch<User>('/auth/me',payload),
 }
 export const adminAuthApi = {
   login:(email:string,password:string)=>adminHttpApi.post<AuthData>('/auth/admin/login',{email,password}),

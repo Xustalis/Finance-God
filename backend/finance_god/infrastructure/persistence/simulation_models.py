@@ -5,9 +5,9 @@ from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import (
+    DDL,
     JSON,
     CheckConstraint,
-    DDL,
     ForeignKey,
     Index,
     Integer,

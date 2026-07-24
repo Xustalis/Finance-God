@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from pydantic import Field, field_validator, model_validator
 
+from finance_god.application.journal_rules import expected_posting_rows
 from finance_god.application.ports import (
     Clock,
     IdGenerator,
@@ -12,7 +13,6 @@ from finance_god.application.ports import (
     UnitOfWork,
     UnitOfWorkFactory,
 )
-from finance_god.application.journal_rules import expected_posting_rows
 from finance_god.application.projections import (
     project_event_stream,
     replace_projections,

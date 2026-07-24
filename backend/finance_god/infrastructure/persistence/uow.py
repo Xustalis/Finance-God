@@ -13,16 +13,38 @@ from sqlalchemy.ext.asyncio import (
 
 from finance_god.application.ports import (
     AccountActivityRepository as AccountActivityRepositoryPort,
+)
+from finance_god.application.ports import (
     AccountEventRepository as AccountEventRepositoryPort,
+)
+from finance_god.application.ports import (
     AccountProjectionRepository as AccountProjectionRepositoryPort,
+)
+from finance_god.application.ports import (
     AccountRepository as AccountRepositoryPort,
+)
+from finance_god.application.ports import (
     AggregateLockRepository as AggregateLockRepositoryPort,
+)
+from finance_god.application.ports import (
     AuditRepository as AuditRepositoryPort,
+)
+from finance_god.application.ports import (
     FillRepository as FillRepositoryPort,
+)
+from finance_god.application.ports import (
     IdempotencyRepository as IdempotencyRepositoryPort,
+)
+from finance_god.application.ports import (
     JournalRepository as JournalRepositoryPort,
+)
+from finance_god.application.ports import (
     OutboxRepository as OutboxRepositoryPort,
+)
+from finance_god.application.ports import (
     PositionProjectionRepository as PositionProjectionRepositoryPort,
+)
+from finance_god.application.ports import (
     ReservationRepository as ReservationRepositoryPort,
 )
 
@@ -44,8 +66,9 @@ from .repositories import (
 
 def create_session_factory(
     database_url: str,
+    **engine_options: object,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(database_url)
+    engine = create_async_engine(database_url, **engine_options)
     if engine.dialect.name == "sqlite":
         @event.listens_for(engine.sync_engine, "connect")
         def _enable_sqlite_foreign_keys(

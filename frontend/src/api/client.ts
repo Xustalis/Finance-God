@@ -50,6 +50,7 @@ function clientApi(client: AxiosInstance) {
     get: <T>(url: string) => unwrap(client.get<ApiEnvelope<T>>(url)),
     post: <T>(url: string, body?: unknown) => unwrap(client.post<ApiEnvelope<T>>(url, body)),
     put: <T>(url: string, body?: unknown) => unwrap(client.put<ApiEnvelope<T>>(url, body)),
+    patch: <T>(url: string, body?: unknown) => unwrap(client.patch<ApiEnvelope<T>>(url, body)),
   }
 }
 

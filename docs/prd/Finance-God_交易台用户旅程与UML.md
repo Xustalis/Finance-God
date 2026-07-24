@@ -494,6 +494,8 @@ classDiagram
 
 ## 10. 依据与冲突处理
 
-本文件以交易台范围的现行页面规范为准：`docs/page-design/04_Finance-God前端设计要求.md`、`docs/page-design/06_Finance-God页面减肥与前后端职责规范.md`、`docs/page-design/00_交易页面设计索引.md` 和 `docs/research/Finance-God_交易软件形态与页面原型研究.md`。
+本文件以交易台范围的现行页面规范为准：`docs/page-design/01_前端统一设计规范.md`、
+`docs/page-design/02_前后端职责与数据合同.md`、`docs/page-design/00_前端设计文档索引.md`
+和 `docs/page-design/pages/` 下对应页面规格。
 
 若与较早的 MVP、实现计划或移动端材料冲突，采用以下处理：交易台从已有有效授权开始；只覆盖桌面端；PandaData 为市场数据唯一来源；业务事实为仿真；提交前只有一个正式风控记录。较早文档中的移动流程、AKShare/yfinance 兜底、前端本地风险判断或多份正式风控记录不构成本文件的实现依据。

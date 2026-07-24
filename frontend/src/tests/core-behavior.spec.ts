@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory } from 'vue-router'
 import { createAppRouter } from '@/router'
@@ -28,6 +28,16 @@ describe('route permissions', () => {
     await router.push('/app/exe')
     await router.isReady()
     expect(router.currentRoute.value.path).toBe('/login')
+  })
+
+  it('guards trading and workspace routes behind an authenticated session', async () => {
+    const router = createAppRouter(createMemoryHistory())
+    for (const path of ['/markets', '/desk', '/overview', '/portfolio', '/orders', '/reviews', '/data', '/settings']) {
+      await router.push(path)
+      await router.isReady()
+      expect(router.currentRoute.value.path).toBe('/login')
+      expect(router.currentRoute.value.query.redirect).toBe(path)
+    }
   })
 
   it('redirects admin settings to the dedicated login without clearing a user session', async () => {
@@ -159,7 +169,7 @@ describe('admin settings privacy', () => {
     expect(setting).not.toHaveProperty('api_key_ref')
     expect(setting).not.toHaveProperty('api_key')
   })
-  it('uses only the fixed server-side key reference for DeepSeek',()=>{const base={id:'1',capability:'text' as const,provider:'deepseek',model_name:'deepseek-v4-flash',base_url:'https://api.deepseek.com',api_key_configured:true,prompt_version:'v2',prompt_content:'new prompt content here',min_rounds:6,max_rounds:12,enabled:true,version:2};expect(adminUpdatePayload(base).api_key_ref).toBe('DEEPSEEK_API_KEY');expect(adminUpdatePayload({...base,provider:'mock',model_name:'mock-structured-v1'})).not.toHaveProperty('api_key_ref')})
+  it('uses only fixed server-side key references for text providers',()=>{const base={id:'1',capability:'text' as const,provider:'deepseek',model_name:'deepseek-v4-flash',base_url:'https://api.deepseek.com',api_key_configured:true,prompt_version:'v2',prompt_content:'new prompt content here',min_rounds:6,max_rounds:12,enabled:true,version:2};expect(adminUpdatePayload(base).api_key_ref).toBe('DEEPSEEK_API_KEY');expect(adminUpdatePayload({...base,provider:'stepfun',model_name:'step-3.5-flash-2603'}).api_key_ref).toBe('STEPFUN_API_KEY');expect(adminUpdatePayload({...base,provider:'mock',model_name:'mock-structured-v1'})).not.toHaveProperty('api_key_ref')})
 })
 
 describe('application contract',()=>{
@@ -168,4 +178,37 @@ describe('application contract',()=>{
   it('unwraps successful envelopes when request id is null',()=>{expect(unwrapEnvelope({success:true,data:{ok:true},error:null,meta:{request_id:null}})).toEqual({ok:true})})
   it('hydrates an existing token before mounting and contains hydrate failures',async()=>{const order:string[]=[];await bootstrapApplication({hasToken:true,hydrate:async()=>{order.push('hydrate');throw new Error('expired')},mount:()=>order.push('mount')});expect(order).toEqual(['hydrate','mount'])})
   it('resolves the workbench origin from either supported build variable',()=>{expect(resolveWorkbenchOrigin({VITE_WORKBENCH_ORIGIN:'https://vite.example',WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://vite.example');expect(resolveWorkbenchOrigin({WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://alias.example')})
+})
+
+vi.mock('@/api/desk', () => ({
+  fetchQuotes: vi.fn().mockResolvedValue({ quotes: [], errors: {} }),
+  fetchBars: vi.fn().mockResolvedValue({ symbol: '', frequency: '', bars: [] }),
+  fetchHealth: vi.fn().mockResolvedValue({ market_data: 'mock', readiness: 'ready' }),
+}))
+
+describe('market polling controller', () => {
+  beforeEach(() => { setActivePinia(createPinia()) })
+  it('defaults to a 5s interval and switches frequency on demand', async () => {
+    const { useMarketStore } = await import('@/stores/market')
+    const market = useMarketStore()
+    expect(market.pollIntervalMs).toBe(5000)
+    market.setPollInterval(1000)
+    expect(market.pollIntervalMs).toBe(1000)
+    expect(market.isPolling).toBe(true)
+    expect(market.isPaused).toBe(false)
+    market.stopPolling()
+  })
+  it('pauses without discarding data and resumes on a positive interval', async () => {
+    const { useMarketStore } = await import('@/stores/market')
+    const market = useMarketStore()
+    market.setPollInterval(3000)
+    market.setPollInterval(0)
+    expect(market.isPaused).toBe(true)
+    expect(market.isPolling).toBe(false)
+    market.setPollInterval(15000)
+    expect(market.isPaused).toBe(false)
+    expect(market.isPolling).toBe(true)
+    expect(market.pollIntervalMs).toBe(15000)
+    market.stopPolling()
+  })
 })

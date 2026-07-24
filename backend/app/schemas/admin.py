@@ -2,16 +2,17 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
-DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+from app.ai_catalog import DEEPSEEK_MODELS, STEPFUN_MODELS
 
 
 def validate_provider_model(capability: "AICapability", provider: str, model_name: str) -> None:
     if capability == AICapability.TEXT:
-        if provider not in {"mock", "deepseek"}:
+        if provider not in {"mock", "deepseek", "stepfun", "ark"}:
             raise ValueError("Unsupported text provider")
         if provider == "deepseek" and model_name not in DEEPSEEK_MODELS:
             raise ValueError("Unsupported DeepSeek model")
+        if provider == "stepfun" and model_name not in STEPFUN_MODELS:
+            raise ValueError("Unsupported StepFun model")
         return
     expected_model = (
         "web-speech-recognition"
@@ -51,6 +52,11 @@ class AISettingsUpdate(BaseModel):
             "DEEPSEEK_API_KEY",
         }:
             raise ValueError("DeepSeek uses the DEEPSEEK_API_KEY reference")
+        if self.provider == "stepfun" and self.api_key_ref not in {
+            None,
+            "STEPFUN_API_KEY",
+        }:
+            raise ValueError("StepFun uses the STEPFUN_API_KEY reference")
         return self
 
 

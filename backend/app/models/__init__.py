@@ -1,4 +1,4 @@
-from app.models.ai_config import AIModelConfig, AdminAuditRecord, PromptVersion
+from app.models.ai_config import AdminAuditRecord, AIModelConfig, PromptVersion
 from app.models.base import Base
 from app.models.onboarding import OnboardingSession, ProfileMessage
 from app.models.profile import DirectionRecommendation, InvestmentProfile

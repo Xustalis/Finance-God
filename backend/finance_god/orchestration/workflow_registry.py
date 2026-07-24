@@ -9,7 +9,7 @@ from typing import Final, Mapping, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from finance_god.agents.catalog import AgentGovernanceCatalog, PLANNER_ID
+from finance_god.agents.catalog import PLANNER_ID, AgentGovernanceCatalog
 from finance_god.agents.contracts import (
     FailureKind,
     NodeRequirement,

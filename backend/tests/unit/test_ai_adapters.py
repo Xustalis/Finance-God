@@ -520,77 +520,165 @@ def test_novice_prompt_uses_life_scenarios_without_scoring_lack_of_knowledge() -
     assert "不把“不懂”视为低风险" in prompt
 
 
-def test_profile_snapshot_lists_uncertain_dimensions_and_asked_questions() -> None:
-    snapshot = ai.build_profile_snapshot(
-        objective_profile={"age_range": "36-45", "fund_horizon": "5_plus_years"},
-        dimension_scores={"risk_tolerance": 0.7},
-        followup_counts={"liquidity_need": 1},
-        skipped_dimensions=["income_stability"],
-        asked_questions=["你能接受多大波动？"],
-    )
+ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+ARK_MODEL = "doubao-seed-2-0-lite-260215"
 
-    assert "风险承受" in snapshot
-    # 已较清楚（高置信或已跳过）与仍不确定分开列出
-    assert "收入稳定性(已跳过)" in snapshot
-    assert "流动性需求(已问1次)" in snapshot
-    assert "你能接受多大波动？" in snapshot
+
+def ark_orchestrator(transport: httpx.MockTransport) -> ai.AIOrchestrator:
+    return ai.ArkTextProvider(
+        api_key="ark-secret",
+        base_url=ARK_BASE_URL,
+        transport=transport,
+    ).create(model_name=ARK_MODEL, system_prompt="system prompt")
 
 
 @pytest.mark.asyncio
-async def test_mock_opening_question_is_deterministic_and_life_anchored() -> None:
-    orchestrator = ai.DeterministicMockOrchestrator()
-
-    question, dimension = await orchestrator.opening_question(
-        objective_profile={"investment_experience": "none"}
-    )
-
-    assert dimension is ai.ProfileDimension.RISK_TOLERANCE
-    assert question == ai.INITIAL_RISK_QUESTION
-    assert "阶段性亏损" in question
-
-
-@pytest.mark.asyncio
-async def test_deepseek_opening_question_parses_structure_and_snapshot() -> None:
+async def test_ark_provider_uses_openai_contract_and_preserves_versioned_path() -> None:
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("Authorization")
         captured["body"] = json.loads(request.content)
         return deepseek_response(
             {
-                "opening_question": "这笔钱对你来说，最重要的是能帮你完成什么？",
-                "dimension": "investment_goal",
+                "reply": "谢谢你的分享。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 0.6,
+                "confidence": 0.75,
+                "should_continue": True,
+                "end_reason": None,
+                "next_question": "这笔钱多久内可能需要取用？",
+                "next_question_dimension": "liquidity_need",
             }
         )
 
-    orchestrator = ai.DeepSeekTextProvider(
-        api_key="test-secret",
-        transport=httpx.MockTransport(handler),
-    ).create(model_name="deepseek-v4-flash", system_prompt="system prompt")
-
-    question, dimension = await orchestrator.opening_question(
-        objective_profile={"age_range": "36-45", "fund_horizon": "5_plus_years"}
+    result = await ark_orchestrator(httpx.MockTransport(handler)).respond(
+        **DEEPSEEK_RESPOND_ARGS
     )
 
-    assert question == "这笔钱对你来说，最重要的是能帮你完成什么？"
-    assert dimension is ai.ProfileDimension.INVESTMENT_GOAL
-    # 开场请求体也携带了画像快照（供 AI 据此定制开场问题）
-    user_message = captured["body"]["messages"][-1]["content"]
-    assert "用户当前画像快照" in user_message
+    # 绝对 URL 必须保留 ARK 的 /api/v3 路径，不能被 httpx join 丢弃
+    assert captured["url"] == f"{ARK_BASE_URL}/chat/completions"
+    assert captured["authorization"] == "Bearer ark-secret"
+    assert captured["body"]["model"] == ARK_MODEL
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.6}
+    assert result.next_question_dimension is ai.ProfileDimension.LIQUIDITY_NEED
 
 
 @pytest.mark.asyncio
-async def test_deepseek_opening_question_invalid_dimension_defaults_to_first() -> None:
-    transport = httpx.MockTransport(
-        lambda request: deepseek_response(
-            {"opening_question": "先聊聊你对这笔钱的打算吧？", "dimension": "financial_goal"}
-        )
+async def test_ark_content_wrapped_in_markdown_fence_is_parsed() -> None:
+    payload = json.dumps(
+        {
+            "reply": "已记录你的情况。",
+            "target_dimension": "risk_tolerance",
+            "profile_value": 0.3,
+            "confidence": 0.6,
+            "should_continue": True,
+        },
+        ensure_ascii=False,
     )
-    orchestrator = ai.DeepSeekTextProvider(
-        api_key="test-secret", transport=transport
-    ).create(model_name="deepseek-v4-flash", system_prompt="system prompt")
+    transport = httpx.MockTransport(
+        lambda request: deepseek_raw_response(f"```json\n{payload}\n```")
+    )
 
-    question, dimension = await orchestrator.opening_question(objective_profile={})
+    result = await ark_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
 
-    assert question == "先聊聊你对这笔钱的打算吧？"
-    # 非法维度归一化为第一维度（风险承受）
-    assert dimension is ai.ProfileDimension.RISK_TOLERANCE
+    assert result.reply == "已记录你的情况。"
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.3}
+
+
+@pytest.mark.asyncio
+async def test_ark_provider_classifies_rate_limit_without_leaking_body() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(429, text="provider-secret-body", request=request)
+    )
+
+    with pytest.raises(ai.AIProviderError, match="请求过于频繁") as raised:
+        await ark_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert raised.value.code == "ARK_RATE_LIMITED"
+    assert "provider-secret-body" not in str(raised.value)
+
+
+def test_registry_resolves_ark_when_credentials_configured() -> None:
+    registry = ai.AIAdapterRegistry(
+        ark_api_key="ark-secret", ark_base_url=ARK_BASE_URL
+    )
+
+    orchestrator = registry.resolve_text(
+        provider="ark", model_name=ARK_MODEL, system_prompt="system prompt"
+    )
+
+    assert isinstance(orchestrator, ai.ArkOrchestrator)
+    assert orchestrator.base_url == ARK_BASE_URL
+    assert orchestrator.error_prefix == "ARK"
+
+
+def test_registry_without_ark_rejects_ark_provider() -> None:
+    with pytest.raises(LookupError, match="No configured text adapter"):
+        ai.AIAdapterRegistry().resolve_text(
+            provider="ark", model_name=ARK_MODEL, system_prompt="system prompt"
+        )
+
+
+@pytest.mark.asyncio
+async def test_stepfun_provider_uses_benchmarked_profile_configuration() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("Authorization")
+        captured["body"] = json.loads(request.content)
+        return deepseek_response(
+            {
+                "reply": "谢谢你的分享。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 0.6,
+                "confidence": 0.75,
+                "should_continue": True,
+                "end_reason": None,
+                "next_question": "这笔钱多久内可能需要取用？",
+                "next_question_dimension": "liquidity_need",
+            }
+        )
+
+    provider = ai.StepFunTextProvider(
+        api_key="stepfun-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    orchestrator = provider.create(
+        model_name=ai.STEPFUN_PROFILE_MODEL,
+        system_prompt="system prompt",
+    )
+
+    result = await orchestrator.respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert captured["url"] == "https://api.stepfun.com/v1/chat/completions"
+    assert captured["authorization"] == "Bearer stepfun-secret"
+    assert captured["body"]["model"] == "step-3.5-flash-2603"
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+    assert captured["body"]["reasoning_effort"] == "low"
+    assert captured["body"]["max_tokens"] == 2048
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.6}
+
+
+def test_stepfun_provider_only_accepts_benchmarked_profile_model() -> None:
+    provider = ai.StepFunTextProvider(api_key="stepfun-secret")
+
+    with pytest.raises(LookupError, match="Unsupported StepFun model"):
+        provider.create(model_name="step-3.7-flash", system_prompt="system prompt")
+
+
+def test_registry_resolves_stepfun_when_credentials_configured() -> None:
+    registry = ai.AIAdapterRegistry(stepfun_api_key="stepfun-secret")
+
+    orchestrator = registry.resolve_text(
+        provider="stepfun",
+        model_name=ai.STEPFUN_PROFILE_MODEL,
+        system_prompt="system prompt",
+    )
+
+    assert isinstance(orchestrator, ai.StepFunOrchestrator)
+    assert orchestrator.base_url == "https://api.stepfun.com/v1"
+    assert orchestrator.error_prefix == "STEPFUN"

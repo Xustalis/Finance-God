@@ -24,7 +24,6 @@ from .instruments import (
     DEFAULT_INSTRUMENT_MASTER_VERSION,
 )
 
-
 _MARKET_ZONES = {
     "CN": ZoneInfo("Asia/Shanghai"),
     "HK": ZoneInfo("Asia/Hong_Kong"),

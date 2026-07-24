@@ -56,7 +56,9 @@ class SimulationRepository:
                 request_hash=request_hash,
                 revision=draft.record_revision,
                 status=draft.draft.status.value,
-                payload_json=draft.model_dump(mode="json"),
+                payload_json=draft.model_dump(
+                    mode="json", exclude_computed_fields=True
+                ),
                 created_at=draft.draft.audit_reference.recorded_at,
                 updated_at=draft.draft.audit_reference.recorded_at,
             )
@@ -67,7 +69,7 @@ class SimulationRepository:
                 draft.draft.draft_id,
                 draft.record_revision,
                 "draft_created",
-                draft.model_dump(mode="json"),
+                draft.model_dump(mode="json", exclude_computed_fields=True),
                 draft.owner_id,
                 draft.draft.audit_reference.recorded_at,
             )
@@ -96,7 +98,9 @@ class SimulationRepository:
                 .values(
                     revision=draft.record_revision,
                     status=draft.draft.status.value,
-                    payload_json=draft.model_dump(mode="json"),
+                    payload_json=draft.model_dump(
+                        mode="json", exclude_computed_fields=True
+                    ),
                     updated_at=draft.draft.audit_reference.recorded_at,
                 )
             )
@@ -106,7 +110,7 @@ class SimulationRepository:
                 draft.draft.draft_id,
                 draft.record_revision,
                 "draft_revised",
-                draft.model_dump(mode="json"),
+                draft.model_dump(mode="json", exclude_computed_fields=True),
                 draft.owner_id,
                 draft.draft.audit_reference.recorded_at,
             )
@@ -141,7 +145,9 @@ class SimulationRepository:
                 order_kind="exchange" if order.exchange_order else "fund",
                 revision=domain_order.revision,
                 status=domain_order.status.value,
-                payload_json=order.model_dump(mode="json"),
+                payload_json=order.model_dump(
+                    mode="json", exclude_computed_fields=True
+                ),
                 created_at=domain_order.audit_reference.recorded_at,
                 updated_at=domain_order.audit_reference.recorded_at,
             )
@@ -152,7 +158,7 @@ class SimulationRepository:
                 domain_order.order_id,
                 domain_order.revision,
                 "order_submitting",
-                order.model_dump(mode="json"),
+                order.model_dump(mode="json", exclude_computed_fields=True),
                 order.owner_id,
                 domain_order.audit_reference.recorded_at,
             )
@@ -189,7 +195,9 @@ class SimulationRepository:
                 .values(
                     revision=domain_order.revision,
                     status=domain_order.status.value,
-                    payload_json=order.model_dump(mode="json"),
+                    payload_json=order.model_dump(
+                        mode="json", exclude_computed_fields=True
+                    ),
                     updated_at=domain_order.audit_reference.recorded_at,
                 )
             )
@@ -199,7 +207,7 @@ class SimulationRepository:
                 domain_order.order_id,
                 domain_order.revision,
                 f"order_{domain_order.status.value}",
-                order.model_dump(mode="json"),
+                order.model_dump(mode="json", exclude_computed_fields=True),
                 order.owner_id,
                 domain_order.audit_reference.recorded_at,
             )
@@ -212,7 +220,9 @@ class SimulationRepository:
                     fill_id=fill.fill_id,
                     order_id=fill.order_id,
                     ledger_fill_id=fill.ledger_fill_id,
-                    payload_json=fill.model_dump(mode="json"),
+                    payload_json=fill.model_dump(
+                        mode="json", exclude_computed_fields=True
+                    ),
                     occurred_at=fill.occurred_at,
                 )
             )

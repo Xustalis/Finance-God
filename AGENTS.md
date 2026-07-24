@@ -4,9 +4,11 @@
 
 Before designing, changing, or reviewing any Finance-God frontend, read:
 
-1. `docs/page-design/04_Finance-God前端设计要求.md`
-2. `docs/page-design/templates/前端设计验收模板.md`
-3. The page-specific specification for every affected route.
+1. `docs/page-design/01_前端统一设计规范.md`
+2. `docs/page-design/02_前后端职责与数据合同.md`
+3. `docs/page-design/templates/前端设计验收模板.md`
+4. The page-specific specification in `docs/page-design/pages/` for every
+   affected route.
 
 The frontend design requirements are normative. If an older page document conflicts
 with them, the frontend design requirements win and the older document must be
@@ -15,6 +17,8 @@ updated in the same change.
 ## Required workflow
 
 Every frontend task must produce a short design brief before implementation:
+
+Use `docs/page-design/templates/前端设计简报模板.md`.
 
 - user and operating context;
 - page task and primary object;
@@ -33,12 +37,16 @@ item is unverified.
   professional traders.
 - Primary canvas: 1440 px. Minimum supported width: 1024 px. Below 1024 px, show
   an explicit desktop-width notice. Do not create a mobile layout.
-- Use a light, compact, OKX-inspired professional workspace. Reuse its density and
-  operational clarity, not its brand assets or exact composition.
+- Use a warm editorial financial-terminal workspace: warm beige paper surfaces,
+  deep ink typography, fine rules, dense tabular information and restrained
+  interaction. Financial newspapers may inform material, proportion and
+  hierarchy; trading terminals may inform density and operational clarity.
+  Do not copy third-party brand assets or exact compositions.
 - Global navigation is a compact top bar. Workspace tabs sit below it when a page
   has multiple tools.
-- Surfaces use white, neutral gray, and near-black. Blue is reserved for selection
-  and primary action. Red/green are reserved for loss/sell/risk and gain/buy/pass.
+- Surfaces use warm beige and light paper tones with deep brown-black ink.
+  Selection and primary actions use ink weight, underlines and rules rather than
+  blue. Red/green are reserved for loss/sell/risk and gain/buy/pass.
 - Do not build dashboard card mosaics. Use workspace regions, dividers, tables,
   tabs, toolbars, charts, and inspectors.
 - UI copy must describe function. Ban slogans, metaphors, design commentary, and

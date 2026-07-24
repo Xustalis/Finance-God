@@ -37,7 +37,6 @@
 html { font-size: 16px; }
 body {
   margin: 0;
-  min-width: 1024px;
   min-height: 100vh;
   background: var(--paper);
   line-height: 1.55;
@@ -291,11 +290,12 @@ details li { margin: .5rem 0; list-style-position: inside; }
 .settings-title h2 { margin: .25rem 0; }
 .settings-title p:last-child { color: var(--muted-ink); margin: 0; }
 .switch { display: flex !important; grid-template-columns: auto auto; align-items: center; gap: .6rem !important; white-space: nowrap; }
-.switch input { position: absolute; opacity: 0; }
+.switch input { position: absolute; width: 1px; height: 1px; min-height: 1px; opacity: 0; }
 .switch span { width: 46px; height: 26px; border-radius: 20px; background: #b8a890; position: relative; }
 .switch span:after { content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: var(--paper-light); top: 3px; left: 3px; transition: transform .2s; }
 .switch input:checked + span { background: var(--ink); }
 .switch input:checked + span:after { transform: translateX(20px); }
+.switch input:focus-visible + span { outline: 2px solid var(--risk); outline-offset: 2px; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
 .key-field { grid-column: 1 / -1; }
 .input-with-status { padding-left: .8rem; }

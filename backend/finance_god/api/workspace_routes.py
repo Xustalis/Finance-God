@@ -12,7 +12,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from finance_god.domain.errors import ConcurrentCommandConflict, DomainInvariantViolation
+from finance_god.api.auth import AuthenticationError
+from finance_god.domain.errors import (
+    ConcurrentCommandConflict,
+    DomainInvariantViolation,
+)
 from finance_god.domain.models import (
     NotificationCategory,
     NotificationPreference,
@@ -203,7 +207,7 @@ async def _body(request: Request, model: type[Model]) -> Model:
 def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
     owner_user_id = owner_resolver(request).strip()
     if not owner_user_id or len(owner_user_id) > 160:
-        raise PermissionError("authenticated owner is required")
+        raise AuthenticationError("authenticated owner is required")
     return owner_user_id
 
 
@@ -214,8 +218,10 @@ async def _respond(
         return JSONResponse(_json_value(await action()), status_code=success_status)
     except ValidationError as error:
         return _error("VALIDATION_ERROR", str(error), 422)
+    except AuthenticationError as error:
+        return _error("UNAUTHORIZED", str(error), 401)
     except PermissionError as error:
-        return _error("FORBIDDEN", str(error), 403)
+        return _error("NOT_FOUND", str(error), 404)
     except LookupError as error:
         return _error("NOT_FOUND", str(error), 404)
     except ConcurrentCommandConflict as error:

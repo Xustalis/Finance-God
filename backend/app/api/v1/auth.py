@@ -47,6 +47,14 @@ class RegisterRequest(BaseModel):
         return LoginRequest.validate_email(value)
 
 
+class UpdateProfileRequest(BaseModel):
+    """账户资料的部分更新；仅提交的字段会被写入。"""
+
+    display_name: str | None = Field(None, max_length=100)
+    base_currency: str | None = Field(None, pattern="^[A-Z]{3}$")
+    region: str | None = Field(None, pattern="^[A-Z]{2}$")
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -153,6 +161,25 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 async def me(
     user: User = Depends(get_current_user),
 ):
+    return ApiResponse.ok(_user_to_dict(user))
+
+
+@router.patch("/me", response_model=ApiResponse[UserResponse])
+async def update_me(
+    body: UpdateProfileRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    fields = body.model_dump(exclude_unset=True)
+    if "display_name" in fields:
+        raw = fields["display_name"]
+        user.display_name = raw.strip() if isinstance(raw, str) and raw.strip() else None
+    if fields.get("base_currency"):
+        user.base_currency = fields["base_currency"]
+    if fields.get("region"):
+        user.region = fields["region"]
+    user.updated_at = datetime.now(timezone.utc)
+    await db.flush()
     return ApiResponse.ok(_user_to_dict(user))
 
 

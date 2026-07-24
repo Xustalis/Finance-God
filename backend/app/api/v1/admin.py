@@ -4,20 +4,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai_catalog import DEEPSEEK_BASE_URL, STEPFUN_BASE_URL
+from app.config import settings
 from app.core.response import ApiResponse
 from app.core.security import require_admin
 from app.db.session import get_db
-from app.models.ai_config import AIModelConfig, AdminAuditRecord, PromptVersion
+from app.models.ai_config import AdminAuditRecord, AIModelConfig, PromptVersion
 from app.models.user import User
-from app.schemas.admin import AICapability, AIConnectionTest, AIConnectionTestResponse, AISettingsResponse, AISettingsUpdate
+from app.schemas.admin import (
+    AIConnectionTest,
+    AIConnectionTestResponse,
+    AISettingsResponse,
+    AISettingsUpdate,
+)
 from app.services.ai_orchestrator import (
+    ONBOARDING_SYSTEM_PROMPT,
     AIAdapterRegistry,
     AIProviderError,
-    DEEPSEEK_BASE_URL,
-    ONBOARDING_SYSTEM_PROMPT,
     get_ai_adapter_registry,
 )
-from app.config import settings
 
 router = APIRouter()
 
@@ -30,18 +35,33 @@ DEFAULT_CONFIGS = {
     "tts": {"provider": "browser", "model_name": "web-speech-synthesis"},
 }
 
+TEXT_PROVIDER_KEY_REFS = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "stepfun": "STEPFUN_API_KEY",
+}
+
 
 def safe_config(config: AIModelConfig | None, capability: str) -> dict:
     defaults = DEFAULT_CONFIGS[capability]
     provider = config.provider if config else defaults["provider"]
+    base_url = None
+    if capability == "text":
+        if provider == "ark":
+            base_url = settings.ark_base_url
+        elif provider == "stepfun":
+            base_url = STEPFUN_BASE_URL
+        else:
+            base_url = DEEPSEEK_BASE_URL
     return {
         "id": config.id if config else None,
         "capability": capability,
         "provider": provider,
         "model_name": config.model_name if config else defaults["model_name"],
-        "base_url": DEEPSEEK_BASE_URL if capability == "text" else None,
+        "base_url": base_url,
         "api_key_configured": bool(
-            provider == "deepseek" and settings.deepseek_api_key is not None
+            (provider == "deepseek" and settings.deepseek_api_key is not None)
+            or (provider == "stepfun" and settings.stepfun_api_key is not None)
+            or (provider == "ark" and settings.ark_api_key is not None)
         ),
         "prompt_version": config.prompt_version if config else "v1",
         "min_rounds": config.min_rounds if config else 6,
@@ -106,7 +126,7 @@ async def update_ai_settings(
             capability=capability,
             provider=body.provider,
             model_name=body.model_name,
-            api_key_ref=("DEEPSEEK_API_KEY" if body.provider == "deepseek" else body.api_key_ref),
+            api_key_ref=TEXT_PROVIDER_KEY_REFS.get(body.provider, body.api_key_ref),
             prompt_version=body.prompt_version,
             min_rounds=body.min_rounds,
             max_rounds=body.max_rounds,
@@ -118,8 +138,8 @@ async def update_ai_settings(
     else:
         config.provider = body.provider
         config.model_name = body.model_name
-        if body.provider == "deepseek":
-            config.api_key_ref = "DEEPSEEK_API_KEY"
+        if body.provider in TEXT_PROVIDER_KEY_REFS:
+            config.api_key_ref = TEXT_PROVIDER_KEY_REFS[body.provider]
         elif "api_key_ref" in body.model_fields_set:
             config.api_key_ref = body.api_key_ref
         config.prompt_version = body.prompt_version
@@ -197,7 +217,9 @@ async def test_ai_settings(
             "model_name": body.model_name,
             "adapter": probe["adapter"],
             "credential_status": (
-                "configured" if body.provider == "deepseek" else "not_required"
+                "configured"
+                if body.provider in {"deepseek", "stepfun", "ark"}
+                else "not_required"
             ),
         }
     )

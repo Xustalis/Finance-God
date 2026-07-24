@@ -1,11 +1,8 @@
 """SQLAlchemy ORM 模型基类"""
 
-import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, DateTime, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB, NUMERIC
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
