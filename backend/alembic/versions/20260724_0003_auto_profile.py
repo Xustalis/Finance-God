@@ -28,8 +28,10 @@ def downgrade() -> None:
             server_default=sa.text("'{}'"),
         ),
     )
-    op.alter_column(
-        "onboarding_sessions",
-        "pending_profile_evidence",
-        server_default=None,
-    )
+    # SQLite 不支持 ALTER COLUMN ... DROP DEFAULT，仅在 PostgreSQL 等方言上移除服务端默认值
+    if op.get_context().dialect.name != "sqlite":
+        op.alter_column(
+            "onboarding_sessions",
+            "pending_profile_evidence",
+            server_default=None,
+        )
