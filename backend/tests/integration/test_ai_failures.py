@@ -86,6 +86,22 @@ class MismatchedNextDimensionOrchestrator:
         }
 
 
+class EarlyStoppingOrchestrator:
+    async def respond(self, **kwargs):
+        return {
+            "reply": "我觉得已经了解得差不多了。",
+            "target_dimension": "risk_tolerance",
+            "sensitive": False,
+            "profile_delta": {"risk_tolerance": 0.8},
+            "confidence": 0.8,
+            "should_continue": False,
+            "end_reason": "sufficient_profile",
+            "next_question": None,
+            "next_question_dimension": None,
+            "retry_question": "换个角度，你会如何看待阶段性亏损？",
+        }
+
+
 class FixedRegistry:
     def __init__(self, orchestrator):
         self.orchestrator = orchestrator
@@ -281,7 +297,7 @@ def test_invalid_ai_dimension_returns_bad_gateway(client: TestClient) -> None:
     assert response.status_code == 502
 
 
-def test_mismatched_next_question_dimension_returns_bad_gateway(client: TestClient) -> None:
+def test_mismatched_next_question_dimension_falls_back_to_server_question(client: TestClient) -> None:
     headers, session_id = ready_session(client, "mismatched-next-question@example.com")
     app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
         MismatchedNextDimensionOrchestrator()
@@ -293,10 +309,36 @@ def test_mismatched_next_question_dimension_returns_bad_gateway(client: TestClie
         json={"content": "I can accept long term volatility", "input_mode": "text"},
     )
 
-    assert response.status_code == 502
-    resumed = client.get("/api/v1/onboarding/sessions/current", headers=headers).json()["data"]
-    assert resumed["turn_count"] == 0
-    assert resumed["profile_evidence"] == {}
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["session"]["turn_count"] == 1
+    assert data["session"]["current_dimension"] == "liquidity_need"
+    assert data["session"]["current_question"] == server_question(
+        "liquidity_need", "I can accept long term volatility"
+    )
+    assert data["turn"]["next_question_dimension"] == "liquidity_need"
+    assert data["session"]["profile_evidence"] == {"risk_tolerance": 0.8}
+
+
+def test_provider_early_stop_falls_back_to_server_question(client: TestClient) -> None:
+    headers, session_id = ready_session(client, "early-stop@example.com")
+    app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
+        EarlyStoppingOrchestrator()
+    )
+
+    response = client.post(
+        f"/api/v1/onboarding/sessions/{session_id}/messages",
+        headers=headers,
+        json={"content": "I can accept long term volatility", "input_mode": "text"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["session"]["status"] == "active"
+    assert data["session"]["current_dimension"] == "liquidity_need"
+    assert data["session"]["current_question"]
+    assert data["turn"]["should_continue"] is True
+    assert data["turn"]["next_question"] == data["session"]["current_question"]
 
 
 def test_provider_cannot_exceed_two_followups_or_overwrite_next_dimension(client: TestClient) -> None:

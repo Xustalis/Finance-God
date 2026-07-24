@@ -355,6 +355,88 @@ def test_server_terminates_adaptively_after_six_complete_dimensions(client: Test
     assert resumed.json()["data"]["id"] == session["id"]
 
 
+def test_refusing_final_sensitive_question_completes_without_bad_gateway(client: TestClient) -> None:
+    token, _ = register(client, "refuse-final@example.com")
+    headers = authorization(token)
+    session = client.post("/api/v1/onboarding/sessions", headers=headers).json()["data"]
+    client.put(
+        f"/api/v1/onboarding/sessions/{session['id']}/objective-profile",
+        headers=headers,
+        json=adult_profile(),
+    )
+    for number in range(5):
+        turn = client.post(
+            f"/api/v1/onboarding/sessions/{session['id']}/messages",
+            headers=headers,
+            json={"content": f"I can accept long term volatility, answer {number}"},
+        )
+        assert turn.status_code == 200
+    assert turn.json()["data"]["session"]["current_dimension"] == "income_stability"
+
+    refusal = client.post(
+        f"/api/v1/onboarding/sessions/{session['id']}/messages",
+        headers=headers,
+        json={"content": "不想说", "input_mode": "text"},
+    )
+
+    assert refusal.status_code == 200
+    state = refusal.json()["data"]["session"]
+    assert state["status"] == "ready"
+    assert state["current_question"] is None
+    assert refusal.json()["data"]["turn"]["should_continue"] is False
+    assert refusal.json()["data"]["turn"]["next_question"] is None
+
+    completed = client.post(
+        f"/api/v1/onboarding/sessions/{session['id']}/complete", headers=headers
+    )
+    assert completed.status_code == 200
+
+
+def test_vague_answers_continue_conversation_until_completion(client: TestClient) -> None:
+    token, _ = register(client, "vague-continue@example.com")
+    headers = authorization(token)
+    session = client.post("/api/v1/onboarding/sessions", headers=headers).json()["data"]
+    client.put(
+        f"/api/v1/onboarding/sessions/{session['id']}/objective-profile",
+        headers=headers,
+        json=adult_profile(),
+    )
+    for number in range(4):
+        turn = client.post(
+            f"/api/v1/onboarding/sessions/{session['id']}/messages",
+            headers=headers,
+            json={"content": f"I can accept long term volatility, answer {number}"},
+        )
+        assert turn.status_code == 200
+    assert turn.json()["data"]["session"]["current_dimension"] == "investment_knowledge"
+
+    first_refusal = client.post(
+        f"/api/v1/onboarding/sessions/{session['id']}/messages",
+        headers=headers,
+        json={"content": "不想说", "input_mode": "text"},
+    )
+    assert first_refusal.status_code == 200
+    after_first = first_refusal.json()["data"]["session"]
+    assert after_first["status"] == "active"
+    assert after_first["current_dimension"] == "investment_knowledge"
+    assert after_first["current_question"]
+
+    second_refusal = client.post(
+        f"/api/v1/onboarding/sessions/{session['id']}/messages",
+        headers=headers,
+        json={"content": "不想说", "input_mode": "text"},
+    )
+    assert second_refusal.status_code == 200
+    after_second = second_refusal.json()["data"]["session"]
+    assert after_second["status"] == "ready"
+    assert after_second["current_question"] is None
+
+    completed = client.post(
+        f"/api/v1/onboarding/sessions/{session['id']}/complete", headers=headers
+    )
+    assert completed.status_code == 200
+
+
 def test_skip_requires_active_conversation_and_current_sensitive_dimension(client: TestClient) -> None:
     token, _ = register(client, "skip-boundary@example.com")
     headers = authorization(token)

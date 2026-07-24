@@ -7,6 +7,16 @@ import pytest
 import app.services.ai_orchestrator as ai
 
 
+@pytest.mark.asyncio
+async def test_httpx_runtime_supports_socks_proxy_environment(monkeypatch) -> None:
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:1080")
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+
+    async with httpx.AsyncClient():
+        pass
+
+
 def test_reserved_provider_interfaces_are_explicit() -> None:
     text_provider = getattr(ai, "TextProvider", None)
     stt_adapter = getattr(ai, "SpeechToTextAdapter", None)
@@ -68,6 +78,11 @@ def deepseek_response(content: dict) -> httpx.Response:
     )
 
 
+def test_system_prompt_requires_automatic_numeric_profile_analysis() -> None:
+    assert "until the user confirms" not in ai.ONBOARDING_SYSTEM_PROMPT
+    assert "neutral value 0" in ai.ONBOARDING_SYSTEM_PROMPT
+
+
 @pytest.mark.asyncio
 async def test_deepseek_provider_uses_fixed_openai_contract_and_parses_json() -> None:
     captured: dict[str, object] = {}
@@ -117,6 +132,43 @@ async def test_deepseek_provider_uses_fixed_openai_contract_and_parses_json() ->
     assert captured["body"]["response_format"] == {"type": "json_object"}
     assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.8}
     assert result.next_question_dimension is ai.ProfileDimension.LIQUIDITY_NEED
+
+
+@pytest.mark.asyncio
+async def test_deepseek_null_profile_value_is_stored_as_neutral() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "我会换一个更容易回答的生活场景。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": None,
+                "confidence": 0,
+                "should_continue": True,
+                "end_reason": None,
+                "next_question": "如果这笔钱暂时下跌，你更倾向等待还是卖出？",
+                "next_question_dimension": "risk_tolerance",
+            }
+        )
+    )
+    orchestrator = ai.DeepSeekTextProvider(
+        api_key="test-secret", transport=transport
+    ).create(model_name="deepseek-v4-flash", system_prompt="system prompt")
+
+    result = await orchestrator.respond(
+        content="我还不太清楚",
+        round_count=0,
+        turn_count=1,
+        min_rounds=6,
+        max_rounds=12,
+        completeness=0.4,
+        dimension_scores={},
+        followup_counts={},
+        skipped_dimensions=[],
+        current_dimension="risk_tolerance",
+        objective_profile={"investment_experience": "none"},
+    )
+
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0}
 
 
 @pytest.mark.asyncio

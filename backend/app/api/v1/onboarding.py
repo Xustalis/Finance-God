@@ -18,7 +18,7 @@ from app.models.ai_config import AIModelConfig, PromptVersion
 from app.models.profile import DirectionRecommendation, InvestmentProfile
 from app.models.user import User
 from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
-from app.services.ai_orchestrator import AIAdapterRegistry, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question
+from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question
 from app.services.profile_rules import assess_profile, rank_directions
 
 router = APIRouter()
@@ -412,6 +412,17 @@ async def add_message(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI provider timed out; retry without losing progress",
         ) from exc
+    except AIProviderError as exc:
+        await release_message_claim(db, session_id, user_message.id)
+        retryable = exc.code in {"DEEPSEEK_TIMEOUT", "DEEPSEEK_UNAVAILABLE", "DEEPSEEK_RATE_LIMITED"}
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if retryable
+                else status.HTTP_502_BAD_GATEWAY
+            ),
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         await release_message_claim(db, session_id, user_message.id)
         raise HTTPException(
@@ -463,20 +474,26 @@ async def add_message(
         if turn.next_question_dimension is not None
         else None
     )
-    if (
-        projected_ready
-        and (turn.next_question is not None or returned_next_dimension is not None)
-    ) or (
-        not projected_ready
-        and (
-            turn.next_question is None
-            or returned_next_dimension != projected_dimension
-        )
-    ):
-        await release_message_claim(db, session_id, user_message.id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI provider returned an invalid next profile question",
+    # 服务端对终止条件有最终裁决权：提供商的下一问题与服务端推进状态不一致时，
+    # 归一化对话轮结果而不是返回 502（提供商无法感知完整度/轮次早停规则）。
+    if projected_ready:
+        if turn.next_question is not None or returned_next_dimension is not None:
+            turn = turn.model_copy(
+                update={
+                    "should_continue": False,
+                    "end_reason": turn.end_reason or "sufficient_profile",
+                    "next_question": None,
+                    "next_question_dimension": None,
+                }
+            )
+    elif turn.next_question is None or returned_next_dimension != projected_dimension:
+        turn = turn.model_copy(
+            update={
+                "should_continue": True,
+                "end_reason": None,
+                "next_question": server_question(projected_dimension, body.content),
+                "next_question_dimension": ProfileDimension(projected_dimension),
+            }
         )
     evidence_value = turn.profile_delta.get(turn.target_dimension)
     confirmed = dict(session.profile_evidence)
