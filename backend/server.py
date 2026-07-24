@@ -25,6 +25,7 @@ from finance_god.api.agent_routes import (
     AgentRuntimeUnavailable,
     create_agent_routes,
 )
+from finance_god.api.crawler_routes import create_crawler_routes
 from finance_god.api.auth import AuthenticationError
 from finance_god.api.evidence_routes import create_evidence_routes
 from finance_god.api.mandate_routes import create_mandate_routes
@@ -816,6 +817,7 @@ finance_routes = [
         ),
         name="agent",
     ),
+    *create_crawler_routes(),
 ]
 
 finance_app = Starlette(debug=False, routes=finance_routes)
