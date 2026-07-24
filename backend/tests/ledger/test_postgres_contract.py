@@ -60,6 +60,11 @@ from tests.ledger.support import (
 POSTGRES_URL = os.getenv("FINANCE_GOD_TEST_POSTGRES_URL")
 BACKEND = Path(__file__).resolve().parents[2]
 LEDGER_TABLES = (
+    "workflow_outbox_messages",
+    "workflow_execution_audit_records",
+    "workflow_audit_records",
+    "workflow_events",
+    "workflow_runs",
     "account_activities",
     "outbox_messages",
     "audit_records",
@@ -103,6 +108,12 @@ async def _clear_ledger_schema(database_url: str) -> None:
                 text(
                     "DROP FUNCTION IF EXISTS "
                     "finance_god_prevent_fact_mutation()"
+                )
+            )
+            await connection.execute(
+                text(
+                    "DROP FUNCTION IF EXISTS "
+                    "finance_god_prevent_workflow_fact_mutation()"
                 )
             )
     finally:

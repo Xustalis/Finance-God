@@ -417,6 +417,30 @@ class RiskAndWorkflowGovernanceTest(unittest.TestCase):
         self.assertFalse(read_only.can_create_trade_plan)
         self.assertTrue(actionable.can_create_trade_plan)
 
+    def test_input_change_expires_trade_eligible_workflow(self) -> None:
+        completed = (
+            workflow_run("company_research")
+            .transition(WorkflowRunStatus.RUNNING, audit_reference=audit(2))
+            .record_evidence(EVIDENCE, audit_reference=audit(3))
+            .record_node_contribution(CONTRIBUTION, audit_reference=audit(4))
+            .transition(
+                WorkflowRunStatus.COMPLETED,
+                audit_reference=audit(5),
+                trade_eligible=True,
+                final_artifact=ARTIFACT,
+            )
+        )
+
+        expired = completed.expire_if_inputs_changed(
+            (V2,),
+            audit_reference=audit(6),
+        )
+
+        self.assertEqual(expired.status, WorkflowRunStatus.EXPIRED)
+        self.assertFalse(expired.trade_eligible)
+        self.assertFalse(expired.can_create_trade_plan)
+        self.assertEqual(expired.invalidated_by_versions, (V2,))
+
     def test_review_data_quality_and_blocked_runs_are_never_tradeable(self) -> None:
         for key in ("review_only", "data_quality_review"):
             run = workflow_run(key).transition(

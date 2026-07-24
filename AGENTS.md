@@ -59,9 +59,13 @@ item is unverified.
 
 ## Engineering constraints
 
-- Production frontend baseline: Next.js 13+ App Router with React 19. Use server
-  rendering for the product shell and stable page data; isolate charts, polling,
-  workspace manipulation, forms, and dialogs in explicit client components.
+- Production frontend baseline: Vue 3, TypeScript and Vite. Use Vue Router for
+  client-side routing and Pinia for shared client state; keep route views,
+  charts, polling, workspace manipulation, forms and dialogs in explicit
+  components, composables or stores with clear ownership.
+- Stable page data is loaded through typed frontend services. Vite's `/api`
+  proxy is a local-development boundary only; production deployments must route
+  the same-origin API path to the backend without exposing PandaData credentials.
 - Build a Finance-God-owned component layer and design tokens. Do not copy OKX
   internal `okui-` component names, CSS, brand assets, or implementation details.
 - Use `lightweight-charts` for production trading charts unless a page-specific

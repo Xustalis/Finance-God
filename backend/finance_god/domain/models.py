@@ -386,6 +386,7 @@ class OrderSide(str, Enum):
     BUY = "buy"
     SELL = "sell"
     SHORT = "short"
+    COVER = "cover"
     SUBSCRIBE = "subscribe"
     REDEEM = "redeem"
     CONVERT = "convert"
@@ -404,7 +405,9 @@ class TimeInForce(str, Enum):
     IMMEDIATE_OR_CANCEL = "immediate_or_cancel"
 
 
-EXCHANGE_ORDER_SIDES = frozenset({OrderSide.BUY, OrderSide.SELL, OrderSide.SHORT})
+EXCHANGE_ORDER_SIDES = frozenset(
+    {OrderSide.BUY, OrderSide.SELL, OrderSide.SHORT, OrderSide.COVER}
+)
 FUND_ORDER_SIDES = frozenset(
     {
         OrderSide.SUBSCRIBE,
@@ -1150,8 +1153,113 @@ class WorkflowRun(InputVersionedState):
         *,
         audit_reference: AuditReference,
     ) -> WorkflowRun:
-        return self._expire_if_inputs_changed(
-            current_input_versions,
+        current = self.canonicalize_versions(current_input_versions)
+        if current == self.input_versions or self.status is WorkflowRunStatus.EXPIRED:
+            return self
+        return self._transition(
             WorkflowRunStatus.EXPIRED,
-            audit_reference,
+            audit_reference=audit_reference,
+            invalidated_by_versions=current,
+            trade_eligible=False,
         )
+
+
+class NotificationCategory(str, Enum):
+    WORKFLOW = "workflow"
+    DATA_QUALITY = "data_quality"
+    RISK = "risk"
+    TRADE_PLAN = "trade_plan"
+    ORDER = "order"
+    FILL = "fill"
+    REVIEW = "review"
+    AUTHORIZATION = "authorization"
+
+
+class NotificationSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    HARD_RISK = "hard_risk"
+    REQUIRED = "required"
+
+
+class NotificationStatus(str, Enum):
+    UNREAD = "unread"
+    READ = "read"
+
+
+class TaskType(str, Enum):
+    DATA_QUALITY = "data_quality"
+    WORKFLOW_ATTENTION = "workflow_attention"
+    TRADE_PLAN_PENDING = "trade_plan_pending"
+    ORDER_PENDING = "order_pending"
+    UNKNOWN_ORDER = "unknown_order"
+    REVIEW_COMPLETED = "review_completed"
+    AUTHORIZATION_EXPIRING = "authorization_expiring"
+
+
+class WatchlistGroup(FrozenModel):
+    group_id: str = Field(min_length=1, max_length=160)
+    owner_user_id: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = None
+    revision: int = Field(ge=1)
+    created_at: AwareDatetime = Field(...)
+    updated_at: AwareDatetime = Field(...)
+
+    @model_validator(mode="after")
+    def validate_name(self) -> Self:
+        if not self.name.strip():
+            raise DomainInvariantViolation("watchlist group name cannot be blank")
+        return self
+
+
+class WatchlistInstrument(FrozenModel):
+    instrument_id: str = Field(min_length=1, max_length=160)
+    group_id: str = Field(min_length=1, max_length=160)
+    revision: int = Field(ge=1)
+    added_at: AwareDatetime = Field(...)
+    added_by: str = Field(...)
+
+
+class Notification(FrozenModel):
+    notification_id: str = Field(min_length=1, max_length=160)
+    owner_user_id: str = Field(min_length=1, max_length=160)
+    category: NotificationCategory
+    severity: NotificationSeverity
+    title: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=1000)
+    source_object_type: str = Field(min_length=1, max_length=80)
+    source_object_id: str = Field(min_length=1, max_length=160)
+    source_version: str = Field(min_length=1, max_length=80)
+    required: bool = False
+    status: NotificationStatus
+    created_at: AwareDatetime
+    read_at: AwareDatetime | None = None
+    audit_reference: AuditReference
+
+    @model_validator(mode="after")
+    def validate_source(self) -> Self:
+        if self.source_object_type not in {"TradePlan", "OrderDraft", "WorkflowRun"}:
+            raise DomainInvariantViolation(
+                "source_object_type must reference approved authoritative object"
+            )
+        return self
+
+
+class NotificationPreference(FrozenModel):
+    owner_user_id: str
+    category_preferences: dict[NotificationCategory, bool]
+    updated_at: AwareDatetime
+
+
+class Task(FrozenModel):
+    task_id: str = Field(min_length=1, max_length=160)
+    type: TaskType
+    priority: int = Field(ge=1, le=5)
+    reason: str = Field(min_length=1, max_length=500)
+    associated_object_type: str = Field(min_length=1, max_length=80)
+    associated_object_id: str = Field(min_length=1, max_length=160)
+    associated_object_version: str = Field(min_length=1, max_length=80)
+    created_at: AwareDatetime
+    target_link: str | None = None

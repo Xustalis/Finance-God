@@ -83,7 +83,11 @@ def test_bar_normalizer_rejects_out_of_order_and_duplicate_timestamps() -> None:
     )
     normalizer = PandaDataNormalizer(FreshnessPolicy())
     ordered = normalizer.bars(
-        [bar("20260723 10:31:00"), bar("20260723 10:30:00")],
+        [
+            bar("20260723 10:31:00"),
+            bar("20260723 10:29:00"),
+            bar("20260723 10:30:00"),
+        ],
         instrument=instrument,
         endpoint="get_stock_rt_min",
         frequency=DataFrequency.MINUTE_1,
@@ -220,7 +224,12 @@ def test_unexpected_missing_envelope_requires_matching_diagnostic() -> None:
 @pytest.mark.parametrize(
     ("rows", "start_date", "end_date", "message"),
     [
-        ([bar("20260723 10:30:00", symbol="600519.SH")], "20260723", "20260723", "different instrument"),
+        (
+            [bar("20260723 10:30:00", symbol="600519.SH")],
+            "20260723",
+            "20260723",
+            "different instrument",
+        ),
         ([bar("20260722 10:30:00")], "20260723", "20260723", "outside request range"),
         ([bar("20260723")], "20260723", "20260723", "granularity"),
     ],

@@ -22,8 +22,8 @@ def test_a_share_snapshot_daily_and_1m_use_verified_endpoints() -> None:
     sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     sdk.responses["get_stock_daily"] = [bar("20260723")]
     sdk.responses["get_stock_rt_min"] = [
-        bar("20260723 10:30:00"),
         bar("20260723 10:31:00"),
+        bar("20260723 10:30:00"),
     ]
     subject = adapter(sdk)
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
@@ -84,11 +84,11 @@ def test_fund_etf_lof_are_capability_disabled_without_any_sdk_data_call(
     assert not any(name.startswith("get_stock_") for name, _ in sdk.calls)
 
 
-def test_us_daily_does_not_fallback_to_previous_day_when_expected_day_is_empty() -> None:
+def test_us_daily_does_not_fallback_to_previous_day_when_expected_day_is_empty() -> (
+    None
+):
     sdk = FakeSDK()
-    sdk.responses["get_us_daily"] = [
-        bar("20260722", symbol="AAPL", close=195.0)
-    ]
+    sdk.responses["get_us_daily"] = [bar("20260722", symbol="AAPL", close=195.0)]
     subject = adapter(sdk, now=US_NOW)
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("AAPL")
 
@@ -129,9 +129,7 @@ def test_us_daily_does_not_call_upstream_before_release() -> None:
 
 def test_hk_and_us_daily_are_normalized_with_actual_frequency_and_source() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_hk_daily"] = [
-        bar("20260723", symbol="00700.HK", close=10.2)
-    ]
+    sdk.responses["get_hk_daily"] = [bar("20260723", symbol="00700.HK", close=10.2)]
     sdk.responses["get_us_daily"] = [bar("20260723", symbol="AAPL", close=10.2)]
     subject = adapter(sdk, now=US_NOW)
 
@@ -154,7 +152,9 @@ def test_hk_and_us_daily_are_normalized_with_actual_frequency_and_source() -> No
 
     assert hk.items[0].source.endpoint == "get_hk_daily"
     assert us.items[0].source.endpoint == "get_us_daily"
-    assert all(item.source.frequency is DataFrequency.DAILY for item in (*hk.items, *us.items))
+    assert all(
+        item.source.frequency is DataFrequency.DAILY for item in (*hk.items, *us.items)
+    )
 
 
 def test_empty_missing_columns_and_invalid_ohlc_are_explicit_diagnostics() -> None:
@@ -162,19 +162,11 @@ def test_empty_missing_columns_and_invalid_ohlc_are_explicit_diagnostics() -> No
     subject = adapter(sdk)
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
 
-    empty = subject.fetch_snapshot(
-        instrument, release_state=ReleaseState.RELEASED
-    )
+    empty = subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
     sdk.responses["get_stock_rt_daily"] = [{"symbol": "000001.SZ"}]
-    missing = subject.fetch_snapshot(
-        instrument, release_state=ReleaseState.RELEASED
-    )
-    sdk.responses["get_stock_rt_daily"] = [
-        {**stock_snapshot(), "high": 1.0}
-    ]
-    invalid = subject.fetch_snapshot(
-        instrument, release_state=ReleaseState.RELEASED
-    )
+    missing = subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
+    sdk.responses["get_stock_rt_daily"] = [{**stock_snapshot(), "high": 1.0}]
+    invalid = subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
 
     assert empty.diagnostics[0].code is DiagnosticCode.UNEXPECTED_MISSING
     assert missing.diagnostics[0].code is DiagnosticCode.SCHEMA_DRIFT
@@ -202,18 +194,14 @@ def test_snapshot_rejects_any_wrong_symbol_without_selecting_a_matching_row() ->
 
 def test_master_and_calendar_normalizers_validate_schema() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_detail"] = [
-        {"symbol": "000001.SZ", "name": "平安银行"}
-    ]
+    sdk.responses["get_stock_detail"] = [{"symbol": "000001.SZ", "name": "平安银行"}]
     sdk.responses["get_trade_cal"] = [
         {"trade_date": "20260722", "is_trading_day": 1},
         {"trade_date": "20260723", "is_trading_day": 1},
     ]
     subject = adapter(sdk)
 
-    master = subject.fetch_master(
-        [DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")]
-    )
+    master = subject.fetch_master([DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")])
     calendar = subject.fetch_calendar(
         market=DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ").market,
         start_date="20260722",

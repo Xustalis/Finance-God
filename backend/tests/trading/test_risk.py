@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -170,6 +171,7 @@ def principal(**changes: object) -> AuthenticatedPrincipal:
         captured_at=NOW - timedelta(seconds=1),
         valid_until=NOW + timedelta(minutes=30),
         source_version=ref("identity_session", "session-1"),
+        source_revision="1",
         is_fixture=False,
     )
     return AuthenticatedPrincipal.model_validate({**base.model_dump(), **changes})
@@ -199,6 +201,7 @@ def authorization(**changes: object) -> AuthorizationSnapshot:
         captured_at=NOW - timedelta(seconds=1),
         valid_until=NOW + timedelta(days=1),
         source_version=ref("investment_mandate", "mandate-1"),
+        source_revision="1",
         is_fixture=False,
     )
     return AuthorizationSnapshot.model_validate({**base.model_dump(), **changes})
@@ -212,6 +215,7 @@ def cooldown(**changes: object) -> CooldownSnapshot:
         captured_at=NOW - timedelta(seconds=1),
         valid_until=NOW + timedelta(minutes=30),
         source_version=ref("cooldown", "cooldown-1"),
+        source_revision="1",
         is_fixture=False,
     )
     return CooldownSnapshot.model_validate({**base.model_dump(), **changes})
@@ -1208,6 +1212,393 @@ class RiskGateTest(unittest.TestCase):
 
 
 class RiskThresholdAndLifecycleTest(unittest.TestCase):
+    def test_platform_threshold_boundaries_use_strict_greater_than(self) -> None:
+        nav = Decimal("100000")
+
+        def all_in_cost(ratio: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input()
+            total_cost = Decimal("1000") * ratio
+            slippage_amount = snapshot.slippage.estimated_amount
+            assert slippage_amount is not None
+            fee = total_cost - slippage_amount
+            assert fee >= 0
+            return snapshot.model_copy(
+                update={
+                    "fee": snapshot.fee.model_copy(
+                        update={
+                            "estimated_fee": fee,
+                            "maximum_fee": fee,
+                        }
+                    )
+                }
+            )
+
+        def slippage(bps: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input()
+            return snapshot.model_copy(
+                update={
+                    "slippage": snapshot.slippage.model_copy(
+                        update={
+                            "bps": bps,
+                            "estimated_amount": Decimal("1000")
+                            * bps
+                            / Decimal("10000"),
+                        }
+                    )
+                }
+            )
+
+        def price_deviation(ratio: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input()
+            limit_price = Decimal("10") * (Decimal("1") + ratio)
+            nominal = Decimal("100") * limit_price
+            slippage_bps = snapshot.slippage.bps
+            assert slippage_bps is not None
+            return snapshot.model_copy(
+                update={
+                    "draft": snapshot.draft.model_copy(
+                        update={
+                            "order_type": OrderType.LIMIT,
+                            "limit_price": limit_price,
+                        }
+                    ),
+                    "instrument": snapshot.instrument.model_copy(
+                        update={"price_tick": Decimal("0.001")}
+                    ),
+                    "slippage": snapshot.slippage.model_copy(
+                        update={
+                            "estimated_amount": nominal
+                            * slippage_bps
+                            / Decimal("10000")
+                        }
+                    ),
+                }
+            )
+
+        def single_order(ratio: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input(quantity=nav * ratio / Decimal("10"))
+            return snapshot.model_copy(
+                update={
+                    "instrument": snapshot.instrument.model_copy(
+                        update={"quantity_step": Decimal("0.1")}
+                    )
+                }
+            )
+
+        def turnover(ratio: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input()
+            return snapshot.model_copy(
+                update={
+                    "account": snapshot.account.model_copy(
+                        update={"daily_turnover": nav * ratio - Decimal("1000")}
+                    )
+                }
+            )
+
+        def concentration(ratio: Decimal) -> RiskInputSnapshot:
+            return with_exposure(
+                risk_input(),
+                long_value=nav * ratio - Decimal("1000"),
+            )
+
+        def industry(ratio: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input()
+            current_total = nav * ratio - Decimal("1000")
+            other_value = current_total - Decimal("1000")
+            other = PositionLine(
+                instrument_id="INDUSTRY-OTHER",
+                asset_kind=AssetKind.STOCK,
+                industry="financials",
+                long_quantity=other_value / Decimal("10"),
+                short_quantity=Decimal("0"),
+                settled_quantity=other_value / Decimal("10"),
+                sellable_quantity=other_value / Decimal("10"),
+                fund_shares=Decimal("0"),
+                long_market_value=other_value,
+                short_market_value=Decimal("0"),
+            )
+            return snapshot.model_copy(
+                update={
+                    "positions": snapshot.positions.model_copy(
+                        update={
+                            "positions": (
+                                snapshot.positions.positions[0],
+                                other,
+                            )
+                        }
+                    ),
+                    "account": snapshot.account.model_copy(
+                        update={
+                            "gross_long_value": current_total,
+                            "industry_exposures": (
+                                IndustryExposure(
+                                    industry="financials",
+                                    market_value=current_total,
+                                ),
+                            ),
+                        }
+                    ),
+                }
+            )
+
+        def gross(ratio: Decimal) -> RiskInputSnapshot:
+            snapshot = risk_input()
+            current_total = nav * ratio - Decimal("1000")
+            other_total = current_total - Decimal("1000")
+            first_value = other_total / Decimal("2")
+            second_value = other_total - first_value
+
+            def other_position(
+                instrument_id: str,
+                industry_name: str,
+                market_value: Decimal,
+            ) -> PositionLine:
+                quantity = market_value / Decimal("10")
+                return PositionLine(
+                    instrument_id=instrument_id,
+                    asset_kind=AssetKind.STOCK,
+                    industry=industry_name,
+                    long_quantity=quantity,
+                    short_quantity=Decimal("0"),
+                    settled_quantity=quantity,
+                    sellable_quantity=quantity,
+                    fund_shares=Decimal("0"),
+                    long_market_value=market_value,
+                    short_market_value=Decimal("0"),
+                )
+
+            return snapshot.model_copy(
+                update={
+                    "positions": snapshot.positions.model_copy(
+                        update={
+                            "positions": (
+                                snapshot.positions.positions[0],
+                                other_position(
+                                    "GROSS-TECH",
+                                    "technology",
+                                    first_value,
+                                ),
+                                other_position(
+                                    "GROSS-HEALTH",
+                                    "healthcare",
+                                    second_value,
+                                ),
+                            )
+                        }
+                    ),
+                    "account": snapshot.account.model_copy(
+                        update={
+                            "gross_long_value": current_total,
+                            "industry_exposures": (
+                                IndustryExposure(
+                                    industry="financials",
+                                    market_value=Decimal("1000"),
+                                ),
+                                IndustryExposure(
+                                    industry="technology",
+                                    market_value=first_value,
+                                ),
+                                IndustryExposure(
+                                    industry="healthcare",
+                                    market_value=second_value,
+                                ),
+                            ),
+                        }
+                    ),
+                }
+            )
+
+        def short_gross(ratio: Decimal) -> RiskInputSnapshot:
+            current_short = nav * ratio - Decimal("1000")
+            snapshot = risk_input(
+                side=OrderSide.SHORT,
+                market="US",
+                borrow=borrow_snapshot(),
+                positions=(
+                    position(
+                        long_quantity=Decimal("0"),
+                        settled_quantity=Decimal("0"),
+                        sellable_quantity=Decimal("0"),
+                        long_value=Decimal("0"),
+                    ),
+                    PositionLine(
+                        instrument_id="SHORT-OTHER",
+                        asset_kind=AssetKind.STOCK,
+                        industry="technology",
+                        long_quantity=Decimal("0"),
+                        short_quantity=current_short / Decimal("10"),
+                        settled_quantity=Decimal("0"),
+                        sellable_quantity=Decimal("0"),
+                        fund_shares=Decimal("0"),
+                        long_market_value=Decimal("0"),
+                        short_market_value=current_short,
+                    ),
+                ),
+            )
+            return snapshot.model_copy(
+                update={
+                    "account": snapshot.account.model_copy(
+                        update={
+                            "gross_long_value": Decimal("0"),
+                            "gross_short_value": current_short,
+                            "industry_exposures": (
+                                IndustryExposure(
+                                    industry="financials",
+                                    market_value=Decimal("0"),
+                                ),
+                                IndustryExposure(
+                                    industry="technology",
+                                    market_value=current_short,
+                                ),
+                            ),
+                        }
+                    )
+                }
+            )
+
+        def borrow_fee(ratio: Decimal) -> RiskInputSnapshot:
+            return risk_input(
+                side=OrderSide.SHORT,
+                market="US",
+                borrow=borrow_snapshot(annual_fee_ratio=ratio),
+            )
+
+        boundary_cases: tuple[
+            tuple[
+                str,
+                Callable[[Decimal], RiskInputSnapshot],
+                Decimal,
+                Decimal,
+            ],
+            ...,
+        ] = (
+            (
+                "all_in_cost_soft_limit",
+                all_in_cost,
+                Decimal("0.01"),
+                Decimal("0.00001"),
+            ),
+            (
+                "all_in_cost_hard_limit",
+                all_in_cost,
+                Decimal("0.02"),
+                Decimal("0.00001"),
+            ),
+            (
+                "slippage_soft_limit",
+                slippage,
+                Decimal("50"),
+                Decimal("0.01"),
+            ),
+            (
+                "slippage_hard_limit",
+                slippage,
+                Decimal("100"),
+                Decimal("0.01"),
+            ),
+            (
+                "price_deviation_soft_limit",
+                price_deviation,
+                Decimal("0.05"),
+                Decimal("0.0001"),
+            ),
+            (
+                "price_deviation_hard_limit",
+                price_deviation,
+                Decimal("0.10"),
+                Decimal("0.0001"),
+            ),
+            (
+                "single_order_soft_limit",
+                single_order,
+                Decimal("0.05"),
+                Decimal("0.00001"),
+            ),
+            (
+                "single_order_hard_limit",
+                single_order,
+                Decimal("0.10"),
+                Decimal("0.00001"),
+            ),
+            (
+                "daily_turnover_soft_limit",
+                turnover,
+                Decimal("0.15"),
+                Decimal("0.00001"),
+            ),
+            (
+                "daily_turnover_hard_limit",
+                turnover,
+                Decimal("0.25"),
+                Decimal("0.00001"),
+            ),
+            (
+                "concentration_soft_limit",
+                concentration,
+                Decimal("0.10"),
+                Decimal("0.00001"),
+            ),
+            (
+                "concentration_hard_limit",
+                concentration,
+                Decimal("0.20"),
+                Decimal("0.00001"),
+            ),
+            (
+                "industry_soft_limit",
+                industry,
+                Decimal("0.25"),
+                Decimal("0.00001"),
+            ),
+            (
+                "industry_hard_limit",
+                industry,
+                Decimal("0.35"),
+                Decimal("0.00001"),
+            ),
+            (
+                "gross_hard_limit",
+                gross,
+                Decimal("1.00"),
+                Decimal("0.00001"),
+            ),
+            (
+                "short_gross_soft_limit",
+                short_gross,
+                Decimal("0.15"),
+                Decimal("0.00001"),
+            ),
+            (
+                "short_gross_hard_limit",
+                short_gross,
+                Decimal("0.30"),
+                Decimal("0.00001"),
+            ),
+            (
+                "borrow_fee_soft_limit",
+                borrow_fee,
+                Decimal("0.10"),
+                Decimal("0.0001"),
+            ),
+            (
+                "borrow_fee_hard_limit",
+                borrow_fee,
+                Decimal("0.25"),
+                Decimal("0.0001"),
+            ),
+        )
+        for code, build, threshold, epsilon in boundary_cases:
+            for label, value, expected in (
+                ("below", threshold - epsilon, False),
+                ("exact", threshold, False),
+                ("above", threshold + epsilon, True),
+            ):
+                with self.subTest(code=code, boundary=label):
+                    self.assertEqual(
+                        code in codes(evaluate(build(value))),
+                        expected,
+                    )
+
     def test_hard_thresholds_block_and_authorization_can_be_stricter(self) -> None:
         expensive = risk_input().model_copy(
             update={

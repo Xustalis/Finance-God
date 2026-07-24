@@ -31,6 +31,10 @@ from .contracts import (
 )
 from .errors import MarketDataResponseError
 from .freshness import FreshnessPolicy
+from .instruments import (
+    DEFAULT_INSTRUMENT_MASTER_IDENTITY,
+    DEFAULT_INSTRUMENT_MASTER_VERSION,
+)
 
 _MARKET_ZONES = {
     MarketType.CN: ZoneInfo("Asia/Shanghai"),
@@ -99,8 +103,16 @@ def records_from_frame(frame: Any, *, endpoint: str) -> list[dict[str, Any]]:
 
 
 class PandaDataNormalizer:
-    def __init__(self, freshness_policy: FreshnessPolicy) -> None:
+    def __init__(
+        self,
+        freshness_policy: FreshnessPolicy,
+        *,
+        instrument_master_identity: str = DEFAULT_INSTRUMENT_MASTER_IDENTITY,
+        instrument_master_version: str = DEFAULT_INSTRUMENT_MASTER_VERSION,
+    ) -> None:
         self._freshness_policy = freshness_policy
+        self._instrument_master_identity = instrument_master_identity
+        self._instrument_master_version = instrument_master_version
 
     def snapshot(
         self,
@@ -122,8 +134,7 @@ class PandaDataNormalizer:
                 scope, endpoint, "snapshot response is missing required fields"
             )
         if any(
-            str(row["symbol"]).upper() != instrument.provider_symbol
-            for row in rows
+            str(row["symbol"]).upper() != instrument.provider_symbol for row in rows
         ):
             return self._conflict_failure(
                 scope, endpoint, "snapshot response contains a different instrument"
@@ -208,8 +219,7 @@ class PandaDataNormalizer:
                 scope, endpoint, "bar response is missing required fields"
             )
         if any(
-            str(row["symbol"]).upper() != instrument.provider_symbol
-            for row in rows
+            str(row["symbol"]).upper() != instrument.provider_symbol for row in rows
         ):
             return self._conflict_failure(
                 scope, endpoint, "bar response contains a different instrument"
@@ -239,17 +249,14 @@ class PandaDataNormalizer:
         timestamps = [timestamp for timestamp, _ in parsed]
         descending = endpoint in {
             "get_stock_min",
+            "get_stock_rt_min",
             "get_stock_daily",
             "get_hk_daily",
             "get_us_daily",
             "get_index_daily",
         }
         if any(
-            (
-                current >= previous
-                if descending
-                else current <= previous
-            )
+            (current >= previous if descending else current <= previous)
             for previous, current in pairwise(timestamps)
         ):
             return self._schema_failure(
@@ -326,8 +333,8 @@ class PandaDataNormalizer:
             amount=_optional_decimal(row.get("amount"), field="amount"),
         )
 
-    @staticmethod
     def _source(
+        self,
         *,
         endpoint: str,
         data_time: datetime,
@@ -337,6 +344,8 @@ class PandaDataNormalizer:
     ) -> SourceStamp:
         return SourceStamp(
             endpoint=endpoint,
+            instrument_master_identity=self._instrument_master_identity,
+            instrument_master_version=self._instrument_master_version,
             data_time=data_time,
             trading_date=data_time.strftime("%Y%m%d"),
             provider_published_at=provider_published_at,
@@ -350,9 +359,7 @@ class PandaDataNormalizer:
         )
 
     @staticmethod
-    def _unexpected_empty(
-        scope: str, endpoint: str
-    ) -> DataEnvelope[Any]:
+    def _unexpected_empty(scope: str, endpoint: str) -> DataEnvelope[Any]:
         issue = diagnostic(
             code=DiagnosticCode.UNEXPECTED_MISSING,
             scope=scope,
@@ -363,9 +370,7 @@ class PandaDataNormalizer:
         return DataEnvelope((), (issue,), EmptyMeaning.UNEXPECTED_MISSING)
 
     @staticmethod
-    def _schema_failure(
-        scope: str, endpoint: str, message: str
-    ) -> DataEnvelope[Any]:
+    def _schema_failure(scope: str, endpoint: str, message: str) -> DataEnvelope[Any]:
         issue = diagnostic(
             code=DiagnosticCode.SCHEMA_DRIFT,
             scope=scope,
@@ -376,9 +381,7 @@ class PandaDataNormalizer:
         return DataEnvelope((), (issue,), EmptyMeaning.UNEXPECTED_MISSING)
 
     @staticmethod
-    def _conflict_failure(
-        scope: str, endpoint: str, message: str
-    ) -> DataEnvelope[Any]:
+    def _conflict_failure(scope: str, endpoint: str, message: str) -> DataEnvelope[Any]:
         issue = diagnostic(
             code=DiagnosticCode.CONFLICT,
             scope=scope,
@@ -389,9 +392,7 @@ class PandaDataNormalizer:
         return DataEnvelope((), (issue,), EmptyMeaning.UNEXPECTED_MISSING)
 
 
-def valid_no_event(
-    *, scope: str, endpoint: str, message: str
-) -> DataEnvelope[object]:
+def valid_no_event(*, scope: str, endpoint: str, message: str) -> DataEnvelope[object]:
     issue = diagnostic(
         code=DiagnosticCode.VALID_NO_EVENT,
         scope=scope,
@@ -414,21 +415,22 @@ def _bar_time(record: Mapping[str, Any]) -> object:
     return record["date"]
 
 
-def _matches_frequency(
-    record: Mapping[str, Any], frequency: DataFrequency
-) -> bool:
+def _matches_frequency(record: Mapping[str, Any], frequency: DataFrequency) -> bool:
     raw = str(_bar_time(record)).strip()
     if frequency is DataFrequency.DAILY:
         if record.get("datetime") not in {None, ""}:
             return False
         return bool(
-            re.fullmatch(r"\d{8}", raw)
-            or re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw)
+            re.fullmatch(r"\d{8}", raw) or re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw)
         )
     if frequency is DataFrequency.MINUTE_1:
         if not (
             re.fullmatch(r"\d{8} \d{2}:\d{2}:\d{2}", raw)
             or re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", raw)
+            or re.fullmatch(
+                r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,6}",
+                raw,
+            )
             or re.fullmatch(r"\d{14}", raw)
         ):
             return False
@@ -447,6 +449,7 @@ def _parse_data_time(value: object, market: MarketType) -> datetime:
     formats = (
         "%Y%m%d %H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
         "%Y%m%d%H%M%S",
         "%Y%m%d",
         "%Y-%m-%d",

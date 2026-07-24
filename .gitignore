@@ -36,6 +36,18 @@ dist/
 build/
 *.log
 
+# Local browser automation session artifacts
+.playwright-cli/
+
+# Local runtime databases
+backend/*.db
+backend/user.json
+backend/uv.lock
+
+# External reference repositories and generated experiment output
+/resources/
+/artifacts/
+
 # Environment
 .env
 .env.*

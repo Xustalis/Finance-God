@@ -34,6 +34,12 @@ ALLOWED_SIDES = frozenset(
 )
 ALLOWED_ORDER_TYPES = frozenset({"market", "limit", "fund"})
 SHORT_MARKETS = frozenset({"HK", "US"})
+IDENTITY_SOURCE_TYPE = "identity_session"
+AUTHORIZATION_SOURCE_TYPE = "investment_mandate"
+COOLDOWN_SOURCE_TYPE = "cooldown"
+FIXTURE_IDENTITY_SOURCE_TYPE = "fixture_identity"
+FIXTURE_AUTHORIZATION_SOURCE_TYPE = "fixture_authorization"
+FIXTURE_COOLDOWN_SOURCE_TYPE = "fixture_cooldown"
 
 
 class FrozenModel(BaseModel):
@@ -89,6 +95,7 @@ class AuthenticatedPrincipal(FrozenModel):
     captured_at: AwareDatetime
     valid_until: AwareDatetime
     source_version: VersionReference
+    source_revision: str = Field(min_length=1, max_length=80)
     is_fixture: bool
 
     @model_validator(mode="after")
@@ -100,6 +107,16 @@ class AuthenticatedPrincipal(FrozenModel):
             raise ValueError("authentication cannot occur after capture")
         if self.valid_until <= self.captured_at:
             raise ValueError("principal validity must end after capture")
+        _bind_source_version(
+            self.source_version,
+            object_type=(
+                FIXTURE_IDENTITY_SOURCE_TYPE
+                if self.is_fixture
+                else IDENTITY_SOURCE_TYPE
+            ),
+            object_id=self.session_id,
+            revision=self.source_revision,
+        )
         return self
 
 
@@ -133,6 +150,7 @@ class AuthorizationSnapshot(FrozenModel):
     captured_at: AwareDatetime
     valid_until: AwareDatetime
     source_version: VersionReference
+    source_revision: str = Field(min_length=1, max_length=80)
     is_fixture: bool
 
     @field_validator(
@@ -182,6 +200,16 @@ class AuthorizationSnapshot(FrozenModel):
             raise ValueError("authorization cannot be captured before valid_from")
         if self.valid_until <= self.captured_at:
             raise ValueError("authorization validity must end after capture")
+        _bind_source_version(
+            self.source_version,
+            object_type=(
+                FIXTURE_AUTHORIZATION_SOURCE_TYPE
+                if self.is_fixture
+                else AUTHORIZATION_SOURCE_TYPE
+            ),
+            object_id=self.authorization_id,
+            revision=self.source_revision,
+        )
         return self
 
 
@@ -192,6 +220,7 @@ class CooldownSnapshot(FrozenModel):
     captured_at: AwareDatetime
     valid_until: AwareDatetime
     source_version: VersionReference
+    source_revision: str = Field(min_length=1, max_length=80)
     is_fixture: bool
 
     @model_validator(mode="after")
@@ -200,6 +229,16 @@ class CooldownSnapshot(FrozenModel):
         _require_utc(self.valid_until, "valid_until")
         if self.valid_until <= self.captured_at:
             raise ValueError("cooldown validity must end after capture")
+        _bind_source_version(
+            self.source_version,
+            object_type=(
+                FIXTURE_COOLDOWN_SOURCE_TYPE
+                if self.is_fixture
+                else COOLDOWN_SOURCE_TYPE
+            ),
+            object_id=self.cooldown_id,
+            revision=self.source_revision,
+        )
         return self
 
 
@@ -286,9 +325,15 @@ class AccessResolver:
                 now,
             )
         try:
-            principal = self._identity_provider.current_principal()
-            authorization = self._authorization_provider.authorization_for(principal)
-            cooldown = self._authorization_provider.cooldown_for(principal)
+            principal = AuthenticatedPrincipal.model_validate(
+                self._identity_provider.current_principal().model_dump()
+            )
+            authorization = AuthorizationSnapshot.model_validate(
+                self._authorization_provider.authorization_for(principal).model_dump()
+            )
+            cooldown = CooldownSnapshot.model_validate(
+                self._authorization_provider.cooldown_for(principal).model_dump()
+            )
         except Exception as exc:
             return self._denied(
                 AccessResolutionCode.UPSTREAM_UNAVAILABLE,
@@ -513,3 +558,18 @@ def _require_utc(value: datetime, field_name: str) -> None:
     _require_aware(value)
     if value.utcoffset() != timedelta(0):
         raise ValueError(f"{field_name} must be UTC")
+
+
+def _bind_source_version(
+    reference: VersionReference,
+    *,
+    object_type: str,
+    object_id: str,
+    revision: str,
+) -> None:
+    if reference.object_type != object_type:
+        raise ValueError(f"source_version object_type must be {object_type}")
+    if reference.object_id != object_id:
+        raise ValueError("source_version object_id does not match snapshot identity")
+    if reference.version != revision:
+        raise ValueError("source_version version does not match source_revision")

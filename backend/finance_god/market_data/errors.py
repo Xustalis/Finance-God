@@ -21,6 +21,7 @@ _HTTP_STATUS_PATTERN = re.compile(r"\bHTTP\s+(\d{3})\b", re.IGNORECASE)
 
 
 class ErrorKind(StrEnum):
+    CONFIGURATION = "configuration"
     TRANSIENT = "transient"
     AUTHENTICATION = "authentication"
     PERMISSION = "permission"
@@ -33,6 +34,7 @@ class ErrorKind(StrEnum):
 
 
 class PublicErrorCode(StrEnum):
+    CONFIGURATION_ERROR = "MARKET_DATA_CONFIGURATION_ERROR"
     UPSTREAM_TEMPORARY = "MARKET_DATA_UPSTREAM_TEMPORARY"
     AUTHENTICATION_FAILED = "MARKET_DATA_AUTHENTICATION_FAILED"
     PERMISSION_DENIED = "MARKET_DATA_PERMISSION_DENIED"
@@ -44,6 +46,10 @@ class PublicErrorCode(StrEnum):
 
 
 _PUBLIC = {
+    ErrorKind.CONFIGURATION: (
+        PublicErrorCode.CONFIGURATION_ERROR,
+        "The market-data service is not fully configured.",
+    ),
     ErrorKind.TRANSIENT: (
         PublicErrorCode.UPSTREAM_TEMPORARY,
         "PandaData is temporarily unavailable.",
@@ -98,9 +104,7 @@ class MarketDataError(RuntimeError):
         self.trace_id = trace_id or uuid4().hex
         self.internal_message = redact_text(internal_message, secrets=secrets)
         self.public_code, self.public_message = _PUBLIC[kind]
-        super().__init__(
-            f"{self.public_code.value} trace_id={self.trace_id}"
-        )
+        super().__init__(f"{self.public_code.value} trace_id={self.trace_id}")
 
     @property
     def retryable(self) -> bool:
@@ -116,7 +120,7 @@ class MarketDataError(RuntimeError):
 
 class MarketDataConfigurationError(MarketDataError):
     def __init__(self, message: str) -> None:
-        super().__init__(ErrorKind.AUTHENTICATION, message)
+        super().__init__(ErrorKind.CONFIGURATION, message)
 
 
 class MarketDataResponseError(MarketDataError):
@@ -180,7 +184,10 @@ def classify_upstream_error(
         kind = ErrorKind.TRANSIENT
     elif "authentication" in lowered or "unauthor" in lowered:
         kind = ErrorKind.AUTHENTICATION
-    elif any(isinstance(item, PermissionError) for item in chain) or "permission" in lowered:
+    elif (
+        any(isinstance(item, PermissionError) for item in chain)
+        or "permission" in lowered
+    ):
         kind = ErrorKind.PERMISSION
     elif any(isinstance(item, (TypeError, ValueError)) for item in chain):
         kind = ErrorKind.PARAMETER

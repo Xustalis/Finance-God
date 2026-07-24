@@ -39,6 +39,9 @@ verifolio-agent = "research_runtime.cli:main"
 verifolio-agent-catalog = "research_runtime.catalog:main"
 verifolio-agent-mcp = "research_runtime.mcp_server:main"
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.setuptools.package-data]
 research_runtime = ["py.typed"]
 

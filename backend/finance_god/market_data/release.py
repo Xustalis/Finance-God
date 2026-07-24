@@ -12,12 +12,17 @@ from .contracts import (
     DataCategory,
     DataEnvelope,
     DataFrequency,
+    FreshnessStatus,
     InstrumentId,
     MarketType,
     NormalizedCalendarDay,
     ReleaseState,
 )
 from .errors import MarketDataResponseError
+from .instruments import (
+    DEFAULT_INSTRUMENT_MASTER_IDENTITY,
+    DEFAULT_INSTRUMENT_MASTER_VERSION,
+)
 
 
 _MARKET_ZONES = {
@@ -121,8 +126,16 @@ class CalendarDataPort(Protocol):
 class PandaCalendarPublishedState:
     """Calendar-backed release policy for normalized PandaData server composition."""
 
-    def __init__(self, calendar: CalendarDataPort) -> None:
+    def __init__(
+        self,
+        calendar: CalendarDataPort,
+        *,
+        instrument_master_identity: str = DEFAULT_INSTRUMENT_MASTER_IDENTITY,
+        instrument_master_version: str = DEFAULT_INSTRUMENT_MASTER_VERSION,
+    ) -> None:
         self._calendar = calendar
+        self._instrument_master_identity = instrument_master_identity
+        self._instrument_master_version = instrument_master_version
 
     def evaluate(
         self,
@@ -133,20 +146,35 @@ class PandaCalendarPublishedState:
         trading_date: str,
         observed_at: datetime,
     ) -> PublishedStateDecision:
-        is_open = self._is_open(instrument.market, trading_date)
+        calendar_day = self._calendar_day(instrument.market, trading_date)
         evidence_ref = (
             f"PandaData:get_trade_cal:{instrument.market.value}:{trading_date}"
         )
-        if not is_open:
+        if calendar_day.freshness.status is not FreshnessStatus.CURRENT:
+            return PublishedStateDecision(
+                state=ReleaseState.UNKNOWN,
+                trading_date=trading_date,
+                evidence_ref=evidence_ref,
+                reason=(
+                    "authoritative trading calendar freshness is "
+                    f"{calendar_day.freshness.status.value}"
+                ),
+            )
+        if calendar_day.freshness.release_state is not ReleaseState.RELEASED:
+            return PublishedStateDecision(
+                state=ReleaseState.UNKNOWN,
+                trading_date=trading_date,
+                evidence_ref=evidence_ref,
+                reason="authoritative trading calendar release state is not released",
+            )
+        if not calendar_day.is_open:
             return PublishedStateDecision(
                 state=ReleaseState.CLOSED_PENDING,
                 trading_date=trading_date,
                 evidence_ref=evidence_ref,
                 reason="authoritative trading calendar marks the date closed",
             )
-        local_now = observed_at.astimezone(
-            _MARKET_ZONES[instrument.market.value]
-        )
+        local_now = observed_at.astimezone(_MARKET_ZONES[instrument.market.value])
         local_date = local_now.strftime("%Y%m%d")
         if trading_date < local_date:
             state = ReleaseState.RELEASED
@@ -169,25 +197,75 @@ class PandaCalendarPublishedState:
         )
 
     def probe(self, observed_at: datetime) -> None:
-        trading_date = observed_at.astimezone(
-            _MARKET_ZONES["CN"]
-        ).strftime("%Y%m%d")
-        self._is_open(MarketType.CN, trading_date)
+        trading_date = observed_at.astimezone(_MARKET_ZONES["CN"]).strftime("%Y%m%d")
+        calendar_day = self._calendar_day(MarketType.CN, trading_date)
+        if (
+            calendar_day.freshness.status is not FreshnessStatus.CURRENT
+            or calendar_day.freshness.release_state is not ReleaseState.RELEASED
+        ):
+            raise MarketDataResponseError(
+                "authoritative trading calendar is not currently released",
+                endpoint="get_trade_cal",
+            )
 
-    def _is_open(self, market: MarketType, trading_date: str) -> bool:
+    def _calendar_day(
+        self, market: MarketType, trading_date: str
+    ) -> NormalizedCalendarDay:
         envelope = self._calendar.fetch_calendar(
             market=market,
             start_date=trading_date,
             end_date=trading_date,
         )
-        items = envelope.items
-        if len(items) != 1:
+        if envelope.diagnostics:
+            raise MarketDataResponseError(
+                "trading calendar returned quality diagnostics",
+                endpoint="get_trade_cal",
+            )
+        if len(envelope.items) != 1:
             raise MarketDataResponseError(
                 "trading calendar did not return exactly one normalized day",
                 endpoint="get_trade_cal",
             )
-        item = next(iter(items))
-        return item.is_open
+        item = envelope.items[0]
+        if not isinstance(item, NormalizedCalendarDay):
+            raise MarketDataResponseError(
+                "trading calendar returned a non-canonical normalized item",
+                endpoint="get_trade_cal",
+            )
+        source = item.source
+        if item.market is not market or item.trade_date != trading_date:
+            raise MarketDataResponseError(
+                "trading calendar identity does not match the requested market/date",
+                endpoint="get_trade_cal",
+            )
+        if (
+            source.provider != "PandaData"
+            or source.endpoint != "get_trade_cal"
+            or source.frequency is not DataFrequency.DAILY
+            or source.trading_date != trading_date
+        ):
+            raise MarketDataResponseError(
+                "trading calendar source evidence does not match the request",
+                endpoint="get_trade_cal",
+            )
+        if (
+            source.instrument_master_identity != self._instrument_master_identity
+            or source.instrument_master_version != self._instrument_master_version
+        ):
+            raise MarketDataResponseError(
+                "trading calendar instrument-master evidence is not authoritative",
+                endpoint="get_trade_cal",
+            )
+        if (
+            item.freshness.data_time != source.data_time
+            or item.freshness.trading_date != trading_date
+            or item.freshness.provider_published_at != source.provider_published_at
+        ):
+            raise MarketDataResponseError(
+                "trading calendar freshness evidence conflicts with its source",
+                endpoint="get_trade_cal",
+            )
+        return item
 
 
 def _today_release(
@@ -196,10 +274,7 @@ def _today_release(
     frequency: DataFrequency,
     local_time: time,
 ) -> tuple[ReleaseState, str]:
-    if (
-        category is DataCategory.SNAPSHOT
-        or frequency is DataFrequency.MINUTE_1
-    ):
+    if category is DataCategory.SNAPSHOT or frequency is DataFrequency.MINUTE_1:
         open_time = time(9, 30)
         if local_time >= open_time:
             return ReleaseState.RELEASED, "intraday publication window has opened"

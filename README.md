@@ -145,3 +145,26 @@ FINANCE_GOD_POSTGRES_TEST_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:
 See [backend/docs/workbench-integration.md](backend/docs/workbench-integration.md)
 for API fields, enums, error codes, idempotency behavior, and the workbench
 `postMessage` contract.
+
+## Trading simulation API
+
+The FastAPI application is the single backend entry point. It keeps the
+onboarding API under `/api/v1/*` and mounts the trading simulation API under
+`/api/finance/*`, including `/live`, `/market/*`, `/workspace/*`, and
+`/simulation/*`. The market endpoints use PandaData; account and execution
+facts are explicitly simulation-only.
+
+Install both dependency sets before starting the backend because the trading
+runtime uses the bundled research framework:
+
+```bash
+cd backend
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+`FINANCE_GOD_DATABASE_URL` and `FINANCE_GOD_WORKSPACE_OWNER_ID` enable the
+persisted workspace and simulation APIs. PandaData credentials enable live
+market requests. Missing configuration produces explicit readiness or service
+errors; it never substitutes fabricated market data.

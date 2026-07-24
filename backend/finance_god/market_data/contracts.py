@@ -97,9 +97,7 @@ class InstrumentId(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     symbol: str = Field(min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$")
-    provider_symbol: str = Field(
-        min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$"
-    )
+    provider_symbol: str = Field(min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$")
     market: MarketType
     asset_class: AssetClass
     currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
@@ -130,6 +128,8 @@ class SourceStamp(BaseModel):
 
     provider: str = Field(default="PandaData", pattern=r"^PandaData$")
     endpoint: str = Field(min_length=5, max_length=96, pattern=r"^get_[a-z0-9_]+$")
+    instrument_master_identity: str = Field(min_length=1, max_length=96)
+    instrument_master_version: str = Field(min_length=64, max_length=64)
     data_time: datetime
     trading_date: str = Field(pattern=r"^\d{8}$")
     provider_published_at: datetime | None = None
@@ -150,12 +150,9 @@ class SourceStamp(BaseModel):
             raise ValueError("provider_published_at must be timezone-aware")
         if self.data_time > self.ingested_at:
             raise ValueError("data_time cannot be later than ingestion")
-        if (
-            self.provider_published_at is not None
-            and (
-                self.provider_published_at < self.data_time
-                or self.provider_published_at > self.ingested_at
-            )
+        if self.provider_published_at is not None and (
+            self.provider_published_at < self.data_time
+            or self.provider_published_at > self.ingested_at
         ):
             raise ValueError(
                 "provider publication must be between data and ingestion time"
@@ -182,21 +179,26 @@ class Freshness(BaseModel):
     def require_timezone_aware_times(self) -> Freshness:
         if self.data_time.tzinfo is None or self.evaluated_at.tzinfo is None:
             raise ValueError("freshness timestamps must be timezone-aware")
-        if self.provider_published_at is not None and self.provider_published_at.tzinfo is None:
+        if (
+            self.provider_published_at is not None
+            and self.provider_published_at.tzinfo is None
+        ):
             raise ValueError("provider publication time must be timezone-aware")
         expected_age = max(
             0,
             int(
                 (
-                    self.evaluated_at.astimezone(self.data_time.tzinfo)
-                    - self.data_time
+                    self.evaluated_at.astimezone(self.data_time.tzinfo) - self.data_time
                 ).total_seconds()
             ),
         )
         if self.age_seconds != expected_age:
             raise ValueError("freshness age_seconds is inconsistent with timestamps")
         if self.release_state is ReleaseState.RELEASED:
-            if self.provider_published_at is None and self.status is not FreshnessStatus.UNKNOWN:
+            if (
+                self.provider_published_at is None
+                and self.status is not FreshnessStatus.UNKNOWN
+            ):
                 raise ValueError(
                     "released data without provider publication must be unknown"
                 )
@@ -395,9 +397,7 @@ class DataEnvelope(Generic[T]):
             )
 
 
-def _validate_source_freshness(
-    source: SourceStamp, freshness: Freshness
-) -> None:
+def _validate_source_freshness(source: SourceStamp, freshness: Freshness) -> None:
     if source.data_time != freshness.data_time:
         raise ValueError("source and freshness data_time must match")
     if source.trading_date != freshness.trading_date:

@@ -8,11 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.core.exceptions import register_exception_handlers
+from server import finance_app
+from server import lifespan as finance_lifespan
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    async with finance_lifespan(finance_app):
+        yield
 
 
 app = FastAPI(
@@ -48,6 +51,7 @@ async def add_request_id(request: Request, call_next):
 from app.api.v1.router import api_router  # noqa: E402
 
 app.include_router(api_router, prefix="/api/v1")
+app.mount("/api/finance", finance_app)
 
 
 @app.get("/")

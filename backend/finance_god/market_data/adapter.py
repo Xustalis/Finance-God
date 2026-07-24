@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from importlib import import_module, metadata
 from itertools import pairwise
-from threading import Lock
+from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -66,6 +66,7 @@ _MAX_LIMIT = 1_000
 _MAX_DATE_SPAN_DAYS = 3_660
 _MAX_FACT_FIELDS = 40
 _DEFAULT_OPERATION_BUDGET = OperationBudget()
+
 
 @dataclass(frozen=True)
 class PandaCredentials:
@@ -160,11 +161,16 @@ class PandaDataAdapter:
         self._instrument_master = instrument_master
         self._operation_clock = operation_clock
         self._operation_budget = operation_budget
-        self._normalizer = PandaDataNormalizer(freshness_policy)
+        self._normalizer = PandaDataNormalizer(
+            freshness_policy,
+            instrument_master_identity=instrument_master.identity,
+            instrument_master_version=instrument_master.version,
+        )
         self._now = now or (lambda: datetime.now(_UTC))
         self._auth_lock = Lock()
-        self._transport_configured = False
+        self._auth_transport_configured = False
         self._authenticated = False
+        self._deadline_failed = False
 
     @classmethod
     def from_environment(cls) -> PandaDataAdapter:
@@ -259,13 +265,17 @@ class PandaDataAdapter:
                 "fund/ETF/LOF capability is disabled; no stock or deprecated-fund fallback",
                 "get_fund_daily",
             )
-        market_today = self._utc_now().astimezone(
-            {
-                MarketType.CN: ZoneInfo("Asia/Shanghai"),
-                MarketType.HK: ZoneInfo("Asia/Hong_Kong"),
-                MarketType.US: ZoneInfo("America/New_York"),
-            }[instrument.market]
-        ).strftime("%Y%m%d")
+        market_today = (
+            self._utc_now()
+            .astimezone(
+                {
+                    MarketType.CN: ZoneInfo("Asia/Shanghai"),
+                    MarketType.HK: ZoneInfo("Asia/Hong_Kong"),
+                    MarketType.US: ZoneInfo("America/New_York"),
+                }[instrument.market]
+            )
+            .strftime("%Y%m%d")
+        )
         if end > market_today:
             raise ValueError("future market data cannot be requested")
         endpoint, scopes, params = self._bar_request(
@@ -393,9 +403,16 @@ class PandaDataAdapter:
         ingested_at = self._utc_now()
         items: list[NormalizedCalendarDay] = []
         for record in records:
-            trade_date = record.get("trade_date", record.get("date"))
+            trade_date = record.get(
+                "trade_date",
+                record.get("date", record.get("nature_date")),
+            )
             is_open = record.get(
-                "is_trading_day", record.get("is_open", record.get("trade_status"))
+                "is_trading_day",
+                record.get(
+                    "is_open",
+                    record.get("trade_status", record.get("is_trade")),
+                ),
             )
             try:
                 normalized_date = _validate_date(str(trade_date).replace("-", ""))
@@ -442,9 +459,7 @@ class PandaDataAdapter:
             )
         return DataEnvelope(tuple(items), (), EmptyMeaning.NOT_EMPTY)
 
-    def fetch_factors(
-        self, query: FactorQuery
-    ) -> DataEnvelope[NormalizedFact]:
+    def fetch_factors(self, query: FactorQuery) -> DataEnvelope[NormalizedFact]:
         self._validate_query_master(
             query.instrument_master_identity,
             query.instrument_master_version,
@@ -480,9 +495,7 @@ class PandaDataAdapter:
         )
         records = records_from_frame(frame, endpoint=endpoint)
         if not records:
-            return self._unexpected_missing(
-                f"{instrument.symbol}:factor", endpoint
-            )
+            return self._unexpected_missing(f"{instrument.symbol}:factor", endpoint)
         scope = f"{instrument.symbol}:factor"
         ingested_at = self._utc_now()
         items: list[NormalizedFact] = []
@@ -493,9 +506,7 @@ class PandaDataAdapter:
                 )
             raw_time = record.get("date")
             if raw_time is None:
-                return self._schema_drift(
-                    scope, endpoint, "factor row is missing date"
-                )
+                return self._schema_drift(scope, endpoint, "factor row is missing date")
             try:
                 data_time = _parse_fact_time(raw_time)
             except ValueError:
@@ -580,10 +591,12 @@ class PandaDataAdapter:
         """Publish the audited catalog, never raw SDK introspection."""
         return tuple(record.model_dump(mode="json") for record in self._catalog.all())
 
-    def _request(
-        self, endpoint: str, scopes: Iterable[str], **params: object
-    ) -> Any:
-        started_at = self._operation_clock()
+    def _request(self, endpoint: str, scopes: Iterable[str], **params: object) -> Any:
+        if self._deadline_failed:
+            self._raise_deadline(endpoint)
+        deadline = (
+            self._operation_clock() + self._operation_budget.operation_deadline_seconds
+        )
         try:
             shape = request_shape(
                 endpoint,
@@ -597,19 +610,27 @@ class PandaDataAdapter:
             raise MarketDataError(
                 ErrorKind.CAPABILITY, str(error), endpoint=endpoint
             ) from error
-        self._authenticate(started_at)
+        self._authenticate(deadline)
+        self._transport_policy.configure_client(
+            self._sdk,
+            self._operation_budget,
+            timeout_seconds=self._remaining_timeout(deadline, endpoint),
+        )
         method = getattr(self._sdk, endpoint)
         try:
-            result = method(**params)
+            return self._run_before_deadline(
+                lambda: method(**params),
+                deadline=deadline,
+                endpoint=endpoint,
+            )
         except Exception as error:
-            self._raise_if_deadline(started_at, endpoint)
+            if isinstance(error, MarketDataError):
+                raise
             raise classify_upstream_error(
                 error, endpoint=endpoint, secrets=self._credentials.secrets
             ) from error
-        self._raise_if_deadline(started_at, endpoint)
-        return result
 
-    def _authenticate(self, started_at: float) -> None:
+    def _authenticate(self, deadline: float) -> None:
         if self._authenticated:
             return
         with self._auth_lock:
@@ -622,19 +643,21 @@ class PandaDataAdapter:
             if self._credentials.base_url:
                 arguments["base_url"] = self._credentials.base_url
             try:
-                if not self._transport_configured:
-                    self._transport_policy.configure(
+                if not self._auth_transport_configured:
+                    self._transport_policy.configure_auth(
                         self._sdk,
                         self._operation_budget,
+                        timeout_seconds=self._remaining_timeout(deadline, "init_token"),
                     )
-                    self._transport_configured = True
-                self._raise_if_deadline(started_at, "init_token")
-                self._sdk.init_token(**arguments)
-                self._raise_if_deadline(started_at, "init_token")
+                    self._auth_transport_configured = True
+                self._run_before_deadline(
+                    lambda: self._sdk.init_token(**arguments),
+                    deadline=deadline,
+                    endpoint="init_token",
+                )
             except MarketDataError:
                 raise
             except Exception as error:
-                self._raise_if_deadline(started_at, "init_token")
                 raise classify_upstream_error(
                     error,
                     endpoint="init_token",
@@ -642,14 +665,50 @@ class PandaDataAdapter:
                 ) from error
             self._authenticated = True
 
-    def _raise_if_deadline(
+    def _remaining_timeout(
         self,
-        started_at: float,
+        deadline: float,
         endpoint: str,
-    ) -> None:
-        elapsed = self._operation_clock() - started_at
-        if elapsed <= self._operation_budget.operation_deadline_seconds:
-            return
+    ) -> float:
+        remaining = deadline - self._operation_clock()
+        if remaining <= 0:
+            self._raise_deadline(endpoint)
+        return min(remaining, self._operation_budget.request_timeout_seconds)
+
+    def _run_before_deadline(
+        self,
+        operation: Callable[[], Any],
+        *,
+        deadline: float,
+        endpoint: str,
+    ) -> Any:
+        timeout = self._remaining_timeout(deadline, endpoint)
+        completed = Event()
+        values: list[Any] = []
+        errors: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                values.append(operation())
+            except BaseException as error:  # noqa: BLE001 - re-raised on caller
+                errors.append(error)
+            finally:
+                completed.set()
+
+        Thread(
+            target=invoke,
+            name=f"pandadata-{endpoint}",
+            daemon=True,
+        ).start()
+        if not completed.wait(timeout):
+            self._raise_deadline(endpoint)
+        self._remaining_timeout(deadline, endpoint)
+        if errors:
+            raise errors[0]
+        return values[0]
+
+    def _raise_deadline(self, endpoint: str) -> None:
+        self._deadline_failed = True
         raise MarketDataError(
             ErrorKind.DEADLINE,
             (
@@ -669,7 +728,10 @@ class PandaDataAdapter:
         realtime_minute: bool,
     ) -> tuple[str, frozenset[str], dict[str, object]]:
         if instrument.asset_class is AssetClass.INDEX:
-            if instrument.market is not MarketType.CN or frequency is not DataFrequency.DAILY:
+            if (
+                instrument.market is not MarketType.CN
+                or frequency is not DataFrequency.DAILY
+            ):
                 raise UnsupportedDataCategoryError(
                     "only CN index daily bars passed capability verification"
                 )
@@ -736,6 +798,8 @@ class PandaDataAdapter:
         trading_date = data_time.strftime("%Y%m%d")
         source = SourceStamp(
             endpoint=endpoint,
+            instrument_master_identity=self._instrument_master.identity,
+            instrument_master_version=self._instrument_master.version,
             data_time=data_time,
             trading_date=trading_date,
             provider_published_at=None,
@@ -782,14 +846,10 @@ class PandaDataAdapter:
             identity != self._instrument_master.identity
             or version != self._instrument_master.version
         ):
-            raise ValueError(
-                "typed query instrument master identity/version mismatch"
-            )
+            raise ValueError("typed query instrument master identity/version mismatch")
 
     @staticmethod
-    def _disabled(
-        scope: str, message: str, endpoint: str | None
-    ) -> DataEnvelope[Any]:
+    def _disabled(scope: str, message: str, endpoint: str | None) -> DataEnvelope[Any]:
         issue = diagnostic(
             code=DiagnosticCode.CAPABILITY_DISABLED,
             scope=scope,
@@ -811,9 +871,7 @@ class PandaDataAdapter:
         return DataEnvelope((), (issue,), EmptyMeaning.UNEXPECTED_MISSING)
 
     @staticmethod
-    def _schema_drift(
-        scope: str, endpoint: str, message: str
-    ) -> DataEnvelope[Any]:
+    def _schema_drift(scope: str, endpoint: str, message: str) -> DataEnvelope[Any]:
         issue = diagnostic(
             code=DiagnosticCode.SCHEMA_DRIFT,
             scope=scope,
@@ -859,9 +917,7 @@ def _master_endpoint(
     if instrument.asset_class is AssetClass.INDEX:
         return "get_index_detail", frozenset({"CN_INDEX"})
     if instrument.asset_class is not AssetClass.EQUITY:
-        raise UnsupportedDataCategoryError(
-            "asset class master endpoint is not enabled"
-        )
+        raise UnsupportedDataCategoryError("asset class master endpoint is not enabled")
     if instrument.market is MarketType.CN:
         return "get_stock_detail", frozenset({"A_SHARE_STOCK_ONLY"})
     if instrument.market is MarketType.HK:
@@ -924,9 +980,7 @@ def _bounded_fact_params(
         if isinstance(bounded_value, str):
             bounded[key] = _validate_date(bounded_value)
     if "start_date" in bounded and "end_date" in bounded:
-        _bounded_date_range(
-            str(bounded["start_date"]), str(bounded["end_date"])
-        )
+        _bounded_date_range(str(bounded["start_date"]), str(bounded["end_date"]))
     return bounded
 
 

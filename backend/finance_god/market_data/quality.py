@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -13,10 +14,23 @@ from typing import Any, Literal, Protocol, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts import (
+    DataCategory,
     DataDiagnostic,
     DataEnvelope,
+    DataFrequency,
     DiagnosticCode,
     FreshnessStatus,
+    NormalizedBar,
+    NormalizedCalendarDay,
+    NormalizedFact,
+    NormalizedIndexWeight,
+    NormalizedMasterRecord,
+    NormalizedSnapshot,
+    SourceStamp,
+)
+from .instruments import (
+    DEFAULT_INSTRUMENT_MASTER_IDENTITY,
+    DEFAULT_INSTRUMENT_MASTER_VERSION,
 )
 from .normalization import diagnostic
 
@@ -54,6 +68,7 @@ class QualityDecision(BaseModel):
     diagnostics: tuple[DataDiagnostic, ...]
     fingerprint: str = Field(min_length=64, max_length=64)
     active_freeze_version: int | None = Field(default=None, ge=1)
+    defect_detected_at: datetime | None = None
 
     @model_validator(mode="after")
     def enforce_eligibility_invariant(self) -> QualityDecision:
@@ -61,12 +76,36 @@ class QualityDecision(BaseModel):
             raise ValueError("frozen quality scope cannot be trade eligible")
         if self.trade_eligible and not self.capability_trade_eligible:
             raise ValueError("capability-ineligible data cannot become trade eligible")
+        if (
+            self.defect_detected_at is not None
+            and self.defect_detected_at.tzinfo is None
+        ):
+            raise ValueError("defect_detected_at must be timezone-aware")
         return self
 
 
 class ScopeFreezeStatus(StrEnum):
     ACTIVE = "active"
     RESOLVED = "resolved"
+
+
+class QualityContext(BaseModel):
+    """Immutable request identity bound to a quality freeze."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    affected_scope: str = Field(min_length=1, max_length=160)
+    category: DataCategory
+    frequency: DataFrequency
+    instrument_master_identity: str = Field(min_length=1, max_length=96)
+    instrument_master_version: str = Field(min_length=64, max_length=64)
+    source_provider: Literal["PandaData"] = "PandaData"
+    source_endpoint: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=96,
+        pattern=r"^get_[a-z0-9_]+$",
+    )
 
 
 class ScopeFreezeRecord(BaseModel):
@@ -78,17 +117,25 @@ class ScopeFreezeRecord(BaseModel):
     freeze_version: int = Field(ge=1)
     status: ScopeFreezeStatus
     policy_version: str = QUALITY_POLICY_VERSION
+    context: QualityContext
+    first_detected_at: datetime
     resolution_reason: str | None = Field(default=None, min_length=1, max_length=240)
-    resolved_data_version: str | None = Field(default=None, min_length=64, max_length=64)
+    resolved_data_version: str | None = Field(
+        default=None, min_length=64, max_length=64
+    )
 
     @model_validator(mode="after")
     def enforce_resolution_state(self) -> ScopeFreezeRecord:
+        if self.first_detected_at.tzinfo is None:
+            raise ValueError("first_detected_at must be timezone-aware")
         resolved = self.status is ScopeFreezeStatus.RESOLVED
         if resolved != (
             self.resolution_reason is not None
             and self.resolved_data_version is not None
         ):
-            raise ValueError("resolved freeze requires reason and resolved data version")
+            raise ValueError(
+                "resolved freeze requires reason and resolved data version"
+            )
         return self
 
 
@@ -96,9 +143,10 @@ class ScopeFreezePort(Protocol):
     def freeze(
         self,
         *,
-        affected_scope: str,
+        context: QualityContext,
         quality_fingerprint: str,
         data_version: str,
+        observed_at: datetime,
     ) -> ScopeFreezeRecord: ...
 
     def active(self, affected_scope: str) -> ScopeFreezeRecord | None: ...
@@ -121,11 +169,13 @@ class InMemoryScopeFreezeRepository:
     def freeze(
         self,
         *,
-        affected_scope: str,
+        context: QualityContext,
         quality_fingerprint: str,
         data_version: str,
+        observed_at: datetime,
     ) -> ScopeFreezeRecord:
         with self._lock:
+            affected_scope = context.affected_scope
             records = self._records.setdefault(affected_scope, [])
             if (
                 records
@@ -143,6 +193,8 @@ class InMemoryScopeFreezeRepository:
                 data_version=data_version,
                 freeze_version=version,
                 status=ScopeFreezeStatus.ACTIVE,
+                context=context,
+                first_detected_at=observed_at,
             )
             records.append(record)
             return record
@@ -176,9 +228,7 @@ class InMemoryScopeFreezeRepository:
             if active.freeze_version != expected_freeze_version:
                 raise ValueError("quality freeze version mismatch")
             if active.data_version == resolved_data_version:
-                raise ValueError(
-                    "quality freeze requires a new validated data version"
-                )
+                raise ValueError("quality freeze requires a new validated data version")
             resolved = active.model_copy(
                 update={
                     "status": ScopeFreezeStatus.RESOLVED,
@@ -204,18 +254,25 @@ class QualityGate:
         self,
         envelope: DataEnvelope[T],
         *,
-        affected_scope: str,
+        context: QualityContext,
+        observed_at: datetime,
     ) -> QualityDecision:
+        if observed_at.tzinfo is None:
+            raise ValueError("quality evaluation time must be timezone-aware")
+        _validate_evaluation_envelope(envelope, context)
+        affected_scope = context.affected_scope
         diagnostics = list(envelope.diagnostics)
-        diagnostics.extend(
-            _envelope_contract_diagnostics(envelope, affected_scope)
-        )
+        diagnostics.extend(_envelope_contract_diagnostics(envelope, affected_scope))
         diagnostics.extend(_freshness_diagnostics(envelope.items, affected_scope))
         current_blocking = tuple(
             item for item in diagnostics if item.code in _BLOCKING_CODES
         )
         active = self._scope_freezer.active(affected_scope)
         if active is not None:
+            if active.context != context:
+                raise ValueError(
+                    "quality request context does not match the active freeze"
+                )
             diagnostics.append(
                 diagnostic(
                     code=DiagnosticCode.UNRESOLVED_QUALITY_FREEZE,
@@ -228,38 +285,37 @@ class QualityGate:
                     details={"freeze_version": str(active.freeze_version)},
                 )
             )
-        blocking = tuple(
-            item for item in diagnostics if item.code in _BLOCKING_CODES
-        )
+        blocking = tuple(item for item in diagnostics if item.code in _BLOCKING_CODES)
+        defect_fingerprint = _diagnostic_fingerprint(_defect_diagnostics(diagnostics))
+        data_version = _data_version(envelope)
+        if current_blocking:
+            active = self._scope_freezer.freeze(
+                context=context,
+                quality_fingerprint=defect_fingerprint,
+                data_version=data_version,
+                observed_at=observed_at,
+            )
         material = "|".join(
             (
                 QUALITY_POLICY_VERSION,
                 affected_scope,
-                *(sorted(item.fingerprint for item in blocking)),
+                active.quality_fingerprint
+                if active is not None
+                else defect_fingerprint,
             )
         )
-        data_version = _data_version(envelope)
-        if current_blocking:
-            active = self._scope_freezer.freeze(
-                affected_scope=affected_scope,
-                quality_fingerprint=sha256(
-                    "|".join(
-                        sorted(item.fingerprint for item in current_blocking)
-                    ).encode()
-                ).hexdigest(),
-                data_version=data_version,
-            )
         decision = QualityDecision(
             affected_scope=affected_scope,
             frozen=bool(blocking),
-            trade_eligible=(
-                not bool(blocking) and self._capability_trade_eligible
-            ),
+            trade_eligible=(not bool(blocking) and self._capability_trade_eligible),
             capability_trade_eligible=self._capability_trade_eligible,
             diagnostics=tuple(diagnostics),
             fingerprint=sha256(material.encode()).hexdigest(),
             active_freeze_version=(
                 active.freeze_version if active is not None else None
+            ),
+            defect_detected_at=(
+                active.first_detected_at if active is not None else None
             ),
         )
         return decision
@@ -272,14 +328,18 @@ class QualityGate:
         expected_freeze_version: int,
         reason: str,
     ) -> ScopeFreezeRecord:
+        active = self._scope_freezer.active(affected_scope)
+        if active is None:
+            raise ValueError("scope has no active quality freeze")
+        if active.context.affected_scope != affected_scope:
+            raise ValueError("quality freeze scope binding mismatch")
+        _validate_clean_envelope(envelope, active.context)
         diagnostics = [
             *envelope.diagnostics,
             *_envelope_contract_diagnostics(envelope, affected_scope),
             *_freshness_diagnostics(envelope.items, affected_scope),
         ]
-        blocking = tuple(
-            item for item in diagnostics if item.code in _BLOCKING_CODES
-        )
+        blocking = tuple(item for item in diagnostics if item.code in _BLOCKING_CODES)
         if blocking:
             raise ValueError(
                 "quality freeze resolution requires a newly evaluated clean envelope"
@@ -300,8 +360,15 @@ class DQTriggerRequest(BaseModel):
     affected_scope: str = Field(min_length=1, max_length=160)
     policy_version: str = QUALITY_POLICY_VERSION
     diagnostic_fingerprints: tuple[str, ...]
+    requested_at: datetime
     trade_eligible: Literal[False] = False
     recursive_trigger_allowed: Literal[False] = False
+
+    @model_validator(mode="after")
+    def validate_requested_at(self) -> DQTriggerRequest:
+        if self.requested_at.tzinfo is None:
+            raise ValueError("requested_at must be timezone-aware")
+        return self
 
 
 class DQTriggerRepository(Protocol):
@@ -311,27 +378,14 @@ class DQTriggerRepository(Protocol):
 
 
 class DQWorkflowPort(Protocol):
-    def start(self, request: DQTriggerRequest) -> str: ...
+    async def start(self, request: DQTriggerRequest) -> DQWorkflowReceipt: ...
 
 
-class AuditedDQWorkflowPort:
-    """Thread-safe in-process workflow request audit for server composition."""
+class DQWorkflowReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    def __init__(self) -> None:
-        self._requests: dict[str, DQTriggerRequest] = {}
-        self._lock = Lock()
-
-    def start(self, request: DQTriggerRequest) -> str:
-        with self._lock:
-            existing = self._requests.get(request.idempotency_key)
-            if existing is not None and existing != request:
-                raise ValueError("DQ workflow idempotency payload conflict")
-            self._requests[request.idempotency_key] = request
-        return f"dq-{request.idempotency_key[:24]}"
-
-    def list_requests(self) -> tuple[DQTriggerRequest, ...]:
-        with self._lock:
-            return tuple(self._requests[key] for key in sorted(self._requests))
+    workflow_run_id: str = Field(min_length=1, max_length=160)
+    idempotency_key: str = Field(min_length=64, max_length=64)
 
 
 class InMemoryDQTriggerRepository:
@@ -370,46 +424,85 @@ class DQTrigger:
         self._repository = repository
         self._workflow = workflow
 
-    def trigger(
+    async def trigger(
         self,
         decision: QualityDecision,
         *,
         source_workflow: str | None,
     ) -> DQTriggerResult:
         if not decision.frozen:
-            return DQTriggerResult(False, None, None, "quality gate did not freeze scope")
+            return DQTriggerResult(
+                False, None, None, "quality gate did not freeze scope"
+            )
         if source_workflow == "data_quality_review":
             return DQTriggerResult(
                 False, None, None, "recursive data-quality trigger is prohibited"
             )
-        key = _trigger_key(decision)
+        if not _defect_diagnostics(decision.diagnostics):
+            return DQTriggerResult(
+                False,
+                None,
+                None,
+                "no new blocking defect requires a workflow trigger",
+            )
+        request = build_dq_trigger_request(
+            decision,
+            source_workflow=source_workflow,
+        )
+        if request is None:
+            raise AssertionError("blocking defect must produce a DQ request")
+        key = request.idempotency_key
         if not self._repository.claim(key):
             return DQTriggerResult(False, key, None, "duplicate trigger suppressed")
-        request = DQTriggerRequest(
-            workflow_key="data_quality_review",
-            idempotency_key=key,
-            affected_scope=decision.affected_scope,
-            diagnostic_fingerprints=tuple(
-                sorted(item.fingerprint for item in decision.diagnostics)
-            ),
-        )
         try:
-            run_id = self._workflow.start(request)
+            receipt = await self._workflow.start(request)
         except Exception:
             self._repository.release(key)
             raise
-        if not run_id.strip():
+        if receipt.idempotency_key != key:
             self._repository.release(key)
-            raise ValueError("DQ workflow port returned a blank run id")
-        return DQTriggerResult(True, key, run_id, "data-quality workflow started")
+            raise ValueError("DQ workflow receipt idempotency key mismatch")
+        return DQTriggerResult(
+            True,
+            key,
+            receipt.workflow_run_id,
+            "data-quality workflow started",
+        )
+
+
+def build_dq_trigger_request(
+    decision: QualityDecision,
+    *,
+    source_workflow: str | None,
+) -> DQTriggerRequest | None:
+    if not decision.frozen or source_workflow == "data_quality_review":
+        return None
+    defects = _defect_diagnostics(decision.diagnostics)
+    if not defects:
+        return None
+    if decision.defect_detected_at is None:
+        raise ValueError("frozen defect decision lacks its first detection time")
+    key = _trigger_key(decision)
+    return DQTriggerRequest(
+        workflow_key="data_quality_review",
+        idempotency_key=key,
+        affected_scope=decision.affected_scope,
+        diagnostic_fingerprints=tuple(sorted(item.fingerprint for item in defects)),
+        requested_at=decision.defect_detected_at,
+    )
 
 
 def _trigger_key(decision: QualityDecision) -> str:
+    defect_diagnostics = _defect_diagnostics(decision.diagnostics)
     material = "|".join(
         (
             decision.affected_scope,
             decision.policy_version,
-            *(sorted(item.fingerprint for item in decision.diagnostics)),
+            *(
+                sorted(item.fingerprint for item in defect_diagnostics)
+                if defect_diagnostics
+                else (decision.fingerprint,)
+            ),
         )
     )
     return sha256(material.encode()).hexdigest()
@@ -457,9 +550,7 @@ def _envelope_contract_diagnostics(
             for item in envelope.diagnostics
         )
     ):
-        messages.append(
-            "unexpected-missing envelope lacks a matching diagnostic"
-        )
+        messages.append("unexpected-missing envelope lacks a matching diagnostic")
     return tuple(
         diagnostic(
             code=DiagnosticCode.ENVELOPE_CONTRACT,
@@ -472,16 +563,18 @@ def _envelope_contract_diagnostics(
 
 
 def _data_version(envelope: DataEnvelope[Any]) -> str:
-    items = [
-        (
-            item.model_dump(mode="json")
-            if hasattr(item, "model_dump")
-            else repr(item)
-        )
-        for item in envelope.items
-    ]
+    items = [_stable_item_content(item) for item in envelope.items]
     diagnostics = [
-        item.model_dump(mode="json")
+        {
+            "code": item.code.value,
+            "severity": item.severity.value,
+            "scope": item.scope,
+            "empty_meaning": item.empty_meaning.value,
+            "retryable": item.retryable,
+            "endpoint": item.endpoint,
+            "details": item.details,
+            "fingerprint": item.fingerprint,
+        }
         for item in envelope.diagnostics
     ]
     material = {
@@ -496,3 +589,146 @@ def _data_version(envelope: DataEnvelope[Any]) -> str:
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
+
+
+def _defect_diagnostics(
+    diagnostics: Iterable[DataDiagnostic],
+) -> tuple[DataDiagnostic, ...]:
+    return tuple(
+        item
+        for item in diagnostics
+        if item.code in _BLOCKING_CODES
+        and item.code is not DiagnosticCode.UNRESOLVED_QUALITY_FREEZE
+    )
+
+
+def _diagnostic_fingerprint(
+    diagnostics: Iterable[DataDiagnostic],
+) -> str:
+    return sha256(
+        "|".join(sorted(item.fingerprint for item in diagnostics)).encode()
+    ).hexdigest()
+
+
+def _validate_evaluation_envelope(
+    envelope: DataEnvelope[Any],
+    context: QualityContext,
+) -> None:
+    for issue in envelope.diagnostics:
+        if issue.scope != context.affected_scope:
+            raise ValueError("quality diagnostic scope does not match request context")
+        if (
+            context.source_endpoint is not None
+            and issue.endpoint is not None
+            and issue.endpoint != context.source_endpoint
+        ):
+            raise ValueError("quality diagnostic source does not match request context")
+    if envelope.items:
+        _validate_items_against_context(envelope.items, context)
+
+
+def _validate_clean_envelope(
+    envelope: DataEnvelope[Any],
+    context: QualityContext,
+) -> None:
+    if not envelope.items:
+        raise ValueError(
+            "quality freeze resolution clean envelope requires non-empty "
+            "canonical normalized data"
+        )
+    if envelope.diagnostics:
+        raise ValueError(
+            "quality freeze resolution requires a diagnostic-free envelope"
+        )
+    _validate_items_against_context(envelope.items, context)
+
+
+def _validate_items_against_context(
+    items: Iterable[object],
+    context: QualityContext,
+) -> None:
+    for item in items:
+        category, scope, source = _normalized_item_identity(item)
+        if scope != context.affected_scope:
+            raise ValueError("normalized data scope does not match quality freeze")
+        if category is not context.category:
+            raise ValueError("normalized data category does not match quality freeze")
+        if source.frequency is not context.frequency:
+            raise ValueError("normalized data frequency does not match quality freeze")
+        if source.provider != context.source_provider:
+            raise ValueError("normalized data provider does not match quality freeze")
+        if source.endpoint != context.source_endpoint:
+            raise ValueError("normalized data endpoint does not match quality freeze")
+        if (
+            source.instrument_master_identity != context.instrument_master_identity
+            or source.instrument_master_version != context.instrument_master_version
+        ):
+            raise ValueError(
+                "normalized data instrument-master identity does not match quality freeze"
+            )
+
+
+def _normalized_item_identity(
+    item: object,
+) -> tuple[DataCategory, str, SourceStamp]:
+    if isinstance(item, NormalizedSnapshot):
+        return DataCategory.SNAPSHOT, item.instrument.symbol, item.source
+    if isinstance(item, NormalizedBar):
+        return (
+            DataCategory.BAR,
+            f"{item.instrument.symbol}:{item.source.frequency.value}",
+            item.source,
+        )
+    if isinstance(item, NormalizedFact):
+        return item.category, item.scope, item.source
+    if isinstance(item, NormalizedMasterRecord):
+        return DataCategory.MASTER, item.instrument.symbol, item.source
+    if isinstance(item, NormalizedCalendarDay):
+        return (
+            DataCategory.CALENDAR,
+            f"{item.market.value}:{item.trade_date}",
+            item.source,
+        )
+    if isinstance(item, NormalizedIndexWeight):
+        return DataCategory.FACTOR, item.index.symbol, item.source
+    raise ValueError("quality resolution accepts only canonical normalized data")
+
+
+def _stable_item_content(item: object) -> dict[str, Any]:
+    if not isinstance(
+        item,
+        (
+            NormalizedSnapshot,
+            NormalizedBar,
+            NormalizedFact,
+            NormalizedMasterRecord,
+            NormalizedCalendarDay,
+            NormalizedIndexWeight,
+        ),
+    ):
+        raise ValueError("data version accepts only canonical normalized data")
+    payload: dict[str, Any] = item.model_dump(mode="json")
+    source = payload.get("source")
+    if isinstance(source, dict):
+        source.pop("ingested_at", None)
+    payload.pop("freshness", None)
+    return payload
+
+
+def default_quality_context(
+    *,
+    affected_scope: str,
+    category: DataCategory,
+    frequency: DataFrequency,
+    source_endpoint: str | None,
+) -> QualityContext:
+    """Build a context bound to the bundled authoritative master."""
+
+    return QualityContext(
+        affected_scope=affected_scope,
+        category=category,
+        frequency=frequency,
+        instrument_master_identity=DEFAULT_INSTRUMENT_MASTER_IDENTITY,
+        instrument_master_version=DEFAULT_INSTRUMENT_MASTER_VERSION,
+        source_endpoint=source_endpoint,
+    )

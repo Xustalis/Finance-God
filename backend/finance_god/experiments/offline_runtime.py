@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timezone
 
 from research_runtime import AgentRunner
-from research_runtime.data_provider import DataArtifact, DataQuery, PandaDataDataset
+from research_runtime.models import DataArtifact, DataQuery, PandaDataDataset
 
 from finance_god.orchestration.multi_agent import MultiAgentRuntime
 from finance_god.orchestration.orchestrator import Orchestrator

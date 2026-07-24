@@ -4,12 +4,17 @@ import asyncio
 from threading import Event, Lock
 
 from finance_god.market_data import (
+    DataEnvelope,
     ErrorKind,
     MarketDataError,
     RefreshState,
     SnapshotCoordinator,
 )
-from finance_god.market_data.contracts import ReleaseState
+from finance_god.market_data.contracts import (
+    InstrumentId,
+    NormalizedSnapshot,
+    ReleaseState,
+)
 from finance_god.market_data.freshness import FreshnessPolicy
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 from finance_god.market_data.normalization import PandaDataNormalizer
@@ -17,7 +22,7 @@ from finance_god.market_data.normalization import PandaDataNormalizer
 from .conftest import NOW, stock_snapshot
 
 
-def _success(instrument):
+def _success(instrument: InstrumentId) -> DataEnvelope[NormalizedSnapshot]:
     result = PandaDataNormalizer(FreshnessPolicy()).snapshot(
         [stock_snapshot(instrument.provider_symbol)],
         instrument=instrument,
@@ -39,7 +44,9 @@ async def _same_symbol_and_overlapping_batches_use_one_singleflight() -> None:
     entered = Event()
     release = Event()
 
-    def fetcher(instrument):
+    def fetcher(
+        instrument: InstrumentId,
+    ) -> DataEnvelope[NormalizedSnapshot]:
         with lock:
             counts[instrument.symbol] = counts.get(instrument.symbol, 0) + 1
             if sum(counts.values()) >= 2:
@@ -71,7 +78,9 @@ async def _different_symbols_refresh_concurrently_without_global_network_lock() 
     both = Event()
     release = Event()
 
-    def fetcher(instrument):
+    def fetcher(
+        instrument: InstrumentId,
+    ) -> DataEnvelope[NormalizedSnapshot]:
         with lock:
             entered.add(instrument.symbol)
             if len(entered) == 2:
@@ -102,7 +111,9 @@ async def _background_refresh_failure_is_visible_and_old_value_is_stale() -> Non
     def clock() -> float:
         return tick
 
-    def fetcher(instrument):
+    def fetcher(
+        instrument: InstrumentId,
+    ) -> DataEnvelope[NormalizedSnapshot]:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -145,7 +156,8 @@ async def _coordinator_does_not_stack_retries_over_transport() -> None:
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
     transient_attempts = 0
 
-    def transient(_):
+    def transient(instrument: InstrumentId) -> DataEnvelope[NormalizedSnapshot]:
+        del instrument
         nonlocal transient_attempts
         transient_attempts += 1
         raise MarketDataError(
@@ -162,7 +174,8 @@ async def _coordinator_does_not_stack_retries_over_transport() -> None:
 
     permission_attempts = 0
 
-    def permission(_):
+    def permission(instrument: InstrumentId) -> DataEnvelope[NormalizedSnapshot]:
+        del instrument
         nonlocal permission_attempts
         permission_attempts += 1
         raise MarketDataError(
@@ -185,7 +198,8 @@ def test_unexpected_exception_becomes_visible_error_state() -> None:
 async def _unexpected_exception_becomes_visible_error_state() -> None:
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
 
-    def broken(_):
+    def broken(instrument: InstrumentId) -> DataEnvelope[NormalizedSnapshot]:
+        del instrument
         raise RuntimeError("secret implementation detail")
 
     coordinator = SnapshotCoordinator(broken)
@@ -209,12 +223,12 @@ async def _waiter_cancellation_does_not_cancel_shared_refresh() -> None:
     attempts = 0
     instrument = DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
 
-    def fetcher(item):
+    def fetcher(instrument: InstrumentId) -> DataEnvelope[NormalizedSnapshot]:
         nonlocal attempts
         attempts += 1
         entered.set()
         release.wait(timeout=2)
-        return _success(item)
+        return _success(instrument)
 
     coordinator = SnapshotCoordinator(fetcher)
     waiter_a = asyncio.create_task(coordinator.get([instrument]))

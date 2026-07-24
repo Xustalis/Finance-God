@@ -42,8 +42,7 @@ class InstrumentMaster:
         self._by_symbol: Mapping[str, InstrumentId] = MappingProxyType(by_symbol)
         self._identity = identity
         material = [
-            by_symbol[symbol].model_dump(mode="json")
-            for symbol in sorted(by_symbol)
+            by_symbol[symbol].model_dump(mode="json") for symbol in sorted(by_symbol)
         ]
         self._version = sha256(
             json.dumps(

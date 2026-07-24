@@ -83,18 +83,14 @@ class SnapshotCoordinator:
         self._clock = clock
         self._now = now or (lambda: datetime.now(_UTC))
         self._cache: dict[str, CacheEntry[NormalizedSnapshot]] = {}
-        self._tasks: dict[
-            str, asyncio.Task[DataEnvelope[NormalizedSnapshot]]
-        ] = {}
+        self._tasks: dict[str, asyncio.Task[DataEnvelope[NormalizedSnapshot]]] = {}
         self._lock = asyncio.Lock()
 
     async def get(
         self, instruments: Iterable[InstrumentId]
     ) -> CoordinatedResult[NormalizedSnapshot]:
         requested = _unique_instruments(instruments)
-        initial_tasks: list[
-            asyncio.Future[DataEnvelope[NormalizedSnapshot]]
-        ] = []
+        initial_tasks: list[asyncio.Future[DataEnvelope[NormalizedSnapshot]]] = []
         immediate_items: list[NormalizedSnapshot] = []
         immediate_diagnostics: list[DataDiagnostic] = []
         async with self._lock:
@@ -147,9 +143,7 @@ class SnapshotCoordinator:
                 if instrument.symbol in by_symbol
             ),
             diagnostics=tuple(
-                {
-                    item.fingerprint: item for item in immediate_diagnostics
-                }.values()
+                {item.fingerprint: item for item in immediate_diagnostics}.values()
             ),
             states=states,
         )
@@ -160,9 +154,7 @@ class SnapshotCoordinator:
         if tasks:
             await asyncio.gather(*(asyncio.shield(task) for task in tasks))
 
-    async def cache_state(
-        self, symbol: str
-    ) -> CacheEntry[NormalizedSnapshot] | None:
+    async def cache_state(self, symbol: str) -> CacheEntry[NormalizedSnapshot] | None:
         async with self._lock:
             return self._cache.get(symbol.strip().upper())
 
@@ -202,9 +194,7 @@ class SnapshotCoordinator:
                         last_attempt_at=prior.last_attempt_at,
                         refresh_state=RefreshState.IDLE,
                         latest_diagnostic=(
-                            envelope.diagnostics[-1]
-                            if envelope.diagnostics
-                            else None
+                            envelope.diagnostics[-1] if envelope.diagnostics else None
                         ),
                     )
                 else:
@@ -227,8 +217,7 @@ class SnapshotCoordinator:
                     if prior.last_success:
                         return DataEnvelope(
                             tuple(
-                                _mark_stale(item, issue)
-                                for item in prior.last_success
+                                _mark_stale(item, issue) for item in prior.last_success
                             ),
                             (issue,),
                             EmptyMeaning.NOT_EMPTY,
@@ -268,10 +257,7 @@ class SnapshotCoordinator:
             )
             if prior.last_success:
                 return DataEnvelope(
-                    tuple(
-                        _mark_stale(item, issue)
-                        for item in prior.last_success
-                    ),
+                    tuple(_mark_stale(item, issue) for item in prior.last_success),
                     (issue,),
                     EmptyMeaning.NOT_EMPTY,
                 )
@@ -282,9 +268,7 @@ class SnapshotCoordinator:
     ) -> DataEnvelope[NormalizedSnapshot]:
         return await asyncio.to_thread(self._fetcher, instrument)
 
-    def _is_fresh(
-        self, entry: CacheEntry[NormalizedSnapshot], current: float
-    ) -> bool:
+    def _is_fresh(self, entry: CacheEntry[NormalizedSnapshot], current: float) -> bool:
         return (
             entry.last_success_at is not None
             and entry.refresh_state is RefreshState.IDLE

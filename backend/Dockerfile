@@ -10,12 +10,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY pyproject.toml requirements.txt ./
 COPY app ./app
+COPY finance_god ./finance_god
+COPY vendor ./vendor
+COPY server.py ./
 COPY alembic.ini ./
 COPY alembic ./alembic
 
 RUN pip install --upgrade pip \
+    && pip install -r requirements.txt \
     && pip install -e .
 
 EXPOSE 8000

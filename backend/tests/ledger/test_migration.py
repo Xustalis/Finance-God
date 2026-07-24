@@ -16,6 +16,11 @@ from sqlalchemy.ext.asyncio import create_async_engine
 POSTGRES_URL = os.getenv("FINANCE_GOD_TEST_POSTGRES_URL")
 BACKEND = Path(__file__).resolve().parents[2]
 LEDGER_TABLES = (
+    "workflow_outbox_messages",
+    "workflow_execution_audit_records",
+    "workflow_audit_records",
+    "workflow_events",
+    "workflow_runs",
     "account_activities",
     "outbox_messages",
     "audit_records",
@@ -116,6 +121,12 @@ async def _clear_ledger_schema(database_url: str) -> None:
                     "finance_god_prevent_fact_mutation()"
                 )
             )
+            await connection.execute(
+                text(
+                    "DROP FUNCTION IF EXISTS "
+                    "finance_god_prevent_workflow_fact_mutation()"
+                )
+            )
     finally:
         await engine.dispose()
 
@@ -125,13 +136,23 @@ async def _postgres_has_fact_triggers() -> bool:
     engine = create_async_engine(POSTGRES_URL)
     try:
         async with engine.connect() as connection:
-            count = await connection.scalar(
+            trigger_names = set(
+                (
+                    await connection.execute(
                 text(
-                    "SELECT count(*) FROM pg_trigger "
+                    "SELECT tgname FROM pg_trigger "
                     "WHERE tgname LIKE '%_no_mutation' AND NOT tgisinternal"
                 )
+                    )
+                ).scalars()
             )
-            return bool(count == 5)
+            return {
+                "account_events_no_mutation",
+                "journal_entries_no_mutation",
+                "ledger_postings_no_mutation",
+                "audit_records_no_mutation",
+                "fills_no_mutation",
+            }.issubset(trigger_names)
     finally:
         await engine.dispose()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -18,6 +19,7 @@ from .contracts import (
     DataDiagnostic,
     DataEnvelope,
     DataFrequency,
+    EmptyMeaning,
     InstrumentId,
     MarketType,
     NormalizedBar,
@@ -31,14 +33,15 @@ from .errors import (
 )
 from .instruments import DEFAULT_INSTRUMENT_MASTER, InstrumentMaster
 from .quality import (
-    AuditedDQWorkflowPort,
-    DQTrigger,
-    DQTriggerResult,
-    InMemoryDQTriggerRepository,
+    DQTriggerRequest,
+    DQWorkflowPort,
+    DQWorkflowReceipt,
     InMemoryScopeFreezeRepository,
+    QualityContext,
     QualityDecision,
     QualityGate,
     ScopeFreezeRecord,
+    build_dq_trigger_request,
 )
 from .release import (
     FailClosedPublishedState,
@@ -75,6 +78,8 @@ class MarketQuote(BaseModel):
     market_status: str
     source_endpoint: str
     capability_version: str
+    instrument_master_identity: str
+    instrument_master_version: str
     trade_eligible: Literal[False] = False
 
 
@@ -90,6 +95,10 @@ class MarketBar(BaseModel):
     amount: Decimal | None = None
     freshness: str
     provider_time: str
+    source_endpoint: str
+    capability_version: str
+    instrument_master_identity: str
+    instrument_master_version: str
     trade_eligible: Literal[False] = False
 
 
@@ -104,6 +113,30 @@ class QuoteBatch(BaseModel):
     diagnostics: tuple[DataDiagnostic, ...] = ()
     quality: dict[str, QualityDecision] = Field(default_factory=dict)
     trade_eligible: Literal[False] = False
+
+
+class QualityOutcome(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision: QualityDecision
+    dq_request: DQTriggerRequest | None
+
+
+class MarketBarsResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    frequency: str
+    bars: tuple[MarketBar, ...]
+    quality: QualityDecision
+    dq_request: DQTriggerRequest | None
+    error_message: str | None = None
+
+
+class QuoteExecution(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    batch: QuoteBatch
+    dq_requests: tuple[DQTriggerRequest, ...]
 
 
 class MarketDataService:
@@ -123,7 +156,6 @@ class MarketDataService:
         clock: Callable[[], float] = monotonic,
         published_state: PublishedStatePort | None = None,
         quality_gate: QualityGate | None = None,
-        dq_trigger: DQTrigger | None = None,
     ) -> None:
         del clock
         if adapter is None:
@@ -149,16 +181,12 @@ class MarketDataService:
         self._quality_gate = quality_gate or QualityGate(
             InMemoryScopeFreezeRepository()
         )
-        self._dq_workflow = AuditedDQWorkflowPort()
-        self._dq_trigger = dq_trigger or DQTrigger(
-            InMemoryDQTriggerRepository(),
-            self._dq_workflow,
-        )
         self._latest_quality: dict[str, QualityDecision] = {}
-        self._latest_dq_trigger: dict[str, DQTriggerResult] = {}
 
     @classmethod
-    def from_environment(cls) -> MarketDataService:
+    def from_environment(
+        cls,
+    ) -> MarketDataService:
         adapter = PandaDataAdapter.from_environment()
         return cls(
             adapter=adapter,
@@ -172,13 +200,13 @@ class MarketDataService:
     def resolve(self, symbol: str) -> InstrumentId:
         return self._master.resolve(symbol)
 
-    def fetch_snapshot(
+    def _fetch_snapshot(
         self, instrument: InstrumentId
     ) -> DataEnvelope[NormalizedSnapshot]:
         observed_at = self._aware_now()
-        trading_date = observed_at.astimezone(
-            _market_zone(instrument.market)
-        ).strftime("%Y%m%d")
+        trading_date = observed_at.astimezone(_market_zone(instrument.market)).strftime(
+            "%Y%m%d"
+        )
         publication = self._published_state.evaluate(
             instrument=instrument,
             category=DataCategory.SNAPSHOT,
@@ -192,40 +220,9 @@ class MarketDataService:
             expected_date=publication.trading_date,
             provider_published_at=publication.provider_published_at,
         )
-        self._evaluate_quality(envelope, instrument.symbol)
         return envelope
 
-    def fetch_quotes(self, symbols: Iterable[str]) -> QuoteBatch:
-        requested = _bounded_symbols(symbols)
-        quotes: list[MarketQuote] = []
-        diagnostics: list[DataDiagnostic] = []
-        errors: dict[str, str] = {}
-        quality: dict[str, QualityDecision] = {}
-        for symbol in requested:
-            instrument = self.resolve(symbol)
-            try:
-                envelope = self.fetch_snapshot(instrument)
-            except MarketDataError as error:
-                errors[instrument.symbol] = str(error)
-                continue
-            diagnostics.extend(envelope.diagnostics)
-            quality[instrument.symbol] = self._latest_quality[instrument.symbol]
-            if envelope.items:
-                quotes.append(_quote(envelope.items[0]))
-            elif envelope.diagnostics:
-                errors[instrument.symbol] = envelope.diagnostics[-1].message
-        return QuoteBatch(
-            requested_at=self._aware_now(),
-            cache_hit=False,
-            quotes=tuple(quotes),
-            errors=errors,
-            diagnostics=tuple(diagnostics),
-            quality=quality,
-        )
-
-    def fetch_bars(
-        self, symbol: str, *, limit: int = 80
-    ) -> tuple[str, tuple[MarketBar, ...]]:
+    def _fetch_bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
         instrument = self.resolve(symbol)
         now = self._aware_now()
         market_today = now.astimezone(_market_zone(instrument.market))
@@ -255,18 +252,28 @@ class MarketDataService:
             release_state=publication.state,
             provider_published_at=publication.provider_published_at,
         )
-        self._evaluate_quality(
+        outcome = self.evaluate_quality(
             envelope,
             f"{instrument.symbol}:{frequency.value}",
+            category=DataCategory.BAR,
+            frequency=frequency,
         )
-        if not envelope.items:
-            message = (
+        error_message = (
+            (
                 envelope.diagnostics[-1].message
                 if envelope.diagnostics
                 else "PandaData returned no normalized bars"
             )
-            raise MarketDataResponseError(message)
-        return _display_frequency(frequency), tuple(_bar(item) for item in envelope.items)
+            if not envelope.items
+            else None
+        )
+        return MarketBarsResult(
+            frequency=_display_frequency(frequency),
+            bars=tuple(_bar(item) for item in envelope.items),
+            quality=outcome.decision,
+            dq_request=outcome.dq_request,
+            error_message=error_message,
+        )
 
     def catalog(self) -> tuple[dict[str, object], ...]:
         return self._adapter.catalog()
@@ -303,28 +310,35 @@ class MarketDataService:
             if scope in self._latest_quality
         }
 
-    def dq_trigger_for(self, scope: str) -> DQTriggerResult | None:
-        return self._latest_dq_trigger.get(scope)
-
-    def dq_audit_requests(self) -> tuple[object, ...]:
-        return self._dq_workflow.list_requests()
-
-    def _evaluate_quality(
+    def evaluate_quality(
         self,
         envelope: DataEnvelope[Any],
         affected_scope: str,
-    ) -> QualityDecision:
+        *,
+        category: DataCategory,
+        frequency: DataFrequency,
+    ) -> QualityOutcome:
+        endpoint = _single_source_endpoint(envelope)
         decision = self._quality_gate.evaluate(
             envelope,
-            affected_scope=affected_scope,
+            context=QualityContext(
+                affected_scope=affected_scope,
+                category=category,
+                frequency=frequency,
+                instrument_master_identity=self._master.identity,
+                instrument_master_version=self._master.version,
+                source_endpoint=endpoint,
+            ),
+            observed_at=self._aware_now(),
         )
         self._latest_quality[affected_scope] = decision
-        result = self._dq_trigger.trigger(
-            decision,
-            source_workflow="market_data",
+        return QualityOutcome(
+            decision=decision,
+            dq_request=build_dq_trigger_request(
+                decision,
+                source_workflow="market_data",
+            ),
         )
-        self._latest_dq_trigger[affected_scope] = result
-        return decision
 
     def _aware_now(self) -> datetime:
         value = self._now()
@@ -333,8 +347,8 @@ class MarketDataService:
         return value.astimezone(_UTC)
 
 
-class QuoteCoordinator:
-    """Compatibility batch API backed by the per-symbol shared coordinator."""
+class _QuoteCoordinator:
+    """Internal shared polling coordinator used only by the async application."""
 
     def __init__(
         self,
@@ -345,13 +359,13 @@ class QuoteCoordinator:
     ) -> None:
         self._service = service
         self._coordinator = SnapshotCoordinator(
-            service.fetch_snapshot,
+            service._fetch_snapshot,
             refresh_after_seconds=refresh_after_seconds,
             clock=clock,
         )
         self._seen: set[str] = set()
 
-    async def get(self, symbols: Iterable[str]) -> QuoteBatch:
+    async def get(self, symbols: Iterable[str]) -> QuoteExecution:
         requested = _bounded_symbols(symbols)
         instruments = tuple(self._service.resolve(symbol) for symbol in requested)
         cache_hit = all(item.symbol in self._seen for item in instruments)
@@ -362,16 +376,106 @@ class QuoteCoordinator:
             item.scope.split(":", maxsplit=1)[0]: item.message
             for item in result.diagnostics
         }
-        return QuoteBatch(
+        quality: dict[str, QualityDecision] = {}
+        dq_requests: list[DQTriggerRequest] = []
+        for instrument in instruments:
+            items = tuple(
+                item
+                for item in result.items
+                if item.instrument.symbol == instrument.symbol
+            )
+            diagnostics = tuple(
+                item
+                for item in result.diagnostics
+                if item.scope.split(":", maxsplit=1)[0] == instrument.symbol
+            )
+            empty_meaning = (
+                EmptyMeaning.NOT_EMPTY if items else EmptyMeaning.UNEXPECTED_MISSING
+            )
+            envelope = DataEnvelope(items, diagnostics, empty_meaning)
+            outcome = self._service.evaluate_quality(
+                envelope,
+                instrument.symbol,
+                category=DataCategory.SNAPSHOT,
+                frequency=DataFrequency.SNAPSHOT,
+            )
+            quality[instrument.symbol] = outcome.decision
+            if outcome.dq_request is not None:
+                dq_requests.append(outcome.dq_request)
+        batch = QuoteBatch(
             requested_at=datetime.now(_UTC),
             cache_hit=cache_hit,
             quotes=tuple(_quote(item) for item in result.items),
             errors=errors,
             diagnostics=result.diagnostics,
-            quality=self._service.quality_for(
-                item.symbol for item in instruments
-            ),
+            quality=quality,
         )
+        return QuoteExecution(batch=batch, dq_requests=tuple(dq_requests))
+
+
+class MarketDataApplication:
+    """Only async application boundary allowed to publish market-data results."""
+
+    def __init__(
+        self,
+        service: MarketDataService,
+        *,
+        dq_workflow: DQWorkflowPort | None,
+    ) -> None:
+        self._service = service
+        self._quotes = _QuoteCoordinator(service)
+        self._dq_workflow = dq_workflow
+        self._latest_receipts: dict[str, DQWorkflowReceipt] = {}
+
+    def probe_readiness(self) -> tuple[bool, str]:
+        if self._dq_workflow is None:
+            return False, "DQ_WORKFLOW_COMMAND_PORT_UNCONFIGURED"
+        return self._service.probe_readiness()
+
+    async def quotes(self, symbols: Iterable[str]) -> QuoteBatch:
+        self._require_workflow()
+        execution = await self._quotes.get(symbols)
+        await self._dispatch(execution.dq_requests)
+        return execution.batch
+
+    async def bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
+        self._require_workflow()
+        result = await asyncio.to_thread(
+            self._service._fetch_bars,
+            symbol,
+            limit=limit,
+        )
+        requests = (result.dq_request,) if result.dq_request is not None else ()
+        await self._dispatch(requests)
+        if not result.bars:
+            raise MarketDataResponseError(
+                result.error_message or "PandaData returned no normalized bars"
+            )
+        return result
+
+    async def _dispatch(
+        self,
+        requests: Iterable[DQTriggerRequest],
+    ) -> None:
+        pending = tuple(requests)
+        if not pending:
+            return
+        if self._dq_workflow is None:
+            raise MarketDataConfigurationError(
+                "data-quality workflow command port is not configured"
+            )
+        for request in pending:
+            receipt = await self._dq_workflow.start(request)
+            if receipt.idempotency_key != request.idempotency_key:
+                raise ValueError("DQ workflow receipt idempotency key mismatch")
+            self._latest_receipts[request.idempotency_key] = receipt
+
+    def _require_workflow(self) -> DQWorkflowPort:
+        if self._dq_workflow is None:
+            raise MarketDataConfigurationError(
+                "data-quality workflow command port is not configured"
+            )
+        return self._dq_workflow
 
 
 def _quote(item: NormalizedSnapshot) -> MarketQuote:
@@ -410,6 +514,8 @@ def _quote(item: NormalizedSnapshot) -> MarketQuote:
         market_status=item.freshness.release_state.value,
         source_endpoint=item.source.endpoint,
         capability_version=item.source.capability_version,
+        instrument_master_identity=item.source.instrument_master_identity,
+        instrument_master_version=item.source.instrument_master_version,
     )
 
 
@@ -424,6 +530,10 @@ def _bar(item: NormalizedBar) -> MarketBar:
         amount=item.amount,
         freshness=item.freshness.status.value,
         provider_time=item.source.data_time.isoformat(),
+        source_endpoint=item.source.endpoint,
+        capability_version=item.source.capability_version,
+        instrument_master_identity=item.source.instrument_master_identity,
+        instrument_master_version=item.source.instrument_master_version,
     )
 
 
@@ -460,3 +570,20 @@ def _market_zone(market: MarketType) -> ZoneInfo:
         MarketType.HK: ZoneInfo("Asia/Hong_Kong"),
         MarketType.US: ZoneInfo("America/New_York"),
     }[market]
+
+
+def _single_source_endpoint(envelope: DataEnvelope[Any]) -> str | None:
+    endpoints = {
+        endpoint
+        for endpoint in (
+            *(
+                getattr(getattr(item, "source", None), "endpoint", None)
+                for item in envelope.items
+            ),
+            *(issue.endpoint for issue in envelope.diagnostics),
+        )
+        if endpoint is not None
+    }
+    if len(endpoints) > 1:
+        raise ValueError("quality envelope contains conflicting source endpoints")
+    return next(iter(endpoints), None)

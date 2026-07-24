@@ -58,6 +58,7 @@ def principal(*, fixture: bool = False) -> AuthenticatedPrincipal:
         source_version=version(
             "fixture_identity" if fixture else "identity_session", "server-session-1"
         ),
+        source_revision="1",
         is_fixture=fixture,
     )
 
@@ -81,6 +82,7 @@ def authorization(*, fixture: bool = False) -> AuthorizationSnapshot:
             "fixture_authorization" if fixture else "investment_mandate",
             "mandate-1",
         ),
+        source_revision="1",
         is_fixture=fixture,
     )
 
@@ -95,6 +97,7 @@ def cooldown(*, fixture: bool = False) -> CooldownSnapshot:
         source_version=version(
             "fixture_cooldown" if fixture else "cooldown", "cooldown-1"
         ),
+        source_revision="1",
         is_fixture=fixture,
     )
 
@@ -232,6 +235,135 @@ class AccessTest(unittest.TestCase):
                     "max_single_order_amount": Decimal("NaN"),
                 }
             )
+
+    def test_access_source_versions_bind_type_id_and_revision_at_construction(
+        self,
+    ) -> None:
+        invalid_inputs = (
+            (
+                AuthenticatedPrincipal,
+                {
+                    **principal().model_dump(),
+                    "source_version": version(
+                        "client_claim",
+                        "server-session-1",
+                    ),
+                },
+            ),
+            (
+                AuthorizationSnapshot,
+                {
+                    **authorization().model_dump(),
+                    "source_version": version(
+                        "investment_mandate",
+                        "another-mandate",
+                    ),
+                },
+            ),
+            (
+                CooldownSnapshot,
+                {
+                    **cooldown().model_dump(),
+                    "source_version": version(
+                        "cooldown",
+                        "cooldown-1",
+                        "2",
+                    ),
+                },
+            ),
+        )
+        for model, values in invalid_inputs:
+            with self.subTest(model=model.__name__):
+                with self.assertRaises(ValueError):
+                    model.model_validate(values)
+
+    def test_production_formal_resolution_revalidates_forged_provider_models(
+        self,
+    ) -> None:
+        class ForgedProvider:
+            def __init__(
+                self,
+                *,
+                authenticated: AuthenticatedPrincipal,
+                mandate: AuthorizationSnapshot,
+                cooldown_snapshot: CooldownSnapshot,
+            ) -> None:
+                self.authenticated = authenticated
+                self.mandate = mandate
+                self.cooldown_snapshot = cooldown_snapshot
+
+            def current_principal(self) -> AuthenticatedPrincipal:
+                return self.authenticated
+
+            def authorization_for(
+                self,
+                authenticated: AuthenticatedPrincipal,
+            ) -> AuthorizationSnapshot:
+                del authenticated
+                return self.mandate
+
+            def cooldown_for(
+                self,
+                authenticated: AuthenticatedPrincipal,
+            ) -> CooldownSnapshot:
+                del authenticated
+                return self.cooldown_snapshot
+
+        providers = (
+            ForgedProvider(
+                authenticated=principal().model_copy(
+                    update={
+                        "source_version": version(
+                            "client_claim",
+                            "server-session-1",
+                        )
+                    }
+                ),
+                mandate=authorization(),
+                cooldown_snapshot=cooldown(),
+            ),
+            ForgedProvider(
+                authenticated=principal(),
+                mandate=authorization().model_copy(
+                    update={
+                        "source_version": version(
+                            "investment_mandate",
+                            "another-mandate",
+                        )
+                    }
+                ),
+                cooldown_snapshot=cooldown(),
+            ),
+            ForgedProvider(
+                authenticated=principal(),
+                mandate=authorization(),
+                cooldown_snapshot=cooldown().model_copy(
+                    update={
+                        "source_version": version(
+                            "cooldown",
+                            "cooldown-1",
+                            "2",
+                        )
+                    }
+                ),
+            ),
+        )
+        for provider in providers:
+            with self.subTest(provider=provider):
+                resolution = AccessResolver(
+                    environment=RuntimeEnvironment.PRODUCTION,
+                    identity_provider=provider,
+                    authorization_provider=provider,
+                    clock=FixedClock(),
+                ).resolve()
+                self.assertFalse(resolution.allowed)
+                self.assertEqual(
+                    resolution.code,
+                    AccessResolutionCode.UPSTREAM_UNAVAILABLE,
+                )
+                self.assertIsNone(resolution.principal)
+                self.assertIsNone(resolution.authorization)
+                self.assertIsNone(resolution.cooldown)
 
     def test_owner_mismatch_and_stale_provider_snapshot_fail_closed(self) -> None:
         class MismatchProvider(StaticProvider):

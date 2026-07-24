@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from finance_god import MultiAgentRuntime, Orchestrator
+from finance_god.orchestration import MultiAgentRuntime, Orchestrator
 from research_runtime import AgentRequest, AgentRunner
 from research_runtime.models import EvidenceRecord
 

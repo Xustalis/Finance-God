@@ -33,51 +33,66 @@ class FreshnessPolicy:
         display_thresholds = {
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.CN, DataCategory.SNAPSHOT, DataFrequency.SNAPSHOT
+                MarketType.CN,
+                DataCategory.SNAPSHOT,
+                DataFrequency.SNAPSHOT,
             ): 5,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.CN, DataCategory.BAR, DataFrequency.MINUTE_1
+                MarketType.CN,
+                DataCategory.BAR,
+                DataFrequency.MINUTE_1,
             ): 120,
             FreshnessPolicyKey(
-                "market_display",
-                MarketType.CN, DataCategory.BAR, DataFrequency.DAILY
+                "market_display", MarketType.CN, DataCategory.BAR, DataFrequency.DAILY
+            ): 129_600,
+            FreshnessPolicyKey(
+                "market_display", MarketType.HK, DataCategory.BAR, DataFrequency.DAILY
+            ): 129_600,
+            FreshnessPolicyKey(
+                "market_display", MarketType.US, DataCategory.BAR, DataFrequency.DAILY
             ): 129_600,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.HK, DataCategory.BAR, DataFrequency.DAILY
-            ): 129_600,
-            FreshnessPolicyKey(
-                "market_display",
-                MarketType.US, DataCategory.BAR, DataFrequency.DAILY
-            ): 129_600,
-            FreshnessPolicyKey(
-                "market_display",
-                MarketType.CN, DataCategory.CALENDAR, DataFrequency.DAILY
+                MarketType.CN,
+                DataCategory.CALENDAR,
+                DataFrequency.DAILY,
             ): 172_800,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.HK, DataCategory.CALENDAR, DataFrequency.DAILY
+                MarketType.HK,
+                DataCategory.CALENDAR,
+                DataFrequency.DAILY,
             ): 172_800,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.US, DataCategory.CALENDAR, DataFrequency.DAILY
+                MarketType.US,
+                DataCategory.CALENDAR,
+                DataFrequency.DAILY,
             ): 172_800,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.CN, DataCategory.MASTER, DataFrequency.STATIC
+                MarketType.CN,
+                DataCategory.MASTER,
+                DataFrequency.STATIC,
             ): 604_800,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.HK, DataCategory.MASTER, DataFrequency.STATIC
+                MarketType.HK,
+                DataCategory.MASTER,
+                DataFrequency.STATIC,
             ): 604_800,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.US, DataCategory.MASTER, DataFrequency.STATIC
+                MarketType.US,
+                DataCategory.MASTER,
+                DataFrequency.STATIC,
             ): 604_800,
             FreshnessPolicyKey(
                 "market_display",
-                MarketType.CN, DataCategory.FACTOR, DataFrequency.DAILY
+                MarketType.CN,
+                DataCategory.FACTOR,
+                DataFrequency.DAILY,
             ): 129_600,
         }
         if thresholds is not None:

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 from finance_god.market_data import (
-    DQTrigger,
+    DQTriggerRequest,
+    DQWorkflowReceipt,
     FailClosedPublishedState,
-    InMemoryDQTriggerRepository,
+    MarketDataApplication,
+    MarketDataConfigurationError,
     MarketDataService,
     PandaCalendarPublishedState,
     StaticPublishedState,
@@ -14,6 +18,18 @@ from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 from .conftest import NOW, FakeSDK, adapter, stock_snapshot
 
 
+class RecordingWorkflow:
+    def __init__(self) -> None:
+        self.requests: list[DQTriggerRequest] = []
+
+    async def start(self, request: DQTriggerRequest) -> DQWorkflowReceipt:
+        self.requests.append(request)
+        return DQWorkflowReceipt(
+            workflow_run_id="persisted-dq-run",
+            idempotency_key=request.idempotency_key,
+        )
+
+
 def test_service_fails_closed_before_sdk_when_publication_state_is_unknown() -> None:
     sdk = FakeSDK()
     service = MarketDataService(
@@ -21,13 +37,15 @@ def test_service_fails_closed_before_sdk_when_publication_state_is_unknown() -> 
         now=lambda: NOW,
         published_state=FailClosedPublishedState(),
     )
-
-    result = service.fetch_snapshot(
-        DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
     )
 
-    assert result.items == ()
-    assert result.diagnostics[0].code.value == "data_not_released"
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
+
+    assert batch.quotes == ()
+    assert batch.diagnostics[0].code.value == "data_not_released"
     assert sdk.calls == []
 
 
@@ -39,12 +57,22 @@ def test_service_exposes_research_data_but_never_marks_it_trade_eligible() -> No
         now=lambda: NOW,
         published_state=StaticPublishedState(ReleaseState.RELEASED),
     )
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
+    )
 
-    batch = service.fetch_quotes(["000001.SZ"])
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
 
     assert batch.quotes
     assert batch.trade_eligible is False
     assert batch.quotes[0].trade_eligible is False
+    assert (
+        batch.quotes[0].instrument_master_identity == DEFAULT_INSTRUMENT_MASTER.identity
+    )
+    assert (
+        batch.quotes[0].instrument_master_version == DEFAULT_INSTRUMENT_MASTER.version
+    )
     assert batch.quality["000001.SZ"].trade_eligible is False
     assert batch.quality["000001.SZ"].capability_trade_eligible is False
 
@@ -54,29 +82,26 @@ def test_service_creates_audited_data_quality_review_for_conflict() -> None:
     sdk.responses["get_stock_rt_daily"] = [
         stock_snapshot("600519.SH"),
     ]
+    workflow = RecordingWorkflow()
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,
         published_state=StaticPublishedState(ReleaseState.RELEASED),
     )
+    application = MarketDataApplication(service, dq_workflow=workflow)
 
-    result = service.fetch_snapshot(
-        DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
-    )
-    trigger = service.dq_trigger_for("000001.SZ")
-    requests = service.dq_audit_requests()
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
 
-    assert result.items == ()
-    assert result.diagnostics[0].code.value == "conflict"
-    assert trigger is not None and trigger.started is True
-    assert len(requests) == 1
-    assert requests[0].workflow_key == "data_quality_review"
-    assert requests[0].recursive_trigger_allowed is False
+    assert batch.quotes == ()
+    assert batch.diagnostics[0].code.value == "conflict"
+    assert len(workflow.requests) == 1
+    assert workflow.requests[0].workflow_key == "data_quality_review"
+    assert workflow.requests[0].recursive_trigger_allowed is False
 
 
 def test_service_surfaces_dq_workflow_start_failure() -> None:
     class FailingWorkflow:
-        def start(self, request):
+        async def start(self, request: DQTriggerRequest) -> DQWorkflowReceipt:
             del request
             raise RuntimeError("DQ workflow unavailable")
 
@@ -85,23 +110,18 @@ def test_service_surfaces_dq_workflow_start_failure() -> None:
         adapter=adapter(sdk),
         now=lambda: NOW,
         published_state=StaticPublishedState(ReleaseState.RELEASED),
-        dq_trigger=DQTrigger(
-            InMemoryDQTriggerRepository(),
-            FailingWorkflow(),
-        ),
     )
+    application = MarketDataApplication(service, dq_workflow=FailingWorkflow())
 
     try:
-        service.fetch_snapshot(
-            DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ")
-        )
+        asyncio.run(application.quotes(["000001.SZ"]))
     except RuntimeError as error:
         assert "DQ workflow unavailable" in str(error)
     else:
         raise AssertionError("DQ workflow failure must surface explicitly")
 
 
-def test_calendar_published_state_calls_real_adapter_for_released_session() -> None:
+def test_unknown_calendar_freshness_cannot_authorize_released_session() -> None:
     sdk = FakeSDK()
     sdk.responses["get_trade_cal"] = [
         {"trade_date": "20260723", "is_trading_day": 1},
@@ -113,12 +133,50 @@ def test_calendar_published_state_calls_real_adapter_for_released_session() -> N
         now=lambda: NOW,
         published_state=PandaCalendarPublishedState(data_adapter),
     )
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
+    )
 
-    batch = service.fetch_quotes(["000001.SZ"])
-    ready, reason = service.probe_readiness()
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
+    ready, reason = application.probe_readiness()
 
-    assert batch.quotes
-    assert ready is True and reason == "ready"
+    assert batch.quotes == ()
+    assert ready is False
+    assert reason == "MARKET_DATA_SCHEMA_INVALID"
     calls = [name for name, _ in sdk.calls]
     assert calls.count("get_trade_cal") == 2
-    assert calls.count("get_stock_rt_daily") == 1
+    assert calls.count("get_stock_rt_daily") == 0
+
+
+def test_readiness_fails_when_workflow_command_port_is_unconfigured() -> None:
+    service = MarketDataService(
+        adapter=adapter(FakeSDK()),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    application = MarketDataApplication(service, dq_workflow=None)
+
+    assert application.probe_readiness() == (
+        False,
+        "DQ_WORKFLOW_COMMAND_PORT_UNCONFIGURED",
+    )
+
+
+def test_quality_failure_without_workflow_port_fails_explicitly() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot("600519.SH")]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+    application = MarketDataApplication(service, dq_workflow=None)
+
+    try:
+        asyncio.run(application.quotes(["000001.SZ"]))
+    except MarketDataConfigurationError as error:
+        assert error.public_code.value == "MARKET_DATA_CONFIGURATION_ERROR"
+    else:
+        raise AssertionError("missing workflow command port must fail explicitly")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
@@ -21,7 +21,221 @@ CAPABILITY_CATALOG_VERSION = "pandadata-capabilities-v1"
 EXPECTED_SDK_VERSION = "0.0.12"
 
 ALL_ENDPOINTS = tuple(  # noqa: C409 - generated audited endpoint manifest
-    ["get_adj_factor", "get_adj_factor_hk", "get_audit_opinion", "get_block_trade", "get_broker_build_process", "get_broker_flow_daily", "get_broker_grade", "get_broker_loss_rank", "get_broker_ls_ratio", "get_broker_netmarg", "get_broker_netmarg_change", "get_broker_oi_value", "get_broker_profit", "get_broker_profit_rank", "get_broker_totlmarg", "get_broker_variety_profit", "get_client", "get_concept_constituents", "get_concept_list", "get_factor", "get_factor_hk", "get_factory", "get_fina_ex", "get_fina_forecast", "get_fina_performance", "get_fina_reports", "get_fina_statement", "get_fund_daily", "get_fund_daily_post", "get_fund_daily_pre", "get_fund_detail", "get_fund_etf_constituents", "get_fund_etf_cr", "get_fund_etf_cr_limits", "get_fund_etf_cr_net", "get_future_basis", "get_future_calendar_arbitrage", "get_future_contract_indicators", "get_future_contract_pool", "get_future_contract_rank", "get_future_daily", "get_future_daily_post", "get_future_detail", "get_future_dominant", "get_future_dominant_corr", "get_future_free_ratio", "get_future_free_spread", "get_future_inventory", "get_future_ls_ratio", "get_future_market_post", "get_future_min", "get_future_net_flow", "get_future_netcap_change", "get_future_netposi_rank", "get_future_nonbroker_net", "get_future_spot_profit", "get_future_symbol_posi", "get_future_term_structure", "get_future_trader_quote", "get_future_variety_mcap", "get_future_variety_posi", "get_future_virtual_ratio", "get_future_warehouse_receipt", "get_hk_daily", "get_hk_daily_post", "get_hk_daily_pre", "get_hk_detail", "get_holder_count", "get_hsgt_hold", "get_index_component", "get_index_constituent", "get_index_daily", "get_index_detail", "get_index_indicator", "get_index_min", "get_index_weights", "get_industry_constituents", "get_industry_detail", "get_investor_activity", "get_last_trade_date", "get_lhb_detail", "get_lhb_list", "get_macro_ad", "get_macro_ag", "get_macro_ar", "get_macro_au", "get_macro_bm", "get_macro_cal", "get_macro_cal_config", "get_macro_cal_info", "get_macro_ce", "get_macro_ch", "get_macro_ci", "get_macro_cm", "get_macro_detail", "get_macro_dt", "get_macro_ec", "get_macro_ed", "get_macro_ee", "get_macro_eh", "get_macro_en", "get_macro_ep", "get_macro_ew", "get_macro_fa", "get_macro_fb", "get_macro_fe", "get_macro_fi", "get_macro_fs", "get_macro_gb", "get_macro_ha", "get_macro_in", "get_macro_ir", "get_macro_is", "get_macro_li", "get_macro_mb", "get_macro_md", "get_macro_me", "get_macro_na", "get_macro_nf", "get_macro_of", "get_macro_or", "get_macro_ph", "get_macro_pi", "get_macro_pm", "get_macro_pp", "get_macro_pr", "get_macro_rb", "get_macro_rc", "get_macro_re", "get_macro_se", "get_macro_sm", "get_macro_st", "get_macro_te", "get_macro_th", "get_macro_tm", "get_macro_tr", "get_macro_ut", "get_macro_wr", "get_margin", "get_market_data", "get_market_min_data", "get_option_daily", "get_option_detail", "get_option_exercise", "get_option_implied_volatility", "get_option_risk_indicators", "get_option_spot_market", "get_option_static", "get_option_underlying_detail", "get_option_underlying_volatility", "get_prev_trade_date", "get_repurchase", "get_restricted_list", "get_share_float", "get_stock_allotment", "get_stock_cash_dividend", "get_stock_competitor_information", "get_stock_daily", "get_stock_daily_post", "get_stock_daily_pre", "get_stock_detail", "get_stock_dividend", "get_stock_dividend_activity", "get_stock_dividend_amount", "get_stock_dividend_event", "get_stock_financial_activity", "get_stock_financial_event", "get_stock_industry", "get_stock_industry_median", "get_stock_insider_trade", "get_stock_insider_transaction", "get_stock_intermediary_information", "get_stock_investor_centralization", "get_stock_investor_concentration", "get_stock_investor_leaderboard", "get_stock_investor_ranking", "get_stock_ir_activity", "get_stock_ir_event", "get_stock_market_activity", "get_stock_market_event", "get_stock_meeting_activity", "get_stock_meeting_event", "get_stock_min", "get_stock_mktfin_indicator", "get_stock_mktfin_metric", "get_stock_ncycl_consensus", "get_stock_ncycl_estimate", "get_stock_operating_indicator", "get_stock_operating_metric", "get_stock_pledge", "get_stock_pledge_stat", "get_stock_private_placement", "get_stock_pv_indicator", "get_stock_pv_metric", "get_stock_recommendation_consensus", "get_stock_recommendation_estimate", "get_stock_rela_party_trans", "get_stock_rt_daily", "get_stock_rt_min", "get_stock_sector_median", "get_stock_shareholder_change", "get_stock_shareholder_holding", "get_stock_shareholder_report", "get_stock_split", "get_stock_status_change", "get_stock_status_over_allotment", "get_stock_top20_centralization", "get_stock_top20_concentration", "get_top_holders", "get_trade_cal", "get_trade_list", "get_us_daily", "get_us_detail"]
+    [
+        "get_adj_factor",
+        "get_adj_factor_hk",
+        "get_audit_opinion",
+        "get_block_trade",
+        "get_broker_build_process",
+        "get_broker_flow_daily",
+        "get_broker_grade",
+        "get_broker_loss_rank",
+        "get_broker_ls_ratio",
+        "get_broker_netmarg",
+        "get_broker_netmarg_change",
+        "get_broker_oi_value",
+        "get_broker_profit",
+        "get_broker_profit_rank",
+        "get_broker_totlmarg",
+        "get_broker_variety_profit",
+        "get_client",
+        "get_concept_constituents",
+        "get_concept_list",
+        "get_factor",
+        "get_factor_hk",
+        "get_factory",
+        "get_fina_ex",
+        "get_fina_forecast",
+        "get_fina_performance",
+        "get_fina_reports",
+        "get_fina_statement",
+        "get_fund_daily",
+        "get_fund_daily_post",
+        "get_fund_daily_pre",
+        "get_fund_detail",
+        "get_fund_etf_constituents",
+        "get_fund_etf_cr",
+        "get_fund_etf_cr_limits",
+        "get_fund_etf_cr_net",
+        "get_future_basis",
+        "get_future_calendar_arbitrage",
+        "get_future_contract_indicators",
+        "get_future_contract_pool",
+        "get_future_contract_rank",
+        "get_future_daily",
+        "get_future_daily_post",
+        "get_future_detail",
+        "get_future_dominant",
+        "get_future_dominant_corr",
+        "get_future_free_ratio",
+        "get_future_free_spread",
+        "get_future_inventory",
+        "get_future_ls_ratio",
+        "get_future_market_post",
+        "get_future_min",
+        "get_future_net_flow",
+        "get_future_netcap_change",
+        "get_future_netposi_rank",
+        "get_future_nonbroker_net",
+        "get_future_spot_profit",
+        "get_future_symbol_posi",
+        "get_future_term_structure",
+        "get_future_trader_quote",
+        "get_future_variety_mcap",
+        "get_future_variety_posi",
+        "get_future_virtual_ratio",
+        "get_future_warehouse_receipt",
+        "get_hk_daily",
+        "get_hk_daily_post",
+        "get_hk_daily_pre",
+        "get_hk_detail",
+        "get_holder_count",
+        "get_hsgt_hold",
+        "get_index_component",
+        "get_index_constituent",
+        "get_index_daily",
+        "get_index_detail",
+        "get_index_indicator",
+        "get_index_min",
+        "get_index_weights",
+        "get_industry_constituents",
+        "get_industry_detail",
+        "get_investor_activity",
+        "get_last_trade_date",
+        "get_lhb_detail",
+        "get_lhb_list",
+        "get_macro_ad",
+        "get_macro_ag",
+        "get_macro_ar",
+        "get_macro_au",
+        "get_macro_bm",
+        "get_macro_cal",
+        "get_macro_cal_config",
+        "get_macro_cal_info",
+        "get_macro_ce",
+        "get_macro_ch",
+        "get_macro_ci",
+        "get_macro_cm",
+        "get_macro_detail",
+        "get_macro_dt",
+        "get_macro_ec",
+        "get_macro_ed",
+        "get_macro_ee",
+        "get_macro_eh",
+        "get_macro_en",
+        "get_macro_ep",
+        "get_macro_ew",
+        "get_macro_fa",
+        "get_macro_fb",
+        "get_macro_fe",
+        "get_macro_fi",
+        "get_macro_fs",
+        "get_macro_gb",
+        "get_macro_ha",
+        "get_macro_in",
+        "get_macro_ir",
+        "get_macro_is",
+        "get_macro_li",
+        "get_macro_mb",
+        "get_macro_md",
+        "get_macro_me",
+        "get_macro_na",
+        "get_macro_nf",
+        "get_macro_of",
+        "get_macro_or",
+        "get_macro_ph",
+        "get_macro_pi",
+        "get_macro_pm",
+        "get_macro_pp",
+        "get_macro_pr",
+        "get_macro_rb",
+        "get_macro_rc",
+        "get_macro_re",
+        "get_macro_se",
+        "get_macro_sm",
+        "get_macro_st",
+        "get_macro_te",
+        "get_macro_th",
+        "get_macro_tm",
+        "get_macro_tr",
+        "get_macro_ut",
+        "get_macro_wr",
+        "get_margin",
+        "get_market_data",
+        "get_market_min_data",
+        "get_option_daily",
+        "get_option_detail",
+        "get_option_exercise",
+        "get_option_implied_volatility",
+        "get_option_risk_indicators",
+        "get_option_spot_market",
+        "get_option_static",
+        "get_option_underlying_detail",
+        "get_option_underlying_volatility",
+        "get_prev_trade_date",
+        "get_repurchase",
+        "get_restricted_list",
+        "get_share_float",
+        "get_stock_allotment",
+        "get_stock_cash_dividend",
+        "get_stock_competitor_information",
+        "get_stock_daily",
+        "get_stock_daily_post",
+        "get_stock_daily_pre",
+        "get_stock_detail",
+        "get_stock_dividend",
+        "get_stock_dividend_activity",
+        "get_stock_dividend_amount",
+        "get_stock_dividend_event",
+        "get_stock_financial_activity",
+        "get_stock_financial_event",
+        "get_stock_industry",
+        "get_stock_industry_median",
+        "get_stock_insider_trade",
+        "get_stock_insider_transaction",
+        "get_stock_intermediary_information",
+        "get_stock_investor_centralization",
+        "get_stock_investor_concentration",
+        "get_stock_investor_leaderboard",
+        "get_stock_investor_ranking",
+        "get_stock_ir_activity",
+        "get_stock_ir_event",
+        "get_stock_market_activity",
+        "get_stock_market_event",
+        "get_stock_meeting_activity",
+        "get_stock_meeting_event",
+        "get_stock_min",
+        "get_stock_mktfin_indicator",
+        "get_stock_mktfin_metric",
+        "get_stock_ncycl_consensus",
+        "get_stock_ncycl_estimate",
+        "get_stock_operating_indicator",
+        "get_stock_operating_metric",
+        "get_stock_pledge",
+        "get_stock_pledge_stat",
+        "get_stock_private_placement",
+        "get_stock_pv_indicator",
+        "get_stock_pv_metric",
+        "get_stock_recommendation_consensus",
+        "get_stock_recommendation_estimate",
+        "get_stock_rela_party_trans",
+        "get_stock_rt_daily",
+        "get_stock_rt_min",
+        "get_stock_sector_median",
+        "get_stock_shareholder_change",
+        "get_stock_shareholder_holding",
+        "get_stock_shareholder_report",
+        "get_stock_split",
+        "get_stock_status_change",
+        "get_stock_status_over_allotment",
+        "get_stock_top20_centralization",
+        "get_stock_top20_concentration",
+        "get_top_holders",
+        "get_trade_cal",
+        "get_trade_list",
+        "get_us_daily",
+        "get_us_detail",
+    ]
 )
 
 HARD_DISABLED = frozenset(
@@ -83,10 +297,49 @@ VERIFIED_SCOPES: dict[str, tuple[frozenset[str], ...]] = {
     "get_macro_tr": (frozenset({"RESEARCH_ONLY"}),),
 }
 
+PRODUCTION_AVAILABLE_ENDPOINTS = frozenset(
+    {
+        "get_stock_rt_daily",
+        "get_stock_daily",
+        "get_stock_min",
+        "get_stock_rt_min",
+        "get_hk_daily",
+        "get_us_daily",
+        "get_hk_detail",
+        "get_us_detail",
+        "get_index_daily",
+        "get_index_detail",
+        "get_index_weights",
+        "get_future_daily",
+        "get_future_detail",
+        "get_future_dominant",
+        "get_option_detail",
+        "get_option_implied_volatility",
+        "get_option_underlying_detail",
+        "get_option_underlying_volatility",
+        "get_factor",
+        "get_fina_reports",
+        "get_industry_detail",
+        "get_industry_constituents",
+        "get_macro_detail",
+        "get_macro_tr",
+        "get_last_trade_date",
+        "get_trade_cal",
+    }
+)
+
 
 class CapabilityStatus(StrEnum):
     VERIFIED_ONCE_RESEARCH = "verified_once_research"
     DISABLED = "disabled"
+    NOT_DATA = "not_data"
+
+
+class ProductionAvailability(StrEnum):
+    PRODUCTION_AVAILABLE = "production_available"
+    VERIFIED_RESEARCH_ONLY = "verified_research_only"
+    DISABLED = "disabled"
+    NOT_VERIFIED = "not_verified"
     NOT_DATA = "not_data"
 
 
@@ -117,14 +370,19 @@ class CapabilityRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     endpoint: str = Field(pattern=r"^get_[a-z0-9_]+$")
-    status: str = Field(
-        pattern=r"^(verified_once_research|disabled|not_data)$"
+    status: str = Field(pattern=r"^(verified_once_research|disabled|not_data)$")
+    availability: str = Field(
+        pattern=(
+            r"^(production_available|verified_research_only|disabled|"
+            r"not_verified|not_data)$"
+        )
     )
+    category: str | None = None
     reason: str
     verified_scope_sets: tuple[frozenset[str], ...] = ()
     allowed_request_shape_hashes: tuple[str, ...] = ()
     trade_eligible: bool = False
-    stability_eligible: bool = False
+    stability_confirmed: bool = False
     evidence_ref: str | None = None
 
 
@@ -142,6 +400,53 @@ class CapabilityDisabledError(CapabilityCatalogError):
 
 def endpoint_manifest_hash(endpoints: Iterable[str] = ALL_ENDPOINTS) -> str:
     return sha256("\n".join(sorted(endpoints)).encode()).hexdigest()
+
+
+def capability_catalog_summary(
+    records: Iterable[CapabilityRecord | Mapping[str, object]],
+) -> dict[str, object]:
+    """Return separated availability, trade, and stability catalog counts."""
+    items = tuple(
+        item
+        if isinstance(item, CapabilityRecord)
+        else CapabilityRecord.model_validate(item)
+        for item in records
+    )
+
+    availability = {
+        availability.value: sum(item.availability == availability for item in items)
+        for availability in ProductionAvailability
+    }
+    category_names = sorted({item.category or "unclassified" for item in items})
+    by_category = {
+        category: {
+            "total": sum(
+                (item.category or "unclassified") == category for item in items
+            ),
+            "production_available": sum(
+                (item.category or "unclassified") == category
+                and item.availability == ProductionAvailability.PRODUCTION_AVAILABLE
+                for item in items
+            ),
+            "trade_eligible": sum(
+                (item.category or "unclassified") == category and item.trade_eligible
+                for item in items
+            ),
+            "stability_confirmed": sum(
+                (item.category or "unclassified") == category
+                and item.stability_confirmed
+                for item in items
+            ),
+        }
+        for category in category_names
+    }
+    return {
+        "total": len(items),
+        "availability": availability,
+        "trade_eligible": sum(item.trade_eligible for item in items),
+        "stability_confirmed": sum(item.stability_confirmed for item in items),
+        "by_category": by_category,
+    }
 
 
 _SHAPE_SPECS: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]] = {
@@ -190,7 +495,12 @@ _SHAPE_SPECS: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]] = {
         "bar",
         "1m",
         ("frequency", "symbol"),
-        ("cn_equity_master", "frequency=1m", "single_symbol"),
+        (
+            "cn_equity_master",
+            "frequency=1m",
+            "response_order=descending",
+            "single_symbol",
+        ),
     ),
     "get_stock_detail": (
         "master",
@@ -422,9 +732,7 @@ class PandaDataCapabilityCatalog:
             raise SDKDriftError("full SDK signature catalog hash mismatch")
         self._signature_hashes = dict(signature_hashes)
         self._full_signature_hash = computed_full_hash
-        self._records = {
-            endpoint: self._record(endpoint) for endpoint in ALL_ENDPOINTS
-        }
+        self._records = {endpoint: self._record(endpoint) for endpoint in ALL_ENDPOINTS}
 
     @classmethod
     def for_injected_test_sdk(cls, sdk: Any) -> PandaDataCapabilityCatalog:
@@ -485,9 +793,7 @@ class PandaDataCapabilityCatalog:
         record = self.get(endpoint)
         requested = frozenset(scopes)
         if record.status != CapabilityStatus.VERIFIED_ONCE_RESEARCH:
-            raise CapabilityDisabledError(
-                f"{endpoint} disabled: {record.reason}"
-            )
+            raise CapabilityDisabledError(f"{endpoint} disabled: {record.reason}")
         if requested not in record.verified_scope_sets:
             raise CapabilityDisabledError(
                 f"{endpoint} scope was not verified: {sorted(requested)}"
@@ -497,9 +803,7 @@ class PandaDataCapabilityCatalog:
                 f"{endpoint} typed request shape does not match endpoint/scope"
             )
         if shape.sha256 not in record.allowed_request_shape_hashes:
-            raise CapabilityDisabledError(
-                f"{endpoint} request shape was not verified"
-            )
+            raise CapabilityDisabledError(f"{endpoint} request shape was not verified")
         return record
 
     @staticmethod
@@ -508,35 +812,46 @@ class PandaDataCapabilityCatalog:
             return CapabilityRecord(
                 endpoint=endpoint,
                 status=CapabilityStatus.DISABLED,
+                availability=ProductionAvailability.DISABLED,
                 reason="sdk_warning_deprecated_or_unreleased",
             )
         if endpoint in NOT_DATA:
             return CapabilityRecord(
                 endpoint=endpoint,
                 status=CapabilityStatus.NOT_DATA,
+                availability=ProductionAvailability.NOT_DATA,
                 reason="sdk_helper_not_data_endpoint",
             )
         scopes = VERIFIED_SCOPES.get(endpoint)
         if scopes is not None:
-            shapes = tuple(
-                request_shape(endpoint, scope).sha256 for scope in scopes
-            )
+            shapes = tuple(request_shape(endpoint, scope).sha256 for scope in scopes)
+            production_available = endpoint in PRODUCTION_AVAILABLE_ENDPOINTS
             return CapabilityRecord(
                 endpoint=endpoint,
                 status=CapabilityStatus.VERIFIED_ONCE_RESEARCH,
-                reason="single_probe_research_display_only_not_trade_eligible",
+                availability=(
+                    ProductionAvailability.PRODUCTION_AVAILABLE
+                    if production_available
+                    else ProductionAvailability.VERIFIED_RESEARCH_ONLY
+                ),
+                category=_SHAPE_SPECS[endpoint][0],
+                reason=(
+                    "production_catalog_available_subject_to_runtime_data_gates"
+                    if production_available
+                    else "single_probe_research_display_only_not_production_available"
+                ),
                 verified_scope_sets=scopes,
                 allowed_request_shape_hashes=shapes,
                 trade_eligible=False,
-                stability_eligible=False,
+                stability_confirmed=False,
                 evidence_ref=(
-                    "artifacts/pandadata-capabilities/"
-                    "verification-summary-v1.json"
+                    "artifacts/pandadata-capabilities/verification-summary-v1.json"
                 ),
             )
         return CapabilityRecord(
             endpoint=endpoint,
             status=CapabilityStatus.DISABLED,
+            availability=ProductionAvailability.NOT_VERIFIED,
             reason="not_probed",
         )
 

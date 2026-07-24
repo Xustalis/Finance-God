@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import cast
-
 from dotenv import load_dotenv
 from research_runtime import (
     AgentDefinition,
@@ -62,4 +60,4 @@ class MultiAgentRuntime:
 
     def list_agents(self) -> tuple[AgentDefinition, ...]:
         """Return all agents registered by the unified runtime."""
-        return cast(tuple[AgentDefinition, ...], self._runner.registry.list())
+        return self._runner.registry.list()

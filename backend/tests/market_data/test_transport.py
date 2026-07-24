@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import monotonic, sleep
+from typing import Any
 
 import pytest
 from finance_god.market_data import (
@@ -38,7 +40,11 @@ def test_adapter_configures_one_attempt_budget_once_after_authentication() -> No
     subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
     subject.fetch_snapshot(instrument, release_state=ReleaseState.RELEASED)
 
-    assert policy.configured_budgets == [OperationBudget()]
+    assert policy.auth_configurations == [(OperationBudget(), 10.0)]
+    assert policy.client_configurations == [
+        (OperationBudget(), 10.0),
+        (OperationBudget(), 10.0),
+    ]
     assert [name for name, _ in sdk.calls].count("init_token") == 1
 
 
@@ -51,9 +57,33 @@ def test_transport_policy_is_installed_before_authentication() -> None:
             return super().init_token(**kwargs)
 
     class OrderedPolicy(InjectedSDKTransportPolicy):
-        def configure(self, sdk: object, budget: OperationBudget) -> None:
-            events.append("configure_transport")
-            super().configure(sdk, budget)
+        def configure_auth(
+            self,
+            sdk: object,
+            budget: OperationBudget,
+            *,
+            timeout_seconds: float,
+        ) -> None:
+            events.append("configure_auth_transport")
+            super().configure_auth(
+                sdk,
+                budget,
+                timeout_seconds=timeout_seconds,
+            )
+
+        def configure_client(
+            self,
+            sdk: object,
+            budget: OperationBudget,
+            *,
+            timeout_seconds: float,
+        ) -> None:
+            events.append("configure_client_transport")
+            super().configure_client(
+                sdk,
+                budget,
+                timeout_seconds=timeout_seconds,
+            )
 
     sdk = OrderedSDK()
     sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
@@ -71,7 +101,11 @@ def test_transport_policy_is_installed_before_authentication() -> None:
         release_state=ReleaseState.RELEASED,
     )
 
-    assert events == ["configure_transport", "authenticate"]
+    assert events == [
+        "configure_auth_transport",
+        "authenticate",
+        "configure_client_transport",
+    ]
 
 
 def test_adapter_reports_deadline_without_fabricating_success() -> None:
@@ -112,7 +146,9 @@ def test_production_transport_overrides_sdk_retry_and_streaming_timeout() -> Non
             self.timeouts: list[float] = []
 
         def request(self, **kwargs: object) -> object:
-            self.timeouts.append(float(kwargs["timeout"]))
+            timeout = kwargs["timeout"]
+            assert isinstance(timeout, (int, float))
+            self.timeouts.append(float(timeout))
             return {"ok": True}
 
     class Client:
@@ -129,13 +165,98 @@ def test_production_transport_overrides_sdk_retry_and_streaming_timeout() -> Non
     sdk = SDK()
     policy = PandaData012TransportPolicy()
 
-    policy.configure(sdk, OperationBudget())
+    policy.configure_client(
+        sdk,
+        OperationBudget(),
+        timeout_seconds=2.0,
+    )
     result = sdk.client._http_client.request(timeout=5000.0)
 
     assert result == {"ok": True}
     assert sdk.client._http_client._config.max_retries == 1
-    assert sdk.client._http_client._config.timeout == 10.0
-    assert sdk.client._http_client.timeouts == [10.0]
+    assert sdk.client._http_client._config.timeout == 2.0
+    assert sdk.client._http_client.timeouts == [2.0]
+
+
+def test_authentication_is_interrupted_at_shared_absolute_deadline() -> None:
+    class SlowAuthSDK(FakeSDK):
+        def init_token(self, **kwargs: object) -> str:
+            self.calls.append(("init_token", kwargs))
+            sleep(0.11)
+            return "late-token"
+
+    sdk = SlowAuthSDK()
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
+    subject = PandaDataAdapter(
+        sdk=sdk,
+        sdk_version=EXPECTED_SDK_VERSION,
+        credentials=PandaCredentials("user", "password"),
+        transport_policy=InjectedSDKTransportPolicy(),
+        catalog=PandaDataCapabilityCatalog.for_injected_test_sdk(sdk),
+        now=lambda: NOW,
+        operation_budget=OperationBudget(
+            request_timeout_seconds=0.06,
+            operation_deadline_seconds=0.06,
+        ),
+    )
+
+    started = monotonic()
+    with pytest.raises(MarketDataError) as captured:
+        subject.fetch_snapshot(
+            DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ"),
+            release_state=ReleaseState.RELEASED,
+        )
+    elapsed = monotonic() - started
+
+    assert captured.value.kind is ErrorKind.DEADLINE
+    assert elapsed < 0.1
+    assert [name for name, _ in sdk.calls] == ["init_token"]
+
+
+def test_request_uses_only_deadline_remaining_after_authentication() -> None:
+    class SlowCombinedSDK(FakeSDK):
+        def init_token(self, **kwargs: object) -> str:
+            self.calls.append(("init_token", kwargs))
+            sleep(0.04)
+            return "token"
+
+        def __getattr__(self, name: str) -> Any:
+            endpoint = super().__getattr__(name)
+
+            def slow_endpoint(**kwargs: object) -> object:
+                sleep(0.04)
+                return endpoint(**kwargs)
+
+            return slow_endpoint
+
+    sdk = SlowCombinedSDK()
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
+    policy = InjectedSDKTransportPolicy()
+    subject = PandaDataAdapter(
+        sdk=sdk,
+        sdk_version=EXPECTED_SDK_VERSION,
+        credentials=PandaCredentials("user", "password"),
+        transport_policy=policy,
+        catalog=PandaDataCapabilityCatalog.for_injected_test_sdk(sdk),
+        now=lambda: NOW,
+        operation_budget=OperationBudget(
+            request_timeout_seconds=0.06,
+            operation_deadline_seconds=0.06,
+        ),
+    )
+
+    started = monotonic()
+    with pytest.raises(MarketDataError) as captured:
+        subject.fetch_snapshot(
+            DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ"),
+            release_state=ReleaseState.RELEASED,
+        )
+    elapsed = monotonic() - started
+
+    assert captured.value.kind is ErrorKind.DEADLINE
+    assert elapsed < 0.09
+    assert policy.client_configurations
+    assert 0 < policy.client_configurations[0][1] < 0.04
 
 
 @pytest.mark.parametrize(
