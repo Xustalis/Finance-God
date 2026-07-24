@@ -15,7 +15,7 @@
 | 调研日期 | 2026-07-23 |
 | 产品决策基线 | [MVP PRD Draft 2](../prd/Finance-God_MVP_PRD_v1.0.md)，作为当前产品范围、优先级和业务边界的单一依据 |
 | 当前实现基线 | [Finance-God 运行说明](../../README.md)、[Multi-Agent 技术说明](../architecture/agent-swarm-technical.md)；当前已落地统一 Multi-Agent 运行时、路由与离线工作流实验，尚未形成完整交易产品 |
-| 页面设计输入 | [T03 AI 辅助交易台](../page-design/pages/T03_AI辅助交易台.md)，仅作为单标的手动交易页的需求输入，不代表完整产品或现有实现 |
+| 页面设计输入 | 原 T03 AI 辅助交易台页面规格（单标的手动交易页需求输入）已随产品形态重构移除；当前设计基线见 [Agent 主控交易台规划](../architecture/2026-07-24_Agent主控交易台规划.md) |
 
 ---
 

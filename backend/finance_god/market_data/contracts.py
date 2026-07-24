@@ -144,6 +144,7 @@ class SourceStamp(BaseModel):
     trading_date: str = Field(pattern=r"^\d{8}$")
     provider_published_at: datetime | None = None
     ingested_at: datetime
+    allows_future_data_time: bool = False
     frequency: DataFrequency
     capability_version: str = Field(min_length=1, max_length=64)
     verification: str = Field(pattern=r"^verified_once_research$")
@@ -158,7 +159,7 @@ class SourceStamp(BaseModel):
             and self.provider_published_at.tzinfo is None
         ):
             raise ValueError("provider_published_at must be timezone-aware")
-        if self.data_time > self.ingested_at:
+        if self.data_time > self.ingested_at and not self.allows_future_data_time:
             raise ValueError("data_time cannot be later than ingestion")
         if self.provider_published_at is not None and (
             self.provider_published_at < self.data_time

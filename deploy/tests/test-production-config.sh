@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly CHECKER="$PROJECT_DIR/deploy/check-production-config.sh"
 readonly REMOTE_DEPLOY="$PROJECT_DIR/deploy/remote-deploy.sh"
+readonly COMPOSE_FILE="$PROJECT_DIR/deploy/docker-compose.prod.yml"
 readonly TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEST_DIR"' EXIT
 
@@ -34,13 +35,23 @@ if [[ -e "$TEST_DIR/app/deploy/.env.production" ]]; then
   exit 1
 fi
 
+grep -q '^  learning:$' "$COMPOSE_FILE"
+grep -q 'learning_data:/app/artifacts/knowledge:ro' "$COMPOSE_FILE"
+grep -q 'python -m scripts.run_self_iteration_loop' "$COMPOSE_FILE"
+
 write_base_env "$TEST_DIR/deepseek.env"
 printf '%s\n' "DEEPSEEK_API_KEY=test-deepseek-key" >>"$TEST_DIR/deepseek.env"
-"$CHECKER" "$TEST_DIR/deepseek.env" >/dev/null
+if "$CHECKER" "$TEST_DIR/deepseek.env" >/dev/null 2>&1; then
+  echo "learning deployment without ARK unexpectedly passed" >&2
+  exit 1
+fi
 
 write_base_env "$TEST_DIR/stepfun.env"
 printf '%s\n' "STEPFUN_API_KEY=test-stepfun-key" >>"$TEST_DIR/stepfun.env"
-"$CHECKER" "$TEST_DIR/stepfun.env" >/dev/null
+if "$CHECKER" "$TEST_DIR/stepfun.env" >/dev/null 2>&1; then
+  echo "learning deployment without ARK unexpectedly passed" >&2
+  exit 1
+fi
 
 write_base_env "$TEST_DIR/ark.env"
 printf '%s\n' \
@@ -67,7 +78,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   FINANCE_GOD_ENV_FILE="$TEST_DIR/deepseek.env" \
     docker compose \
       --env-file "$TEST_DIR/deepseek.env" \
-      -f "$PROJECT_DIR/deploy/docker-compose.prod.yml" \
+      -f "$COMPOSE_FILE" \
       config --quiet
 else
   echo "docker compose unavailable; compose config validation skipped" >&2

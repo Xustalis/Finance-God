@@ -98,6 +98,7 @@ from .service import (
     MarketBarsResult,
     MarketDataApplication,
     MarketDataService,
+    MarketFactBatch,
     MarketQuote,
     QuoteBatch,
 )
@@ -157,6 +158,7 @@ __all__ = [
     "MarketDataError",
     "MarketDataResponseError",
     "MarketDataService",
+    "MarketFactBatch",
     "MarketQuote",
     "MarketType",
     "MonitorDataset",

@@ -37,7 +37,13 @@ jobs:
 
       - name: Test backend
         working-directory: backend
-        run: timeout 60s pytest tests/unit -q
+        run: >-
+          timeout 60s pytest
+          tests/unit
+          tests/learning
+          tests/api/test_agent_routes.py
+          tests/market_data/test_service.py
+          -q
 
       - uses: actions/setup-node@v4
         with:

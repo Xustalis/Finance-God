@@ -13,6 +13,7 @@ RUN apt-get update \
 COPY pyproject.toml requirements.txt ./
 COPY app ./app
 COPY finance_god ./finance_god
+COPY scripts ./scripts
 COPY vendor ./vendor
 COPY server.py ./
 COPY alembic.ini ./

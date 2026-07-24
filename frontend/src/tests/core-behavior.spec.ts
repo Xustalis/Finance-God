@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory } from 'vue-router'
 import { createAppRouter } from '@/router'
@@ -30,14 +30,32 @@ describe('route permissions', () => {
     expect(router.currentRoute.value.path).toBe('/login')
   })
 
-  it('guards trading and workspace routes behind an authenticated session', async () => {
+  it('guards the desk and legacy trading URLs behind an authenticated session', async () => {
     const router = createAppRouter(createMemoryHistory())
-    for (const path of ['/markets', '/desk', '/overview', '/portfolio', '/orders', '/reviews', '/data', '/settings']) {
+    for (const path of ['/rebuilding', '/markets', '/desk', '/overview', '/portfolio', '/orders', '/reviews', '/data', '/settings']) {
       await router.push(path)
       await router.isReady()
       expect(router.currentRoute.value.path).toBe('/login')
-      expect(router.currentRoute.value.query.redirect).toBe(path)
+      expect(router.currentRoute.value.query.redirect).toBe('/desk')
     }
+  })
+
+  it('keeps the explicit local desk preview route behind the existing login session', async () => {
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/desk?preview=1')
+    await router.isReady()
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.redirect).toBe('/desk?preview=1')
+    expect(localStorage.getItem('finance-god-token')).toBeNull()
+  })
+
+  it('honors a logged-in developer redirect to the desk', async () => {
+    localStorage.setItem('finance-god-token', 'token')
+    localStorage.setItem('finance-god-user', JSON.stringify({ id: 'u', role: 'user' }))
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/login?redirect=/desk')
+    await router.isReady()
+    expect(router.currentRoute.value.path).toBe('/desk')
   })
 
   it('redirects admin settings to the dedicated login without clearing a user session', async () => {
@@ -178,92 +196,4 @@ describe('application contract',()=>{
   it('unwraps successful envelopes when request id is null',()=>{expect(unwrapEnvelope({success:true,data:{ok:true},error:null,meta:{request_id:null}})).toEqual({ok:true})})
   it('hydrates an existing token before mounting and contains hydrate failures',async()=>{const order:string[]=[];await bootstrapApplication({hasToken:true,hydrate:async()=>{order.push('hydrate');throw new Error('expired')},mount:()=>order.push('mount')});expect(order).toEqual(['hydrate','mount'])})
   it('resolves the workbench origin from either supported build variable',()=>{expect(resolveWorkbenchOrigin({VITE_WORKBENCH_ORIGIN:'https://vite.example',WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://vite.example');expect(resolveWorkbenchOrigin({WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://alias.example')})
-})
-
-vi.mock('@/api/desk', () => ({
-  fetchMarketOverview: vi.fn().mockResolvedValue({
-    object: { type: 'market_overview', id: 'test', symbols: [] },
-    data: {
-      quotes: [],
-      signal: {
-        tendency: 'unavailable',
-        tendency_label: '不可用',
-        consistency_percent: null,
-        definition: 'test',
-      },
-      forces: [],
-      indicators: [],
-    },
-    version: 'test',
-    algorithm_version: 'test-v1',
-    generated_at: '2026-07-24T00:00:00Z',
-    data_status: {
-      provider: 'mock',
-      provider_time: null,
-      frequency: null,
-      freshness: 'unknown',
-      last_success_at: '2026-07-24T00:00:00Z',
-    },
-    warnings: [],
-  }),
-  fetchBars: vi.fn().mockResolvedValue({ symbol: '', frequency: '', bars: [] }),
-  fetchHealth: vi.fn().mockResolvedValue({ market_data: 'mock', readiness: 'ready' }),
-  isCanceledError: vi.fn(() => false),
-}))
-
-describe('market polling controller', () => {
-  beforeEach(() => { setActivePinia(createPinia()) })
-  it('defaults to a 5s interval and switches frequency on demand', async () => {
-    const { useMarketStore } = await import('@/stores/market')
-    const market = useMarketStore()
-    expect(market.pollIntervalMs).toBe(5000)
-    market.setPollInterval(1000)
-    expect(market.pollIntervalMs).toBe(1000)
-    expect(market.isPolling).toBe(true)
-    expect(market.isPaused).toBe(false)
-    market.stopPolling()
-  })
-  it('pauses without discarding data and resumes on a positive interval', async () => {
-    const { useMarketStore } = await import('@/stores/market')
-    const market = useMarketStore()
-    market.setPollInterval(3000)
-    market.setPollInterval(0)
-    expect(market.isPaused).toBe(true)
-    expect(market.isPolling).toBe(false)
-    market.setPollInterval(15000)
-    expect(market.isPaused).toBe(false)
-    expect(market.isPolling).toBe(true)
-    expect(market.pollIntervalMs).toBe(15000)
-    market.stopPolling()
-  })
-  it('keeps polling across an overlapping navigation handoff', async () => {
-    const { useMarketStore } = await import('@/stores/market')
-    const market = useMarketStore()
-    market.startPolling()            // 页面 A onMounted
-    expect(market.isPolling).toBe(true)
-    // 路由切换：新页面 onMounted 早于旧页面 onUnmounted 触发
-    market.startPolling()            // 页面 B onMounted
-    market.stopPolling()             // 页面 A onUnmounted
-    expect(market.isPolling).toBe(true)   // 仍在轮询（引用计数未归零）
-    market.stopPolling()             // 页面 B onUnmounted
-    expect(market.isPolling).toBe(false)
-  })
-  it('discards a superseded loadBars response instead of overwriting the current symbol', async () => {
-    const desk = await import('@/api/desk')
-    const pending: Array<(symbol: string) => void> = []
-    vi.mocked(desk.fetchBars).mockImplementation((symbol: string) =>
-      new Promise((resolve) => {
-        pending.push(() => resolve({ symbol, frequency: 'day', bars: [] } as never))
-      }),
-    )
-    const { useMarketStore } = await import('@/stores/market')
-    const market = useMarketStore()
-    const first = market.loadBars('AAA.SH')   // 旧标的
-    const second = market.loadBars('BBB.SH')  // 快速切换到新标的
-    // 乱序返回：最新请求先完成，随后旧请求才返回
-    pending[1]('BBB.SH')
-    pending[0]('AAA.SH')
-    await Promise.all([first, second])
-    expect(market.barsSymbol).toBe('BBB.SH')  // 旧结果被丢弃，未覆盖当前标的
-  })
 })

@@ -97,6 +97,12 @@ class FreshnessPolicy:
             FreshnessPolicyKey(
                 "market_display",
                 MarketType.CN,
+                DataCategory.FINANCIAL,
+                DataFrequency.EVENT,
+            ): 604_800,
+            FreshnessPolicyKey(
+                "market_display",
+                MarketType.CN,
                 DataCategory.DERIVATIVE_RESEARCH,
                 DataFrequency.DAILY,
             ): 129_600,

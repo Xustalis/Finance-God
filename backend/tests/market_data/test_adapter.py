@@ -235,6 +235,21 @@ def test_master_and_calendar_normalizers_validate_schema() -> None:
     ]
 
 
+def test_calendar_accepts_a_published_future_schedule_date() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_trade_cal"] = [{"trade_date": "20260724", "is_trading_day": 1}]
+    subject = adapter(sdk)
+
+    calendar = subject.fetch_calendar(
+        market=DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ").market,
+        start_date="20260724",
+        end_date="20260724",
+    )
+
+    assert calendar.items[0].trade_date == "20260724"
+    assert calendar.items[0].source.allows_future_data_time is True
+
+
 def test_research_endpoint_returns_typed_fact_or_explicit_unsupported() -> None:
     sdk = FakeSDK()
     sdk.responses["get_factor"] = [

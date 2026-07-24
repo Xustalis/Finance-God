@@ -23,7 +23,9 @@ from .contracts import (
     EmptyMeaning,
     InstrumentId,
     MarketType,
+    MonitorDataset,
     NormalizedBar,
+    NormalizedFact,
     NormalizedSnapshot,
     ReleaseState,
 )
@@ -142,6 +144,19 @@ class MarketBarsResult(BaseModel):
     error_kind: ErrorKind | None = Field(default=None, exclude=True)
 
 
+class MarketFactBatch(BaseModel):
+    """Read-only, source-stamped research facts for an instrument."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: Literal["PandaData"] = "PandaData"
+    fact_kind: Literal["company_disclosure", "margin_balance"]
+    symbol: str
+    requested_at: datetime
+    facts: tuple[NormalizedFact, ...]
+    trade_eligible: Literal[False] = False
+
+
 class QuoteExecution(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -233,7 +248,9 @@ class MarketDataService:
         )
         return envelope
 
-    def _fetch_bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
+    def read_bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
+        """Read normalized bars without starting a durable DQ workflow."""
+
         instrument = self.resolve(symbol)
         now = self._aware_now()
         market_today = now.astimezone(_market_zone(instrument.market))
@@ -285,6 +302,69 @@ class MarketDataService:
             dq_request=outcome.dq_request,
             error_message=error_message,
             error_kind=_envelope_error_kind(envelope) if not envelope.items else None,
+        )
+
+    def read_information_facts(
+        self,
+        symbol: str,
+        *,
+        start_quarter: str,
+        end_quarter: str,
+        limit: int = 20,
+    ) -> MarketFactBatch:
+        """Return source-stamped financial-report disclosures, never summaries."""
+        _validate_fact_limit(limit)
+        instrument = self.resolve(symbol)
+        envelope = self._adapter.fetch_financial_report_facts(
+            instrument,
+            start_quarter=start_quarter,
+            end_quarter=end_quarter,
+        )
+        return _fact_batch(
+            envelope=envelope,
+            fact_kind="company_disclosure",
+            symbol=instrument.symbol,
+            requested_at=self._aware_now(),
+            limit=limit,
+        )
+
+    def read_sentiment_facts(
+        self,
+        symbol: str,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 60,
+    ) -> MarketFactBatch:
+        """Return raw margin-balance observations; no inferred sentiment score."""
+        _validate_fact_limit(limit)
+        if (start_date is None) != (end_date is None):
+            raise ValueError("start_date and end_date must be supplied together")
+        now = self._aware_now()
+        if start_date is None:
+            end_date = now.strftime("%Y%m%d")
+            start_date = (now - timedelta(days=30)).strftime("%Y%m%d")
+        instrument = self.resolve(symbol)
+        if (
+            instrument.market is not MarketType.CN
+            or instrument.asset_class.value != "equity"
+        ):
+            raise MarketDataResponseError(
+                "margin-balance sentiment facts require a CN equity instrument",
+                endpoint="get_margin",
+            )
+        envelope = self._adapter.fetch_monitor_facts(
+            dataset=MonitorDataset.MARGIN,
+            symbols=(instrument.provider_symbol,),
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return _fact_batch(
+            envelope=envelope,
+            fact_kind="margin_balance",
+            symbol=instrument.symbol,
+            requested_at=now,
+            limit=limit,
         )
 
     def catalog(self) -> tuple[dict[str, object], ...]:
@@ -434,8 +514,7 @@ class _QuoteCoordinator:
         successful = {item.instrument.symbol for item in result_items}
         self._seen.update(successful)
         errors = resolution_errors | {
-            item.scope.split(":", maxsplit=1)[0]: item.message
-            for item in diagnostics
+            item.scope.split(":", maxsplit=1)[0]: item.message for item in diagnostics
         }
         quality: dict[str, QualityDecision] = {}
         dq_requests: list[DQTriggerRequest] = []
@@ -513,7 +592,7 @@ class MarketDataApplication:
     async def bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
         self._require_workflow()
         result = await asyncio.to_thread(
-            self._service._fetch_bars,
+            self._service.read_bars,
             symbol,
             limit=limit,
         )
@@ -608,6 +687,36 @@ def _bar(item: NormalizedBar) -> MarketBar:
         instrument_master_identity=item.source.instrument_master_identity,
         instrument_master_version=item.source.instrument_master_version,
     )
+
+
+def _fact_batch(
+    *,
+    envelope: DataEnvelope[NormalizedFact],
+    fact_kind: Literal["company_disclosure", "margin_balance"],
+    symbol: str,
+    requested_at: datetime,
+    limit: int,
+) -> MarketFactBatch:
+    if not envelope.items:
+        message = (
+            envelope.diagnostics[-1].message
+            if envelope.diagnostics
+            else "PandaData returned no research facts"
+        )
+        raise MarketDataResponseError(
+            message, endpoint=_single_source_endpoint(envelope)
+        )
+    return MarketFactBatch(
+        fact_kind=fact_kind,
+        symbol=symbol,
+        requested_at=requested_at,
+        facts=envelope.items[:limit],
+    )
+
+
+def _validate_fact_limit(limit: int) -> None:
+    if isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
 
 
 def _bounded_symbols(symbols: Iterable[str]) -> tuple[str, ...]:

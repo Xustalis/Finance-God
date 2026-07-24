@@ -17,7 +17,6 @@ import {
   type WorkspaceSection,
 } from './agentActions'
 
-const MINIMUM_DESKTOP_WIDTH = 1024
 const MARKET_POLL_INTERVAL_MS = 60_000
 const AGENT_COLLAPSE_KEY = 'finance-god-agent-workbench-collapsed'
 
@@ -66,6 +65,7 @@ interface BarsResponse {
 
 type WorkflowStatus = 'running' | 'completed' | 'failed'
 type StepStatus = 'pending' | 'running' | 'completed' | 'failed'
+type AgentPage = 'conversation' | 'workflows'
 
 interface WorkflowStep {
   id: string
@@ -108,10 +108,11 @@ const sectionItems: ReadonlyArray<{
   hint: string
   action: AgentActionId
 }> = [
-  { id: 'information', label: '信息', hint: '行情、交易与策略', action: 'navigate_information' },
+  { id: 'information', label: '信息', hint: '行情与公司信息', action: 'navigate_information' },
   { id: 'portfolio', label: '持仓', hint: '仿真仓位与风险', action: 'navigate_portfolio' },
   { id: 'watchlist', label: '自选', hint: '观察标的与上下文', action: 'navigate_watchlist' },
-  { id: 'history', label: '交易记录', hint: '仿真订单与成交', action: 'navigate_history' },
+  { id: 'trading', label: '交易', hint: '仿真草稿与策略', action: 'navigate_trading' },
+  { id: 'history', label: '记录', hint: '订单、成交与工作流', action: 'navigate_history' },
   { id: 'wallet', label: '钱包', hint: '仿真现金与占用', action: 'navigate_wallet' },
 ]
 
@@ -121,8 +122,20 @@ const informationModes: ReadonlyArray<{
   action: AgentActionId
 }> = [
   { id: 'market', label: '行情', action: 'show_market' },
+]
+
+const tradingModes: ReadonlyArray<{
+  id: InformationMode
+  label: string
+  action: AgentActionId
+}> = [
   { id: 'trade', label: '交易', action: 'show_trade' },
   { id: 'strategy', label: '策略', action: 'show_strategy' },
+]
+
+const agentPages: ReadonlyArray<{ id: AgentPage; label: string }> = [
+  { id: 'conversation', label: '对话' },
+  { id: 'workflows', label: '任务' },
 ]
 
 const workflowDefinitions: Record<
@@ -159,18 +172,21 @@ const workflowDefinitions: Record<
   },
 }
 
-const currentWidth = ref(
-  typeof window === 'undefined' ? MINIMUM_DESKTOP_WIDTH : window.innerWidth,
-)
 const storedAgentCollapsed = typeof window === 'undefined'
   ? null
   : window.localStorage.getItem(AGENT_COLLAPSE_KEY)
 const agentCollapsed = ref(
   storedAgentCollapsed === null
-    ? typeof window !== 'undefined' && window.innerWidth < 1280
+    ? false
     : storedAgentCollapsed === 'true',
 )
-let hasExplicitAgentPreference = storedAgentCollapsed !== null
+const isCompactViewport = ref(
+  typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches,
+)
+const compactAgentExpanded = ref(false)
+const agentIsCollapsed = computed(
+  () => agentCollapsed.value || (isCompactViewport.value && !compactAgentExpanded.value),
+)
 const currentSection = ref<WorkspaceSection>('information')
 const informationMode = ref<InformationMode>('market')
 const selectedSymbol = ref('000001.SZ')
@@ -194,7 +210,7 @@ const messages = ref<ConversationMessage[]>([
   {
     id: 1,
     role: 'agent',
-    text: '已读取当前页面上下文。你可以让我切换工作区、分析当前对象或填写未提交草稿；用户设置与订单提交仍由你本人操作。',
+    text: '当前按“无仿真交易记录”场景初始化。我可以基于获准的画像投影和当前行情生成研究候选，也可切换工作区或填写未提交草稿；用户设置与订单提交仍由你本人操作。',
     at: new Date().toISOString(),
   },
 ])
@@ -204,6 +220,7 @@ const activeWorkflow = ref<WorkflowRun | null>(null)
 const workflowExpanded = ref(false)
 let workflowTimer: ReturnType<typeof setInterval> | null = null
 
+const agentPage = ref<AgentPage>('conversation')
 const remindersOpen = ref(false)
 const settingsOpen = ref(false)
 const alerts = ref<AlertRecord[]>([])
@@ -217,6 +234,7 @@ let overviewAbort: AbortController | null = null
 let barsAbort: AbortController | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
+let toastFocusOrigin: HTMLElement | null = null
 
 const selectedQuote = computed(
   () => quotes.value.find((quote) => quote.symbol === selectedSymbol.value) ?? null,
@@ -230,14 +248,23 @@ const quickCommands = computed(
   () => quickCommandsFor(currentSection.value, informationMode.value),
 )
 
+const currentModes = computed(() => (
+  currentSection.value === 'trading' ? tradingModes : informationModes
+))
+
+const workspacePageKey = computed(
+  () => `${currentSection.value}:${currentSection.value === 'information' || currentSection.value === 'trading' ? informationMode.value : 'default'}`,
+)
+const agentPageKey = computed(() => `agent:${agentPage.value}`)
+
 const pageTitle = computed(() => {
   const section = sectionItems.find((item) => item.id === currentSection.value)
   return section?.label ?? '信息'
 })
 
 const contextLabel = computed(() => {
-  if (currentSection.value === 'information') {
-    const mode = informationModes.find((item) => item.id === informationMode.value)
+  if (currentSection.value === 'information' || currentSection.value === 'trading') {
+    const mode = currentModes.value.find((item) => item.id === informationMode.value)
     return `${pageTitle.value} / ${mode?.label ?? '行情'} · ${selectedSymbol.value}`
   }
   return `${pageTitle.value} · ${selectedSymbol.value}`
@@ -453,17 +480,33 @@ function pushAlert(input: Omit<AlertRecord, 'id' | 'createdAt' | 'read'>): void 
     read: false,
   }
   alerts.value = [record, ...alerts.value]
+  const activeElement = document.activeElement
+  toastFocusOrigin = activeElement instanceof HTMLElement && activeElement !== document.body
+    ? activeElement
+    : null
   activeToast.value = record
   if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => {
-    activeToast.value = null
-  }, 8_000)
+  toastTimer = null
+  if (record.severity === 'info') {
+    toastTimer = setTimeout(() => {
+      activeToast.value = null
+    }, 8_000)
+  }
 }
 
 function dismissToast(): void {
   if (toastTimer) clearTimeout(toastTimer)
   toastTimer = null
   activeToast.value = null
+  const focusTarget = toastFocusOrigin
+  toastFocusOrigin = null
+  void nextTick(() => {
+    if (focusTarget?.isConnected) {
+      focusTarget.focus()
+      return
+    }
+    document.querySelector<HTMLElement>('#reminder-history-toggle')?.focus()
+  })
 }
 
 function markAllAlertsRead(): void {
@@ -503,6 +546,10 @@ function performAction(actionId: AgentActionId, value?: string | number): void {
     case 'navigate_watchlist':
       currentSection.value = 'watchlist'
       return
+    case 'navigate_trading':
+      currentSection.value = 'trading'
+      informationMode.value = 'trade'
+      return
     case 'navigate_history':
       currentSection.value = 'history'
       return
@@ -517,11 +564,11 @@ function performAction(actionId: AgentActionId, value?: string | number): void {
       refreshAll()
       return
     case 'show_trade':
-      currentSection.value = 'information'
+      currentSection.value = 'trading'
       informationMode.value = 'trade'
       return
     case 'show_strategy':
-      currentSection.value = 'information'
+      currentSection.value = 'trading'
       informationMode.value = 'strategy'
       return
     case 'select_symbol': {
@@ -534,22 +581,22 @@ function performAction(actionId: AgentActionId, value?: string | number): void {
       return
     }
     case 'fill_order_quantity':
-      currentSection.value = 'information'
+      currentSection.value = 'trading'
       informationMode.value = 'trade'
       orderQuantity.value = Number(value)
       return
     case 'fill_limit_price':
-      currentSection.value = 'information'
+      currentSection.value = 'trading'
       informationMode.value = 'trade'
       orderLimitPrice.value = Number(value)
       return
     case 'set_order_side_buy':
-      currentSection.value = 'information'
+      currentSection.value = 'trading'
       informationMode.value = 'trade'
       orderSide.value = 'buy'
       return
     case 'set_order_side_sell':
-      currentSection.value = 'information'
+      currentSection.value = 'trading'
       informationMode.value = 'trade'
       orderSide.value = 'sell'
       return
@@ -557,6 +604,7 @@ function performAction(actionId: AgentActionId, value?: string | number): void {
 }
 
 function startWorkflow(key: WorkflowKey, title: string): void {
+  agentPage.value = 'workflows'
   if (activeWorkflow.value?.status === 'running') {
     addMessage('agent', '当前已有工作流运行中。完成或失败后才能启动下一条工作流。')
     return
@@ -626,11 +674,11 @@ function runCurrentAnalysis(): void {
     startWorkflow('portfolio_stress', '持仓与组合压力分析')
     return
   }
-  if (informationMode.value === 'trade') {
+  if (currentSection.value === 'trading' && informationMode.value === 'trade') {
     startWorkflow('order_review', '仿真订单草稿复核')
     return
   }
-  if (informationMode.value === 'strategy') {
+  if (currentSection.value === 'trading' && informationMode.value === 'strategy') {
     startWorkflow('strategy_validation', '策略条件验证')
     return
   }
@@ -642,7 +690,10 @@ function onWorkflowToggle(event: Event): void {
 }
 
 function toggleAgentPanel(): void {
-  hasExplicitAgentPreference = true
+  if (isCompactViewport.value) {
+    compactAgentExpanded.value = !compactAgentExpanded.value
+    return
+  }
   agentCollapsed.value = !agentCollapsed.value
   window.localStorage.setItem(
     AGENT_COLLAPSE_KEY,
@@ -650,11 +701,13 @@ function toggleAgentPanel(): void {
   )
 }
 
-function resizeHandler(): void {
-  currentWidth.value = window.innerWidth
-  if (!hasExplicitAgentPreference) {
-    agentCollapsed.value = currentWidth.value < 1280
-  }
+function onViewportChange(event: MediaQueryListEvent): void {
+  isCompactViewport.value = event.matches
+  if (!event.matches) compactAgentExpanded.value = false
+}
+
+function showAgentPage(page: AgentPage): void {
+  agentPage.value = page
 }
 
 watch(selectedSymbol, () => {
@@ -662,8 +715,7 @@ watch(selectedSymbol, () => {
 })
 
 onMounted(() => {
-  resizeHandler()
-  window.addEventListener('resize', resizeHandler)
+  window.matchMedia('(max-width: 1023px)').addEventListener('change', onViewportChange)
   document.addEventListener('visibilitychange', onVisibilityChange)
   refreshAll()
   startPolling()
@@ -677,7 +729,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', resizeHandler)
+  window.matchMedia('(max-width: 1023px)').removeEventListener('change', onViewportChange)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   stopPolling()
   overviewAbort?.abort()
@@ -690,30 +742,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="prototype-root">
-    <section v-if="currentWidth < MINIMUM_DESKTOP_WIDTH" class="desktop-notice">
-      <p class="eyebrow">DESKTOP WORKBENCH</p>
-      <h1>请使用更宽的桌面窗口</h1>
-      <p>
-        当前宽度 {{ currentWidth }} px；交易台最低支持 {{ MINIMUM_DESKTOP_WIDTH }} px。
-        本产品不生成移动交易布局。
-      </p>
-    </section>
-
-    <template v-else>
-      <header class="masthead">
+    <header class="masthead">
         <div class="brand-block">
           <span class="brand">FINANCE GOD</span>
           <span class="prototype-mark">AGENT WORKBENCH · ISOLATED PROTOTYPE</span>
         </div>
 
         <nav class="product-nav" aria-label="产品导航">
-          <button type="button">总览</button>
-          <button type="button">行情</button>
-          <button type="button" class="current" aria-current="page">交易台</button>
-          <button type="button">组合</button>
-          <button type="button">订单</button>
-          <button type="button">复盘</button>
-          <button type="button">数据</button>
+          <button type="button" aria-current="page">交易台</button>
         </nav>
 
         <div class="global-status">
@@ -723,7 +759,12 @@ onBeforeUnmount(() => {
             PandaData
           </span>
           <span class="status-fact">请求间隔 60 秒</span>
+          <span class="status-fact">
+            <i :class="activeWorkflow?.status === 'running' ? 'running-dot' : 'status-dot'" />
+            Agent {{ activeWorkflow?.status === 'running' ? '运行中' : '可用' }}
+          </span>
           <button
+            id="reminder-history-toggle"
             type="button"
             class="plain-action reminder-button"
             :aria-expanded="remindersOpen"
@@ -793,13 +834,9 @@ onBeforeUnmount(() => {
         </section>
       </header>
 
-      <div class="workbench" :class="{ 'agent-collapsed': agentCollapsed }">
+      <div class="workbench" :class="{ 'agent-collapsed': agentIsCollapsed }">
         <section class="left-workbench" aria-label="交易台信息工作区">
           <aside class="workspace-nav" aria-label="工作区导航">
-            <div class="nav-caption">
-              <span class="eyebrow">WORKSPACE</span>
-              <strong>交易台</strong>
-            </div>
             <button
               v-for="item in sectionItems"
               :key="item.id"
@@ -826,7 +863,9 @@ onBeforeUnmount(() => {
           </aside>
 
           <main class="workspace-main">
-            <header class="context-bar">
+            <Transition name="paper-tear" mode="out-in">
+              <div :key="workspacePageKey" class="workspace-page">
+                <header class="context-bar">
               <div>
                 <span class="eyebrow">CURRENT OBJECT · workspace-context/v1</span>
                 <h1>{{ contextLabel }}</h1>
@@ -840,10 +879,10 @@ onBeforeUnmount(() => {
               </div>
             </header>
 
-            <template v-if="currentSection === 'information'">
-              <div class="mode-tabs" role="tablist" aria-label="信息工作态">
+                <template v-if="currentSection === 'information' || currentSection === 'trading'">
+              <div class="mode-tabs" role="tablist" :aria-label="currentSection === 'trading' ? '交易工作态' : '信息工作态'">
                 <button
-                  v-for="mode in informationModes"
+                  v-for="mode in currentModes"
                   :key="mode.id"
                   type="button"
                   role="tab"
@@ -860,6 +899,7 @@ onBeforeUnmount(() => {
                   {{ mode.label }}
                 </button>
                 <button
+                  v-if="currentSection === 'information'"
                   type="button"
                   class="refresh-action"
                   data-agent-action="refresh_market"
@@ -1037,7 +1077,7 @@ onBeforeUnmount(() => {
                   <section class="draft-status">
                     <span>草稿状态</span>
                     <strong>等待后端计算与正式风控</strong>
-                    <p>行情、费用、资金、授权和组合影响尚未形成同一版本，不能进入 T06。</p>
+              <p>行情、费用、资金、授权和组合影响尚未形成同一版本，不能进入最终确认。</p>
                   </section>
 
                   <button
@@ -1176,7 +1216,7 @@ onBeforeUnmount(() => {
               </table>
             </section>
 
-            <section v-else class="section-workspace">
+                <section v-else class="section-workspace">
               <header class="task-heading">
                 <div>
                   <span class="eyebrow">SIMULATION WALLET</span>
@@ -1193,12 +1233,15 @@ onBeforeUnmount(() => {
                 <div><dt>订单冻结</dt><dd>等待执行服务</dd></div>
                 <div><dt>基准币种</dt><dd>人民币 CNY</dd></div>
               </dl>
-            </section>
+                </section>
+              </div>
+            </Transition>
           </main>
         </section>
 
-        <aside v-if="agentCollapsed" class="agent-rail" aria-label="已折叠的上下文 Agent">
+        <aside v-if="agentIsCollapsed" class="agent-rail" aria-label="已折叠的上下文 Agent">
           <button
+            id="agent-rail-toggle"
             type="button"
             aria-label="展开交易台 Agent"
             :aria-expanded="false"
@@ -1238,53 +1281,79 @@ onBeforeUnmount(() => {
             <small>页面对象版本 workspace-context/v1</small>
           </section>
 
-          <details
-            v-if="activeWorkflow"
-            class="workflow-status"
-            :open="workflowExpanded"
-            @toggle="onWorkflowToggle"
-          >
-            <summary>
-              <span>
-                <i :class="`workflow-${activeWorkflow.status}`" />
-                {{ activeWorkflow.code }} · {{ activeWorkflow.title }}
-              </span>
-              <small>{{ activeWorkflow.status === 'running' ? '运行中' : '已完成，可展开' }}</small>
-            </summary>
-            <ol>
-              <li v-for="step in activeWorkflow.steps" :key="step.id" :data-status="step.status">
-                <i />
-                <span>{{ step.label }}</span>
-                <small>{{ step.status }}</small>
-              </li>
-            </ol>
-            <p class="run-meta">
-              Run {{ activeWorkflow.runId }} ·
-              {{ formatDateTime(activeWorkflow.startedAt) }}
-            </p>
-          </details>
-
-          <section class="transcript" data-agent-transcript aria-label="Agent 对话">
-            <article
-              v-for="message in messages"
-              :key="message.id"
-              :class="['message', message.role]"
+          <nav class="agent-page-tabs" aria-label="Agent 栏目">
+            <button
+              v-for="page in agentPages"
+              :key="page.id"
+              type="button"
+              :class="{ active: agentPage === page.id }"
+              :aria-current="agentPage === page.id ? 'page' : undefined"
+              @click="showAgentPage(page.id)"
             >
-              <span>{{ message.role === 'agent' ? 'Agent' : '你' }}</span>
-              <p>{{ message.text }}</p>
-              <time>{{ formatDateTime(message.at) }}</time>
-            </article>
-          </section>
+              {{ page.label }}
+            </button>
+          </nav>
 
-          <details class="action-catalog">
-            <summary>查看 Agent 可控动作（{{ AGENT_ACTIONS.length }}）</summary>
-            <ul>
-              <li v-for="action in AGENT_ACTIONS" :key="action.id">
-                <code>{{ action.id }}</code>
-                <span>{{ action.description }}</span>
-              </li>
-            </ul>
-          </details>
+          <Transition name="paper-tear-right" mode="out-in">
+            <section :key="agentPageKey" :class="['agent-page', agentPage]">
+              <template v-if="agentPage === 'conversation'">
+                <section class="transcript" data-agent-transcript aria-label="Agent 对话">
+                  <article
+                    v-for="message in messages"
+                    :key="message.id"
+                    :class="['message', message.role]"
+                  >
+                    <span>{{ message.role === 'agent' ? 'Agent' : '你' }}</span>
+                    <p>{{ message.text }}</p>
+                    <time>{{ formatDateTime(message.at) }}</time>
+                  </article>
+                </section>
+
+                <details class="action-catalog">
+                  <summary>查看 Agent 可控动作（{{ AGENT_ACTIONS.length }}）</summary>
+                  <ul>
+                    <li v-for="action in AGENT_ACTIONS" :key="action.id">
+                      <code>{{ action.id }}</code>
+                      <span>{{ action.description }}</span>
+                    </li>
+                  </ul>
+                </details>
+              </template>
+
+              <template v-else>
+                <details
+                  v-if="activeWorkflow"
+                  class="workflow-status"
+                  :open="workflowExpanded"
+                  @toggle="onWorkflowToggle"
+                >
+                  <summary>
+                    <span>
+                      <i :class="`workflow-${activeWorkflow.status}`" />
+                      {{ activeWorkflow.code }} · {{ activeWorkflow.title }}
+                    </span>
+                    <small>{{ activeWorkflow.status === 'running' ? '运行中' : '已完成，可展开' }}</small>
+                  </summary>
+                  <ol>
+                    <li v-for="step in activeWorkflow.steps" :key="step.id" :data-status="step.status">
+                      <i />
+                      <span>{{ step.label }}</span>
+                      <small>{{ step.status }}</small>
+                    </li>
+                  </ol>
+                  <p class="run-meta">
+                    Run {{ activeWorkflow.runId }} ·
+                    {{ formatDateTime(activeWorkflow.startedAt) }}
+                  </p>
+                </details>
+                <div v-else class="agent-page-empty">
+                  <span class="eyebrow">WORKFLOW RUNS</span>
+                  <h3>暂无运行任务</h3>
+                  <p>从快捷指令或左侧主操作启动研究、持仓、策略或复核工作流。</p>
+                </div>
+              </template>
+            </section>
+          </Transition>
 
           <form class="agent-composer" @submit.prevent="submitPrompt()">
             <label for="agent-command">告诉 Agent 要查看、分析或填写什么</label>
@@ -1322,11 +1391,11 @@ onBeforeUnmount(() => {
       </div>
 
       <aside
-        v-if="activeToast"
+        v-if="activeToast && !remindersOpen && !settingsOpen"
         class="alert-toast"
         :class="`severity-${activeToast.severity}`"
-        role="status"
-        aria-live="polite"
+        :role="activeToast.severity === 'error' ? 'alert' : 'status'"
+        :aria-live="activeToast.severity === 'error' ? 'assertive' : 'polite'"
       >
         <div>
           <span class="eyebrow">REMINDER · {{ activeToast.source }}</span>
@@ -1335,6 +1404,5 @@ onBeforeUnmount(() => {
         </div>
         <button type="button" aria-label="关闭提醒" @click="dismissToast">关闭</button>
       </aside>
-    </template>
   </div>
 </template>

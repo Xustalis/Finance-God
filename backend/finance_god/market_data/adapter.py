@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from importlib import import_module, metadata
 from itertools import pairwise
+from math import isfinite
 from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any
@@ -63,6 +64,7 @@ from .transport import (
 
 _UTC = ZoneInfo("UTC")
 _DATE_PATTERN = re.compile(r"^\d{8}$")
+_QUARTER_PATTERN = re.compile(r"^\d{4}q[1-4]$")
 _MAX_SYMBOLS = 40
 _MAX_LIMIT = 1_000
 _MAX_DATE_SPAN_DAYS = 3_660
@@ -239,9 +241,7 @@ class PandaDataAdapter:
             _validate_date(expected_date)
             if expected_date
             else _reported_trading_date(records)
-            or self._utc_now()
-            .astimezone(ZoneInfo("Asia/Shanghai"))
-            .strftime("%Y%m%d")
+            or self._utc_now().astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
         )
         bars = self._normalizer.bars(
             records,
@@ -593,6 +593,88 @@ class PandaDataAdapter:
             )
         return DataEnvelope(tuple(items), (), EmptyMeaning.NOT_EMPTY)
 
+    def fetch_financial_report_facts(
+        self,
+        instrument: InstrumentId,
+        *,
+        start_quarter: str | None = None,
+        end_quarter: str | None = None,
+    ) -> DataEnvelope[NormalizedFact]:
+        """Read company disclosure facts from the audited financial-report feed."""
+        instrument = self._canonical_instrument(instrument)
+        if (
+            instrument.market is not MarketType.CN
+            or instrument.asset_class is not AssetClass.EQUITY
+        ):
+            return self._disabled(
+                f"{instrument.symbol}:financial_reports",
+                "financial-report facts require an authoritative CN equity instrument",
+                "get_fina_reports",
+            )
+        _validate_quarter_range(start_quarter, end_quarter)
+        endpoint = "get_fina_reports"
+        records = records_from_frame(
+            self._request(
+                endpoint,
+                {"CN_EQUITY"},
+                symbol=instrument.provider_symbol,
+                fields=None,
+                start_quarter=start_quarter,
+                end_quarter=end_quarter,
+                date=None,
+                is_latest=False,
+            ),
+            endpoint=endpoint,
+        )
+        scope = f"{instrument.symbol}:financial_reports"
+        if not records:
+            return self._unexpected_missing(scope, endpoint)
+        ingested_at = self._utc_now()
+        facts: list[NormalizedFact] = []
+        for record in records:
+            reported_symbol = str(record.get("symbol", "")).upper()
+            if reported_symbol != instrument.provider_symbol:
+                return self._schema_drift(
+                    scope,
+                    endpoint,
+                    "financial-report row symbol conflicts with request",
+                )
+            raw_date = record.get("date")
+            if raw_date is None:
+                return self._schema_drift(
+                    scope, endpoint, "financial-report row is missing date"
+                )
+            try:
+                data_time = _parse_fact_time(raw_date)
+                source, freshness = self._reference_evidence(
+                    endpoint=endpoint,
+                    data_time=data_time,
+                    ingested_at=ingested_at,
+                    frequency=DataFrequency.EVENT,
+                    market=instrument.market,
+                    category=DataCategory.FINANCIAL,
+                    release_state=ReleaseState.UNKNOWN,
+                )
+                facts.append(
+                    NormalizedFact(
+                        category=DataCategory.FINANCIAL,
+                        scope=scope,
+                        source=source,
+                        freshness=freshness,
+                        fields=tuple(
+                            FactField(name=str(key), value=_safe_fact_value(value))
+                            for key, value in sorted(record.items())
+                        ),
+                    )
+                )
+            except (TypeError, ValueError):
+                return self._schema_drift(
+                    scope,
+                    endpoint,
+                    "financial-report row contains an invalid fact value",
+                )
+        return DataEnvelope(tuple(facts), (), EmptyMeaning.NOT_EMPTY)
+
     def fetch_monitor_facts(
         self,
         *,
@@ -917,6 +999,7 @@ class PandaDataAdapter:
             trading_date=trading_date,
             provider_published_at=None,
             ingested_at=ingested_at,
+            allows_future_data_time=category is DataCategory.CALENDAR,
             frequency=frequency,
             capability_version=CAPABILITY_CATALOG_VERSION,
             verification="verified_once_research",
@@ -1081,7 +1164,17 @@ def _monitor_request(
             },
             frozenset({"date", "implied_volatility"}),
         )
-    if len(symbols) != 1 or volatility_period not in {5, 10, 30, 60, 90, 120, 180, 250, 500}:
+    if len(symbols) != 1 or volatility_period not in {
+        5,
+        10,
+        30,
+        60,
+        90,
+        120,
+        180,
+        250,
+        500,
+    }:
         raise ValueError("option volatility monitor data has invalid symbol or period")
     return (
         "get_option_underlying_volatility",
@@ -1160,6 +1253,22 @@ def _bounded_date_range(start_date: str, end_date: str) -> tuple[str, str]:
     return start, end
 
 
+def _validate_quarter_range(
+    start_quarter: str | None,
+    end_quarter: str | None,
+) -> None:
+    if (start_quarter is None) != (end_quarter is None):
+        raise ValueError("start_quarter and end_quarter must be supplied together")
+    if start_quarter is None:
+        raise ValueError("start_quarter and end_quarter are required")
+    if not _QUARTER_PATTERN.fullmatch(start_quarter) or not _QUARTER_PATTERN.fullmatch(
+        end_quarter or ""
+    ):
+        raise ValueError("quarters must use YYYYq1 through YYYYq4")
+    if start_quarter > end_quarter:
+        raise ValueError("start_quarter must not be after end_quarter")
+
+
 def _validate_limit(value: int) -> int:
     if isinstance(value, bool) or not 1 <= value <= _MAX_LIMIT:
         raise ValueError(f"limit must be between 1 and {_MAX_LIMIT}")
@@ -1215,6 +1324,8 @@ def _parse_fact_time(value: object) -> datetime:
 
 
 def _safe_fact_value(value: object) -> str | int | float | bool | None:
+    if isinstance(value, float) and not isfinite(value):
+        return None
     if value is None or isinstance(value, (str, int, float, bool)):
         if isinstance(value, str):
             return redact_text(value)

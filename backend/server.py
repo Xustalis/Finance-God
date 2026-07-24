@@ -8,9 +8,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC
 from threading import Lock
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -20,6 +22,7 @@ from starlette.routing import Mount, Route
 from app.config import settings
 from app.core.security import resolve_active_user
 from app.db.session import create_db_session
+from app.models.profile import DirectionRecommendation, InvestmentProfile
 from finance_god.api.agent_routes import (
     AgentRuntimeUnavailable,
     create_agent_routes,
@@ -29,6 +32,10 @@ from finance_god.api.evidence_routes import create_evidence_routes
 from finance_god.api.mandate_routes import create_mandate_routes
 from finance_god.api.simulation import create_simulation_routes
 from finance_god.api.trade_plan_routes import create_trade_plan_routes
+from finance_god.api.workflow_routes import (
+    WorkflowRuntimeUnavailable,
+    create_workflow_routes,
+)
 from finance_god.api.workspace_routes import create_workspace_routes
 from finance_god.application.candidate_service import CandidateScoringService
 from finance_god.application.decision_inbox import DecisionInboxService
@@ -67,6 +74,9 @@ from finance_god.orchestration.workflows import (
     create_workflow_command_runtime_from_environment,
 )
 
+if TYPE_CHECKING:
+    from finance_god.learning.context import VerifiedKnowledgeReader
+
 _LOGGER = logging.getLogger(__name__)
 
 market_data: MarketDataService | None = None
@@ -78,7 +88,9 @@ simulation_execution = None
 simulation_accounts = None
 agent_runtime = None
 agent_runtime_reason: str | None = None
+learning_context_reader: VerifiedKnowledgeReader | None = None
 _agent_lock = Lock()
+_learning_lock = Lock()
 _service_lock = Lock()
 
 
@@ -173,6 +185,7 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     global workflow_runtime_readiness_reason
     global simulation_execution, simulation_accounts
     global agent_runtime, agent_runtime_reason
+    global learning_context_reader
     market_data = None
     market_application = None
     workflow_commands = None
@@ -182,6 +195,7 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     simulation_accounts = None
     agent_runtime = None
     agent_runtime_reason = None
+    learning_context_reader = None
     try:
         workflow_runtime = create_workflow_command_runtime_from_environment(
             database_url=settings.database_url
@@ -205,6 +219,7 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         market_data = None
         agent_runtime = None
         agent_runtime_reason = None
+        learning_context_reader = None
         if runtime is not None:
             await runtime.close()
 
@@ -343,6 +358,60 @@ async def bars(request: Request) -> JSONResponse:
     )
 
 
+async def information_facts(request: Request) -> JSONResponse:
+    symbol = request.query_params.get("symbol", "")
+    start_quarter = request.query_params.get("start_quarter")
+    end_quarter = request.query_params.get("end_quarter")
+    try:
+        limit = int(request.query_params.get("limit", "20"))
+        service, _application = _services()
+        result = await asyncio.to_thread(
+            service.read_information_facts,
+            symbol,
+            start_quarter=start_quarter or "",
+            end_quarter=end_quarter or "",
+            limit=limit,
+        )
+    except (ValueError, ValidationError):
+        return _safe_error(
+            code="MARKET_DATA_INVALID_REQUEST",
+            message="The information-fact request is invalid.",
+            status_code=400,
+        )
+    except MarketDataError as error:
+        return _json({"error": error.public_payload()}, status_code=502)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
+        return _internal_error()
+    return _json(result)
+
+
+async def sentiment_facts(request: Request) -> JSONResponse:
+    symbol = request.query_params.get("symbol", "")
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
+    try:
+        limit = int(request.query_params.get("limit", "60"))
+        service, _application = _services()
+        result = await asyncio.to_thread(
+            service.read_sentiment_facts,
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    except (ValueError, ValidationError):
+        return _safe_error(
+            code="MARKET_DATA_INVALID_REQUEST",
+            message="The sentiment-fact request is invalid.",
+            status_code=400,
+        )
+    except MarketDataError as error:
+        return _json({"error": error.public_payload()}, status_code=502)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
+        return _internal_error()
+    return _json(result)
+
+
 def _instrument_frequency(market: str, asset_class: str) -> str:
     """Display the bar frequency the market-data service uses for this asset."""
     if market == "CN" and asset_class == "equity":
@@ -456,6 +525,18 @@ def _simulation_uow_factory() -> SqlAlchemyUnitOfWork:
     return SqlAlchemyUnitOfWork(_workspace_session)
 
 
+def _workflow_command_provider() -> WorkflowCommandPort:
+    if workflow_commands is None:
+        raise WorkflowRuntimeUnavailable("durable workflow runtime is unavailable")
+    return workflow_commands
+
+
+def _workflow_definition(workflow_key: str):
+    if workflow_runtime is None:
+        raise WorkflowRuntimeUnavailable("durable workflow runtime is unavailable")
+    return workflow_runtime.definition(workflow_key)
+
+
 async def _candidate_quotes(symbols: list[str]):
     _, application = _services()
     return await application.quotes(symbols)
@@ -516,6 +597,79 @@ async def _record_agent_evidence(owner_id: str, subject: str, run) -> None:
         owner_id=owner_id,
         run=run,
         subject=subject,
+    )
+
+
+async def _investor_profile_context(owner_id: str) -> dict | None:
+    """Return a compact investor-profile context for the Multi-Agent runtime.
+
+    Reads the caller's latest completed investment profile and selected/
+    recommended directions so the planner and every prompt agent can tailor
+    reasoning to the user's mandate. Returns ``None`` when no profile exists
+    (for example a brand-new account) so the run proceeds without it.
+    """
+    async with create_db_session() as session:
+        profile = await session.scalar(
+            select(InvestmentProfile)
+            .where(InvestmentProfile.user_id == owner_id)
+            .order_by(InvestmentProfile.version.desc())
+        )
+        if profile is None:
+            return None
+        recommendations = (
+            await session.scalars(
+                select(DirectionRecommendation)
+                .where(DirectionRecommendation.profile_id == profile.id)
+                .order_by(DirectionRecommendation.rank)
+            )
+        ).all()
+    selected = next((rec.direction for rec in recommendations if rec.selected), None)
+    context: dict = {
+        "version": profile.version,
+        "archetype_code": profile.archetype_code,
+        "archetype_title": profile.archetype_title,
+        "risk_level": profile.risk_level,
+        "loss_tolerance_percent": profile.loss_tolerance_percent,
+        "confidence": profile.confidence,
+        "completeness": profile.completeness,
+        "education_only": profile.education_only,
+        "objective_profile": profile.objective_profile,
+        "dimension_scores": profile.dimension_scores,
+        "recommended_directions": [rec.direction for rec in recommendations],
+    }
+    if selected is not None:
+        context["selected_direction"] = selected
+    return context
+
+
+def _verified_knowledge_reader() -> VerifiedKnowledgeReader:
+    global learning_context_reader
+    if learning_context_reader is not None:
+        return learning_context_reader
+    with _learning_lock:
+        if learning_context_reader is None:
+            # Learning is an optional sidecar. Import its read-only consumer
+            # only when an Agent request asks for learned context, never while
+            # the trading API process starts or serves trading routes.
+            from finance_god.learning.context import VerifiedKnowledgeReader
+            from finance_god.learning.contracts import LearningConfig
+
+            learning_context_reader = VerifiedKnowledgeReader(
+                LearningConfig.from_environment().knowledge_dir
+            )
+    return learning_context_reader
+
+
+async def _verified_learning_context(
+    subject: str,
+    task_type: str,
+    asset_kind: str,
+):
+    query = f"{subject} {task_type} {asset_kind}"
+    return await asyncio.to_thread(
+        _verified_knowledge_reader().evidence,
+        query=query,
+        limit=6,
     )
 
 
@@ -638,6 +792,8 @@ finance_routes = [
     Route("/market/quotes", quotes),
     Route("/market/overview", market_overview),
     Route("/market/bars", bars),
+    Route("/market/information-facts", information_facts),
+    Route("/market/sentiment-facts", sentiment_facts),
     Route("/market/instruments", instruments),
     Route("/market/catalog", catalog),
     Mount(
@@ -681,12 +837,19 @@ finance_routes = [
         ),
         name="evidence",
     ),
+    *create_workflow_routes(
+        commands_provider=_workflow_command_provider,
+        definition_provider=_workflow_definition,
+        owner_resolver=_authenticated_owner,
+    ),
     Mount(
         "/agent",
         routes=create_agent_routes(
             runtime_provider=_agent_runtime_provider,
             owner_resolver=_authenticated_owner,
             evidence_recorder=_record_agent_evidence,
+            profile_provider=_investor_profile_context,
+            learning_context_provider=_verified_learning_context,
         ),
         name="agent",
     ),

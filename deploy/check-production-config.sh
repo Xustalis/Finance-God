@@ -57,4 +57,7 @@ if [[ -z "$DEEPSEEK_KEY" && -z "$STEPFUN_KEY" && ( -z "$ARK_KEY" || -z "$ARK_MOD
   fail "至少配置一个生产文本提供方：DEEPSEEK_API_KEY、STEPFUN_API_KEY，或 ARK_API_KEY + ARK_MODEL"
 fi
 
-echo "生产配置检查通过：PandaData 与生产文本提供方已配置。"
+[[ -n "$ARK_KEY" && -n "$ARK_MODEL" ]] \
+  || fail "产品 Multi-Agent 与常驻学习 worker 需要 ARK_API_KEY + ARK_MODEL"
+
+echo "生产配置检查通过：PandaData、ARK Multi-Agent 与学习 worker 已配置。"

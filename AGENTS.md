@@ -35,8 +35,10 @@ item is unverified.
 
 - Finance-God is a desktop trading product for both capable retail users and
   professional traders.
-- Primary canvas: 1440 px. Minimum supported width: 1024 px. Below 1024 px, show
-  an explicit desktop-width notice. Do not create a mobile layout.
+- Primary canvas: 1440 px. Do not enforce a fixed minimum-width gate. Below
+  1024 px, keep the current route mounted and adapt the same desktop workspace
+  through compact layout and collapsible panels. Do not create a separate mobile
+  navigation or trading flow.
 - Use a warm editorial financial-terminal workspace: warm beige paper surfaces,
   deep ink typography, fine rules, dense tabular information and restrained
   interaction. Financial newspapers may inform material, proportion and

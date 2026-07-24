@@ -2,6 +2,7 @@ export type WorkspaceSection =
   | 'information'
   | 'portfolio'
   | 'watchlist'
+  | 'trading'
   | 'history'
   | 'wallet'
 
@@ -20,6 +21,7 @@ export type AgentActionId =
   | 'navigate_information'
   | 'navigate_portfolio'
   | 'navigate_watchlist'
+  | 'navigate_trading'
   | 'navigate_history'
   | 'navigate_wallet'
   | 'show_market'
@@ -55,6 +57,12 @@ export const AGENT_ACTIONS: readonly AgentActionDefinition[] = [
   {
     id: 'navigate_watchlist',
     description: '打开自选工作区',
+    object: 'workspace',
+    mutation: 'ui_only',
+  },
+  {
+    id: 'navigate_trading',
+    description: '打开仿真交易工作区',
     object: 'workspace',
     mutation: 'ui_only',
   },
@@ -161,6 +169,11 @@ const SECTION_ACTIONS: ReadonlyArray<{
     keywords: ['自选'],
     actionId: 'navigate_watchlist',
     response: '已打开自选工作区。',
+  },
+  {
+    keywords: ['交易台', '交易工作区'],
+    actionId: 'navigate_trading',
+    response: '已打开仿真交易工作区。',
   },
   {
     keywords: ['交易记录', '成交记录', '订单记录'],
@@ -285,7 +298,7 @@ export function resolveAgentCommand(rawText: string): ResolvedAgentCommand {
   if (includesAny(text, ['异动', '重大变动', '突发行情'])) {
     return { kind: 'workflow', workflowKey: 'event_impact', title: '重大行情事件影响分析' }
   }
-  if (includesAny(text, ['公司', '股票信息', '研究标的'])) {
+  if (includesAny(text, ['公司', '股票信息', '研究标的', '研究候选', '用户画像', '我的画像'])) {
     return { kind: 'workflow', workflowKey: 'company_research', title: '当前标的公司研究' }
   }
   if (includesAny(text, ['分析行情', '市场环境', '行情'])) {
@@ -348,6 +361,12 @@ export function quickCommandsFor(
   if (section === 'watchlist') {
     return ['分析当前标的行情', '查看我的自选', '研究标的公司信息']
   }
+  if (section === 'trading' && mode === 'strategy') {
+    return ['验证当前策略的适用条件', '列出策略失效条件', '打开仿真订单草稿']
+  }
+  if (section === 'trading') {
+    return ['帮我制定当前标的交易方案', '检查未提交订单草稿', '解释草稿与当前策略的偏离']
+  }
   if (section === 'history') {
     return ['查看我的交易记录', '分析当前标的行情', '检查未提交订单草稿']
   }
@@ -360,5 +379,5 @@ export function quickCommandsFor(
   if (mode === 'strategy') {
     return ['验证当前策略的适用条件', '列出策略失效条件', '切换到交易草稿']
   }
-  return ['分析当前标的行情', '结合用户画像研究标的公司', '查看当前标的重大行情提醒']
+  return ['分析当前标的行情', '结合我的画像生成研究候选', '查看当前标的重大行情提醒']
 }

@@ -143,6 +143,8 @@ class WorkflowCommandPort(Protocol):
 
     async def get(self, run_id: str) -> WorkflowRun | None: ...
 
+    async def get_owner_id(self, run_id: str) -> str | None: ...
+
 
 class RunIdFactory(Protocol):
     def new(self) -> str: ...
@@ -203,8 +205,7 @@ class WorkflowCommandService:
                 "workflow_key": definition.workflow_key.value,
                 "workflow_version": definition.version,
                 "input_versions": [
-                    item.model_dump(mode="json")
-                    for item in command.input_versions
+                    item.model_dump(mode="json") for item in command.input_versions
                 ],
                 "task_plan_reference": (
                     None
@@ -227,6 +228,9 @@ class WorkflowCommandService:
 
     async def get(self, run_id: str) -> WorkflowRun | None:
         return await self._repository.get(run_id)
+
+    async def get_owner_id(self, run_id: str) -> str | None:
+        return await self._repository.get_owner_id(run_id)
 
 
 class DataQualityWorkflowCreationPort:
@@ -251,7 +255,9 @@ class DataQualityWorkflowCreationPort:
         requested_at: datetime,
     ) -> WorkflowCreationReceipt:
         if workflow_key is not WorkflowKey.DATA_QUALITY_REVIEW:
-            raise ValueError("data-quality creation port only accepts data_quality_review")
+            raise ValueError(
+                "data-quality creation port only accepts data_quality_review"
+            )
         return await self._commands.create(
             WorkflowCreateCommand(
                 idempotency_key=stable_trigger_key,

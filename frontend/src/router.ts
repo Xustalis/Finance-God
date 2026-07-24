@@ -19,6 +19,20 @@ function validStoredSession(tokenKey: string, userKey: string, role?: string) {
   } catch { return false }
 }
 
+const LEGACY_TRADING_PATHS = [
+  '/markets',
+  '/watchlist',
+  '/desk',
+  '/overview',
+  '/portfolio',
+  '/trade-plans/:planId',
+  '/orders',
+  '/reviews',
+  '/data',
+  '/data/evidence/:id',
+  '/settings',
+] as const
+
 export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({ history, routes: [
     { path: '/', redirect: () => validStoredSession('finance-god-token', 'finance-god-user') ? '/app/exe' : '/login' },
@@ -26,20 +40,13 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     { path: '/app/exe', name: 'onboarding', component: () => import('@/views/OnboardingView.vue'), meta: { requiresAuth: true } },
     { path: '/app/profile-report', name: 'report', component: () => import('@/views/ProfileReportView.vue'), meta: { requiresAuth: true } },
 
-    // ─── 交易台路由 ─────────────────────────────
-    { path: '/markets', name: 'markets', component: () => import('@/views/MarketsView.vue'), meta: { requiresAuth: true } },
-    { path: '/watchlist', name: 'watchlist', component: () => import('@/views/WatchlistView.vue'), meta: { requiresAuth: true } },
-    { path: '/desk', name: 'desk', component: () => import('@/views/DeskView.vue'), meta: { requiresAuth: true } },
-
-    // ─── 占位路由 ───────────────────────────────
-    { path: '/overview', name: 'overview', component: () => import('@/views/OverviewView.vue'), meta: { requiresAuth: true } },
-    { path: '/portfolio', name: 'portfolio', component: () => import('@/views/PortfolioView.vue'), meta: { requiresAuth: true } },
-    { path: '/trade-plans/:planId', name: 'trade-plan', component: () => import('@/views/TradePlanView.vue'), meta: { requiresAuth: true } },
-    { path: '/orders', name: 'orders', component: () => import('@/views/OrdersView.vue'), meta: { requiresAuth: true } },
-    { path: '/reviews', name: 'reviews', component: () => import('@/views/ReviewsView.vue'), meta: { requiresAuth: true } },
-    { path: '/data', name: 'data', component: () => import('@/views/DataView.vue'), meta: { requiresAuth: true } },
-    { path: '/data/evidence/:id', name: 'evidence', component: () => import('@/views/EvidenceView.vue'), meta: { requiresAuth: true } },
-    { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { requiresAuth: true } },
+    { path: '/desk', name: 'desk', component: () => import('@/views/TradingDeskView.vue'), meta: { requiresAuth: true } },
+    { path: '/rebuilding', redirect: '/desk', meta: { requiresAuth: true } },
+    ...LEGACY_TRADING_PATHS.map((path) => ({
+      path,
+      redirect: '/desk',
+      meta: { requiresAuth: true },
+    })),
 
     // ─── 管理路由 ───────────────────────────────
     { path: '/admin/login', name: 'admin-login', component: () => import('@/views/AdminLoginView.vue') },
@@ -51,7 +58,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     const adminAuthenticated = validStoredSession('finance-god-admin-token', 'finance-god-admin-user', 'admin')
     if (to.meta.requiresAuth && !userAuthenticated) return { path: '/login', query: { redirect: to.fullPath } }
     if (to.meta.requiresAdmin && !adminAuthenticated) return { path: '/admin/login', query: { redirect: to.fullPath } }
-    if (to.path === '/login' && userAuthenticated) return '/app/exe'
+    if (to.path === '/login' && userAuthenticated) return typeof to.query.redirect === 'string' ? to.query.redirect : '/app/exe'
     if (to.path === '/admin/login' && adminAuthenticated) return '/admin/ai-settings'
   })
   return router

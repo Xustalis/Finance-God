@@ -21,7 +21,7 @@ from .workflow_commands import (
     WorkflowCreateCommand,
     WorkflowCreationReceipt,
 )
-from .workflow_registry import FormalWorkflowRegistry
+from .workflow_registry import FormalWorkflowRegistry, WorkflowDefinition
 
 WORKFLOW_DATABASE_URL_ENV = "FINANCE_GOD_DATABASE_URL"
 
@@ -82,6 +82,18 @@ class WorkflowCommandRuntime:
             await uow.commit()
             return run
 
+    async def get_owner_id(self, run_id: str) -> str | None:
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            owner_id = await uow.workflows.get_owner_id(run_id)
+            await uow.commit()
+            return owner_id
+
+    def definition(self, workflow_key: str) -> WorkflowDefinition:
+        """Return the registered definition used to calculate honest progress."""
+        self._ensure_open()
+        return self._registry.get(workflow_key)
+
     def data_quality_port(
         self,
         *,
@@ -115,9 +127,7 @@ def create_workflow_command_runtime_from_environment(
         raise RuntimeError(
             f"{WORKFLOW_DATABASE_URL_ENV} is required for durable workflows"
         )
-    engine, session_factory = create_workflow_session_factory(
-        resolved_url.strip()
-    )
+    engine, session_factory = create_workflow_session_factory(resolved_url.strip())
     return WorkflowCommandRuntime(
         engine=engine,
         session_factory=session_factory,

@@ -54,15 +54,33 @@ class StubService:
         return tuple(item.model_dump(mode="json") for item in CATALOG.all())
 
 
+class FactService(StubService):
+    def read_information_facts(self, symbol: str, **kwargs: object):
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {
+                "fact_kind": "company_disclosure",
+                "symbol": symbol,
+                "arguments": kwargs,
+            }
+        )
+
+    def read_sentiment_facts(self, symbol: str, **kwargs: object):
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {
+                "fact_kind": "margin_balance",
+                "symbol": symbol,
+                "arguments": kwargs,
+            }
+        )
+
+
 def test_market_api_returns_stable_safe_errors_without_raw_exception_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(server, "market_data", StubService())
     monkeypatch.setattr(server, "market_application", FailingApplication())
     quotes = asyncio.run(server.quotes(_request(b"symbols=000001.SZ")))
-    overview = asyncio.run(
-        server.market_overview(_request(b"symbols=000001.SZ"))
-    )
+    overview = asyncio.run(server.market_overview(_request(b"symbols=000001.SZ")))
     bars = asyncio.run(server.bars(_request(b"symbol=000001.SZ")))
     invalid = asyncio.run(server.bars(_request(b"symbol=000001.SZ&limit=bad")))
     live = asyncio.run(server.live(_request(b"")))
@@ -135,6 +153,36 @@ def test_catalog_api_separates_availability_trade_and_stability_counts(
     assert stock_daily["availability"] == "production_available"
     assert stock_daily["trade_eligible"] is False
     assert stock_daily["stability_confirmed"] is False
+
+
+def test_fact_apis_return_source_facts_and_reject_invalid_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "market_data", FactService())
+    monkeypatch.setattr(server, "market_application", FailingApplication())
+
+    information = asyncio.run(
+        server.information_facts(
+            _request(b"symbol=000001.SZ&start_quarter=2026q1&end_quarter=2026q2")
+        )
+    )
+    sentiment = asyncio.run(
+        server.sentiment_facts(
+            _request(b"symbol=000001.SZ&start_date=20260701&end_date=20260723")
+        )
+    )
+    invalid = asyncio.run(
+        server.sentiment_facts(_request(b"symbol=000001.SZ&limit=not-a-number"))
+    )
+
+    assert information.status_code == 200
+    assert _payload(information)["fact_kind"] == "company_disclosure"
+    assert _payload(information)["arguments"]["start_quarter"] == "2026q1"
+    assert sentiment.status_code == 200
+    assert _payload(sentiment)["fact_kind"] == "margin_balance"
+    assert _payload(sentiment)["arguments"]["end_date"] == "20260723"
+    assert invalid.status_code == 400
+    assert _payload(invalid)["error"]["code"] == "MARKET_DATA_INVALID_REQUEST"
 
 
 def test_dq_adapter_maps_stable_intent_to_public_workflow_command() -> None:

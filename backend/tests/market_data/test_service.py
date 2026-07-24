@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from math import nan
 
 import pytest
 
@@ -79,6 +80,95 @@ def test_service_exposes_research_data_but_never_marks_it_trade_eligible() -> No
     )
     assert batch.quality["000001.SZ"].trade_eligible is False
     assert batch.quality["000001.SZ"].capability_trade_eligible is False
+
+
+def test_service_exposes_public_read_only_bar_boundary() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    result = service.read_bars("000001.SZ", limit=20)
+
+    assert result.bars
+    assert result.frequency == "1分钟"
+    assert result.quality.trade_eligible is False
+
+
+def test_service_exposes_source_stamped_company_disclosure_facts() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_fina_reports"] = [
+        {
+            "symbol": "000001.SZ",
+            "date": "20260720",
+            "end_quarter": "2026Q2",
+            "report_type": "interim",
+            "revenue": 123.45,
+            "missing_metric": nan,
+        }
+    ]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    result = service.read_information_facts(
+        "000001.SZ",
+        start_quarter="2026q1",
+        end_quarter="2026q2",
+    )
+
+    assert result.fact_kind == "company_disclosure"
+    assert result.symbol == "000001.SZ"
+    assert result.trade_eligible is False
+    assert result.facts[0].category.value == "financial"
+    assert result.facts[0].source.endpoint == "get_fina_reports"
+    assert (
+        dict((field.name, field.value) for field in result.facts[0].fields)["revenue"]
+        == 123.45
+    )
+    assert (
+        dict((field.name, field.value) for field in result.facts[0].fields)[
+            "missing_metric"
+        ]
+        is None
+    )
+    call_name, call_arguments = sdk.calls[-1]
+    assert call_name == "get_fina_reports"
+    assert call_arguments["start_quarter"] == "2026q1"
+    assert call_arguments["end_quarter"] == "2026q2"
+
+
+def test_service_exposes_raw_margin_facts_without_sentiment_inference() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_margin"] = [
+        {
+            "symbol": "000001.SZ",
+            "date": "20260722",
+            "total_balance": 1000.0,
+            "short_balance": 250.0,
+        }
+    ]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    result = service.read_sentiment_facts(
+        "000001.SZ",
+        start_date="20260701",
+        end_date="20260723",
+    )
+
+    assert result.fact_kind == "margin_balance"
+    assert result.trade_eligible is False
+    assert result.facts[0].source.endpoint == "get_margin"
+    assert all("sentiment" not in field.name for field in result.facts[0].fields)
 
 
 def test_service_creates_audited_data_quality_review_for_conflict() -> None:
@@ -225,9 +315,7 @@ def test_readiness_fails_when_workflow_command_port_is_unconfigured() -> None:
 
 def test_quality_failure_without_workflow_port_fails_explicitly() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_rt_min"] = [
-        bar("20260723 10:31:00", symbol="600519.SH")
-    ]
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00", symbol="600519.SH")]
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,

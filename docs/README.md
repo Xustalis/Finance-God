@@ -13,7 +13,8 @@
 | 安装、配置与运行 | [`../README.md`](../README.md) |
 | 仓库结构、路由、API 和测试入口 | [`项目索引.md`](项目索引.md) |
 | 产品范围与业务验收 | [`prd/Finance-God_MVP_PRD_v1.0.md`](prd/Finance-God_MVP_PRD_v1.0.md) |
-| 交易域需求 | [`prd/Finance-God_交易台_PRD_v1.0.md`](prd/Finance-God_交易台_PRD_v1.0.md) |
+| 交易台最新产品形态 | [`prd/Finance-God_Agent主控交易台_PRD_v2.0.md`](prd/Finance-God_Agent主控交易台_PRD_v2.0.md) |
+| 旧交易域需求 | [`prd/Finance-God_交易台_PRD_v1.0.md`](prd/Finance-God_交易台_PRD_v1.0.md)（已被 v2.0 产品形态取代） |
 | 前端强制规范 | [`page-design/01_前端统一设计规范.md`](page-design/01_前端统一设计规范.md) |
 | 前后端职责与数据合同 | [`page-design/02_前后端职责与数据合同.md`](page-design/02_前后端职责与数据合同.md) |
 | 前端设计入口 | [`page-design/00_前端设计文档索引.md`](page-design/00_前端设计文档索引.md) |
@@ -27,7 +28,7 @@
 现行文档用于开发、评审和验收。发生冲突时按以下顺序处理：
 
 1. 安全、数据完整性和运行时事实；
-2. 交易域 PRD 与前端强制规范；
+2. 最新产品形态 PRD、交易域 PRD 与前端强制规范；其中新版本产品形态优先于旧版本；
 3. 页面专项规格；
 4. 研究、早期方案和实施计划。
 

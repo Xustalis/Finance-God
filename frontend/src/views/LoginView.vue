@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Eye, EyeOff, Landmark, LoaderCircle } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
-const auth=useAuthStore(),router=useRouter(),route=useRoute();const registering=ref(false),email=ref(''),password=ref(''),name=ref(''),showPassword=ref(false),error=ref('')
+const auth=useAuthStore(),router=useRouter(),route=useRoute();const registering=ref(false),email=ref(''),password=ref(''),name=ref(''),showPassword=ref(false),error=ref(''),localPreviewEnabled=import.meta.env.DEV
 async function submit(){error.value='';try{if(registering.value)await auth.register(email.value,password.value,name.value);else await auth.login(email.value,password.value);const redirect=typeof route.query.redirect==='string'?route.query.redirect:(auth.isAdmin?'/admin/ai-settings':'/app/exe');await router.replace(redirect)}catch(e){error.value=e instanceof Error?e.message:'认证失败，请稍后再试'}}
 </script>
 <template>
@@ -18,6 +18,7 @@ async function submit(){error.value='';try{if(registering.value)await auth.regis
         <button class="primary-button" :disabled="auth.loading"><LoaderCircle v-if="auth.loading" class="spin" :size="19"/><span>{{ registering?'创建账户':'进入访谈' }}</span><ArrowRight v-if="!auth.loading" :size="19"/></button>
       </form>
       <button data-test="auth-mode" class="text-button auth-switch" @click="registering=!registering;error=''">{{ registering?'已有账户，返回登录':'还没有账户？创建一个' }}</button>
+      <RouterLink v-if="localPreviewEnabled" class="text-button auth-switch" to="/login?redirect=/desk">登录后预览交易台</RouterLink>
     </section>
   </main>
 </template>

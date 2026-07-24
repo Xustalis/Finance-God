@@ -33,9 +33,39 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - learning_data:/app/artifacts/knowledge:ro
     command: >
       sh -c "alembic upgrade head &&
       python -m app.startup"
+
+  learning:
+    build: ./backend
+    profiles: ["learning"]
+    init: true
+    env_file:
+      - .env
+    environment:
+      FINANCE_GOD_KNOWLEDGE_DIR: /app/artifacts/knowledge
+      FINANCE_GOD_LEARNING_INTERVAL_SECONDS: ${FINANCE_GOD_LEARNING_INTERVAL_SECONDS:-900}
+      FINANCE_GOD_LEARNING_SYMBOLS: ${FINANCE_GOD_LEARNING_SYMBOLS:-000300.SH}
+      FINANCE_GOD_LEARNING_TRANSACTION_COST_BPS: ${FINANCE_GOD_LEARNING_TRANSACTION_COST_BPS:-10}
+    volumes:
+      - ./backend:/app
+      - learning_data:/app/artifacts/knowledge
+    command: python -m scripts.run_self_iteration_loop
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-m",
+          "scripts.run_self_iteration_loop",
+          "--healthcheck",
+        ]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 10m
 
   frontend:
     build: ./frontend
@@ -53,3 +83,4 @@ services:
 
 volumes:
   pgdata:
+  learning_data:

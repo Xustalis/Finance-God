@@ -14,11 +14,20 @@ simulation sub-application uses `/api/finance`.
 | `GET` | `/api/finance/health` | Combined service state; identifies PandaData and simulation mode. |
 | `GET` | `/api/finance/market/quotes?symbols=000001.SZ,...` | Normalized PandaData quotes. |
 | `GET` | `/api/finance/market/bars?symbol=000001.SZ&limit=80` | Normalized bars with freshness and quality metadata. |
+| `GET` | `/api/finance/market/information-facts?symbol=000001.SZ&start_quarter=2026q1&end_quarter=2026q2` | Source-stamped company financial-report disclosures. Both quarters are required and use PandaData's lowercase `YYYYqN` format. |
+| `GET` | `/api/finance/market/sentiment-facts?symbol=000001.SZ&start_date=20260701&end_date=20260723` | Source-stamped CN-equity margin-balance observations. Date bounds must be supplied together; omitted bounds default to the preceding 30 calendar days. |
 | `GET` | `/api/finance/market/catalog` | Audited PandaData capability catalog. |
 
 Market requests never return fabricated values. A failed upstream request has a
 non-2xx status and an `error.code`; clients must display this state rather than
 reusing stale values as current data.
+
+The fact endpoints return raw `NormalizedFact` records with their PandaData
+endpoint, source time, ingestion time, verification evidence and freshness.
+`information-facts` is limited to financial-report disclosures and
+`sentiment-facts` is limited to margin-balance observations. Neither endpoint
+returns media articles, social content, LLM summaries, a sentiment score or a
+trading signal; all records are `trade_eligible: false`.
 
 ## Persisted simulation APIs
 

@@ -1,16 +1,18 @@
 # Agent 主控交易台分析与隔离原型 Context Map
 
-> 任务：分析用户提出的 C/S、工作流、周期行情、重大行情提醒和双向 Agent 交易台需求；
-> 在不修改生产前端与现有后端实现的前提下，交付完整 Phase 规划及隔离可运行原型。
+> 任务：将用户最新提出的 C/S、工作流、周期行情、重大行情提醒和双向 Agent 交易台定义为当前产品形态；
+> 在不修改生产前端与现有后端实现的前提下，交付产品基线、完整 Phase 规划及隔离可运行原型。
 
 ## Context Map
 
 ### Files to Modify
 
-本任务不修改现有生产代码。以下均为新增文件。
+本任务不修改现有生产代码。产品形态文档与页面规格作为新基线，隔离原型继续位于已有原型目录。
 
 | File | Purpose | Changes Needed |
 | --- | --- | --- |
+| `docs/prd/Finance-God_Agent主控交易台_PRD_v2.0.md` | 最新产品形态、边界、主流程与验收 | 新增权威产品基线 |
+| `docs/page-design/pages/Agent主控交易台.md` | 双栏桌面工作区交互规格 | 取代已移除的旧 T00–T10 页面形态 |
 | `docs/architecture/2026-07-24_Agent主控交易台规划.md` | 现状审计、需求修正、目标架构、合同和 Phase 规划 | 新增证据化规划文档 |
 | `docs/page-design/briefs/2026-07-24_Agent主控交易台原型设计简报.md` | 实现前设计简报 | 新增原型范围、数据状态、动作边界和桌面布局 |
 | `docs/page-design/acceptance/2026-07-24_Agent主控交易台原型验收.md` | 实现后逐项验收 | 新增通过/失败/不适用与复现证据 |
@@ -40,7 +42,8 @@
 | `backend/finance_god/market_data/` | PandaData 标准化、缓存、单飞与质量门证据 |
 | `docs/page-design/01_前端统一设计规范.md` | 强制桌面布局、视觉、AI、行情和可访问性约束 |
 | `docs/page-design/02_前后端职责与数据合同.md` | 强制 Page View、Command、错误和前后端职责边界 |
-| `docs/page-design/pages/T03_AI辅助交易台.md` | 交易台页面专属任务和 AI/订单边界 |
+| `docs/prd/Finance-God_Agent主控交易台_PRD_v2.0.md` | 用户最新提示词形成的产品形态优先级来源 |
+| `docs/page-design/pages/Agent主控交易台.md` | 双栏工作区、初始化、快捷指令、工作流状态和 UI 动作边界 |
 
 ### Test Files
 

@@ -15,6 +15,10 @@ describe('Agent UI action contract', () => {
       kind: 'ui_action',
       actionId: 'navigate_history',
     })
+    expect(resolveAgentCommand('打开交易工作区')).toMatchObject({
+      kind: 'ui_action',
+      actionId: 'show_trade',
+    })
   })
 
   it('fills a draft without creating a trade fact', () => {
@@ -78,6 +82,13 @@ describe('Agent UI action contract', () => {
     expect(market).not.toEqual(portfolio)
   })
 
+  it('treats profile-based research candidates as research, not an order', () => {
+    expect(resolveAgentCommand('结合我的画像生成研究候选')).toMatchObject({
+      kind: 'workflow',
+      workflowKey: 'company_research',
+    })
+  })
+
   it('keeps every recommended command executable', () => {
     const contexts = [
       ['information', 'market'],
@@ -85,6 +96,8 @@ describe('Agent UI action contract', () => {
       ['information', 'strategy'],
       ['portfolio', 'market'],
       ['watchlist', 'market'],
+      ['trading', 'trade'],
+      ['trading', 'strategy'],
       ['history', 'market'],
       ['wallet', 'market'],
     ] as const
