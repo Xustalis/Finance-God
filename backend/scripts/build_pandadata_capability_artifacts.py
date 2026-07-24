@@ -6,9 +6,12 @@ import json
 from datetime import date
 from pathlib import Path
 
-from finance_god.market_data import CATALOG, PRODUCTION_AVAILABLE_ENDPOINTS
+from finance_god.market_data import (
+    CATALOG,
+    DEFAULT_INSTRUMENT_MASTER,
+    PRODUCTION_AVAILABLE_ENDPOINTS,
+)
 from finance_god.market_data.capabilities import CAPABILITY_RESOURCE_DIR
-
 
 _ARTIFACT_DIR = CAPABILITY_RESOURCE_DIR
 
@@ -25,6 +28,12 @@ def main() -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     verification = json.loads(verification_path.read_text(encoding="utf-8"))
     records = {item.endpoint: item for item in CATALOG.all()}
+    master_metadata = {
+        "instrument_master_identity": DEFAULT_INSTRUMENT_MASTER.identity,
+        "instrument_master_version": DEFAULT_INSTRUMENT_MASTER.version,
+    }
+    manifest.update(master_metadata)
+    verification.update(master_metadata)
 
     for item in manifest["endpoints"]:
         record = records[item["endpoint"]]

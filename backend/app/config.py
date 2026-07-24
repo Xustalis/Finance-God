@@ -2,33 +2,40 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 支持从 backend/ 或仓库根目录读取 .env
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = _BACKEND_DIR.parent
-_ENV_CANDIDATES = (
-    Path.cwd() / ".env",
-    _BACKEND_DIR / ".env",
-    _REPO_ROOT / ".env",
-)
-_ENV_FILES = tuple(str(p) for p in _ENV_CANDIDATES if p.is_file()) or (".env",)
+ROOT_ENV_FILE = _BACKEND_DIR.parent / ".env"
+
+
+def load_local_environment(env_file: Path = ROOT_ENV_FILE) -> None:
+    """Load the repository-root env for settings and direct os.getenv users."""
+    load_dotenv(env_file, override=False)
+
+
+load_local_environment()
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=_ENV_FILES, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(ROOT_ENV_FILE),
+        extra="ignore",
+    )
 
     # 应用
     app_name: str = "Finance-God"
     app_env: str = "development"
     app_debug: bool = True
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # SQLAlchemy SQL 语句回显日志，与 app_debug 解耦，默认关闭
     sql_echo: bool = False
 
     # 数据库
+    # 全环境统一使用 PostgreSQL；本地开发需先启动 postgres（docker compose up db
+    # 或本机实例），再执行 alembic upgrade head。
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/finance_god"
     database_url_sync: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/finance_god"
 
@@ -43,6 +50,16 @@ class Settings(BaseSettings):
 
     # 服务端 AI 凭据，不得序列化到 API
     deepseek_api_key: SecretStr | None = None
+    stepfun_api_key: SecretStr | None = None
+
+    # 火山方舟 ARK（OpenAI 兼容）凭据；env 配置后作为默认文本提供方替代 mock
+    ark_api_key: SecretStr | None = None
+    ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    ark_model: str | None = None
+
+    # AI /chat/completions 读超时（秒）。结构化 JSON 输出叠加大提示词时，
+    # 部分模型（如豆包 lite）单轮延迟可超过 30s，默认放宽到 60s，可按需覆盖。
+    ai_request_timeout_seconds: float = 60.0
 
     @model_validator(mode="after")
     def validate_production_secret(self):
@@ -61,6 +78,22 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "DEEPSEEK_API_KEY is configured but empty; provide a valid key "
+                "or remove the setting entirely"
+            )
+        if (
+            self.stepfun_api_key is not None
+            and not self.stepfun_api_key.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "STEPFUN_API_KEY is configured but empty; provide a valid key "
+                "or remove the setting entirely"
+            )
+        if (
+            self.ark_api_key is not None
+            and not self.ark_api_key.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "ARK_API_KEY is configured but empty; provide a valid key "
                 "or remove the setting entirely"
             )
         return self

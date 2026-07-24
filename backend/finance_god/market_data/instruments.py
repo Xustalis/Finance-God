@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from hashlib import sha256
-import json
 from types import MappingProxyType
 
 from .contracts import AssetClass, InstrumentId, MarketType
@@ -92,6 +92,62 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
             asset_class=AssetClass.EQUITY,
             currency="CNY",
             aliases=("SH600519",),
+        ),
+        InstrumentId(
+            symbol="000002.SZ",
+            provider_symbol="000002.SZ",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SZ000002",),
+        ),
+        InstrumentId(
+            symbol="000858.SZ",
+            provider_symbol="000858.SZ",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SZ000858",),
+        ),
+        InstrumentId(
+            symbol="002594.SZ",
+            provider_symbol="002594.SZ",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SZ002594",),
+        ),
+        InstrumentId(
+            symbol="300750.SZ",
+            provider_symbol="300750.SZ",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SZ300750",),
+        ),
+        InstrumentId(
+            symbol="601318.SH",
+            provider_symbol="601318.SH",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SH601318",),
+        ),
+        InstrumentId(
+            symbol="600036.SH",
+            provider_symbol="600036.SH",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SH600036",),
+        ),
+        InstrumentId(
+            symbol="600030.SH",
+            provider_symbol="600030.SH",
+            market=MarketType.CN,
+            asset_class=AssetClass.EQUITY,
+            currency="CNY",
+            aliases=("SH600030",),
         ),
         InstrumentId(
             symbol="000300.SH",

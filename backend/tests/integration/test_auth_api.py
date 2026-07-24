@@ -40,6 +40,65 @@ def test_me_rejects_token_for_missing_user(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_patch_me_persists_account_profile(client: TestClient) -> None:
+    registration = client.post(
+        "/api/v1/auth/register",
+        json={"email": "profile-edit@example.com", "password": "correct-horse-123", "display_name": "Old"},
+    ).json()["data"]
+    token = registration["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    patched = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={"display_name": "新昵称", "base_currency": "USD", "region": "US"},
+    )
+
+    assert patched.status_code == 200
+    data = patched.json()["data"]
+    assert data["display_name"] == "新昵称"
+    assert data["base_currency"] == "USD"
+    assert data["region"] == "US"
+
+    # 变更已落库：重新拉取 /me 返回持久化后的值
+    refetched = client.get("/api/v1/auth/me", headers=headers).json()["data"]
+    assert refetched["display_name"] == "新昵称"
+    assert refetched["base_currency"] == "USD"
+    assert refetched["region"] == "US"
+
+
+def test_patch_me_clears_display_name_with_blank(client: TestClient) -> None:
+    registration = client.post(
+        "/api/v1/auth/register",
+        json={"email": "profile-clear@example.com", "password": "correct-horse-123", "display_name": "有值"},
+    ).json()["data"]
+    headers = {"Authorization": f"Bearer {registration['access_token']}"}
+
+    patched = client.patch("/api/v1/auth/me", headers=headers, json={"display_name": "   "})
+
+    assert patched.status_code == 200
+    assert patched.json()["data"]["display_name"] is None
+
+
+def test_patch_me_rejects_invalid_currency(client: TestClient) -> None:
+    registration = client.post(
+        "/api/v1/auth/register",
+        json={"email": "profile-invalid@example.com", "password": "correct-horse-123"},
+    ).json()["data"]
+    headers = {"Authorization": f"Bearer {registration['access_token']}"}
+
+    response = client.patch("/api/v1/auth/me", headers=headers, json={"base_currency": "cny"})
+
+    assert response.status_code == 422
+    assert response.json()["success"] is False
+
+
+def test_patch_me_requires_authentication(client: TestClient) -> None:
+    response = client.patch("/api/v1/auth/me", json={"display_name": "匿名"})
+
+    assert response.status_code == 401
+
+
 @pytest.mark.asyncio
 async def test_admin_login_accepts_only_active_admins(
     client: TestClient, session_factory: async_sessionmaker[AsyncSession]

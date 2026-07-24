@@ -9,63 +9,56 @@ import DeskLayout from '@/components/desk/DeskLayout.vue'
 import { useMarketStore } from '@/stores/market'
 import { fetchOrders, fetchFills } from '@/api/desk'
 import { formatNumber } from '@/types/desk'
+import type { SimulationFill, StoredOrderView } from '@/types/desk'
 
 const market = useMarketStore()
 
-const orders = ref<any[]>([])
-const fills = ref<any[]>([])
+const orders = ref<StoredOrderView[]>([])
+const fills = ref<SimulationFill[]>([])
 const loading = ref(true)
-const error = ref<string | null>(null)
+const ordersError = ref<string | null>(null)
+const fillsError = ref<string | null>(null)
 const selectedFillId = ref<string | null>(null)
 
 const selectedFill = computed(() => {
   if (!selectedFillId.value) return null
-  return fills.value.find(f => (f.fill_id || f.order_id) === selectedFillId.value) ?? null
+  return fills.value.find(f => f.fill_id === selectedFillId.value) ?? null
 })
 
-/* 按标的分组的盈亏统计 */
-const pnlBySymbol = computed(() => {
-  const groups = new Map<string, { buys: number[]; sells: number[]; buyQty: number; sellQty: number }>()
+/** 订单总数（执行中心视图），仅用于统计展示。 */
+const executionOrders = computed(() => orders.value)
+
+/* 仅整理成交事实，不在浏览器推导收益或胜率。 */
+const fillFactsBySymbol = computed(() => {
+  const groups = new Map<string, number>()
   for (const fill of fills.value) {
-    const id = fill.instrument_id || 'unknown'
-    if (!groups.has(id)) groups.set(id, { buys: [], sells: [], buyQty: 0, sellQty: 0 })
-    const g = groups.get(id)!
-    const qty = Number(fill.quantity ?? fill.fill_quantity ?? 0)
-    const price = Number(fill.price ?? fill.fill_price ?? 0)
-    if (fill.side === 'buy') { g.buys.push(price); g.buyQty += qty }
-    else { g.sells.push(price); g.sellQty += qty }
+    groups.set(fill.instrument_id, (groups.get(fill.instrument_id) ?? 0) + 1)
   }
-  const results: { symbol: string; buyCount: number; sellCount: number; avgBuy: number; avgSell: number; realized: number }[] = []
-  for (const [symbol, g] of groups) {
-    const avgBuy = g.buys.length > 0 ? g.buys.reduce((a, b) => a + b, 0) / g.buys.length : 0
-    const avgSell = g.sells.length > 0 ? g.sells.reduce((a, b) => a + b, 0) / g.sells.length : 0
-    const realized = g.sellQty > 0 ? (avgSell - avgBuy) * Math.min(g.buyQty, g.sellQty) : 0
-    results.push({ symbol, buyCount: g.buys.length, sellCount: g.sells.length, avgBuy, avgSell, realized })
-  }
-  return results
+  return [...groups].map(([symbol, fillCount]) => ({ symbol, fillCount }))
 })
 
-const totalRealized = computed(() => pnlBySymbol.value.reduce((s, p) => s + p.realized, 0))
 const totalTrades = computed(() => fills.value.length)
-const winTrades = computed(() => pnlBySymbol.value.filter(p => p.realized > 0).length)
-const winRate = computed(() => {
-  const profitable = pnlBySymbol.value.filter(p => p.sellCount > 0)
-  if (profitable.length === 0) return 0
-  return Math.round((winTrades.value / profitable.length) * 100)
-})
+
+function failureMessage(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback
+}
 
 async function loadData() {
   loading.value = true
-  error.value = null
-  try {
-    const [ord, fil] = await Promise.allSettled([fetchOrders(), fetchFills()])
-    if (ord.status === 'fulfilled') orders.value = Array.isArray(ord.value) ? ord.value : []
-    if (fil.status === 'fulfilled') fills.value = Array.isArray(fil.value) ? fil.value : []
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
+  ordersError.value = null
+  fillsError.value = null
+  const [ord, fil] = await Promise.allSettled([fetchOrders(), fetchFills()])
+  if (ord.status === 'fulfilled') {
+    orders.value = Array.isArray(ord.value) ? ord.value : []
+  } else {
+    ordersError.value = failureMessage(ord.reason, '订单数据加载失败')
   }
+  if (fil.status === 'fulfilled') {
+    fills.value = Array.isArray(fil.value) ? fil.value : []
+  } else {
+    fillsError.value = failureMessage(fil.reason, '成交数据加载失败')
+  }
+  loading.value = false
 }
 
 onMounted(() => {
@@ -85,20 +78,24 @@ onUnmounted(() => market.stopPolling())
           <small>FILLS</small>
         </h2>
         <div v-if="loading" class="summary-empty">加载中...</div>
+        <div v-else-if="fillsError && fills.length === 0" class="summary-empty" role="alert">
+          <strong class="down">成交数据加载失败</strong>
+          <span>{{ fillsError }}</span>
+        </div>
         <div v-else-if="fills.length === 0" class="summary-empty">
           <span>暂无成交记录</span>
         </div>
         <div v-else class="fill-list">
           <button
             v-for="fill in fills"
-            :key="fill.fill_id || fill.order_id"
+            :key="fill.fill_id"
             class="fill-item"
-            :class="{ active: selectedFillId === (fill.fill_id || fill.order_id) }"
-            @click="selectedFillId = selectedFillId === (fill.fill_id || fill.order_id) ? null : (fill.fill_id || fill.order_id)"
+            :class="{ active: selectedFillId === fill.fill_id }"
+            @click="selectedFillId = selectedFillId === fill.fill_id ? null : fill.fill_id"
           >
-            <strong>{{ fill.instrument_id || '—' }}</strong>
-            <span :class="fill.side === 'buy' ? 'up' : 'down'">{{ fill.side }}</span>
-            <span class="mono">{{ fill.quantity ?? fill.fill_quantity ?? '—' }} @ {{ formatNumber(fill.price ?? fill.fill_price) }}</span>
+            <strong>{{ fill.instrument_id }}</strong>
+            <span>成交</span>
+            <span class="mono">{{ fill.quantity }} @ {{ formatNumber(fill.price) }}</span>
           </button>
         </div>
         <div class="rail-action">
@@ -116,16 +113,21 @@ onUnmounted(() => market.stopPolling())
         <h1 class="lead-title">
           交易复盘
           <small v-if="totalTrades > 0">
-            共 {{ totalTrades }} 笔成交 · 胜率 {{ winRate }}%
+            共 {{ totalTrades }} 笔成交 · 收益指标暂不可计算
           </small>
         </h1>
       </div>
 
+      <div v-if="ordersError || fillsError" class="data-warning" role="alert">
+        <p v-if="ordersError"><strong>订单数据加载失败：</strong>{{ ordersError }}。订单统计暂不可用。</p>
+        <p v-if="fillsError"><strong>成交数据加载失败：</strong>{{ fillsError }}。无法确认当前是否存在成交。</p>
+      </div>
+
       <div v-if="loading" class="table-state">加载复盘数据...</div>
-      <div v-else-if="error" class="table-state">
-        <strong class="down">加载失败</strong>
-        <span>{{ error }}</span>
-        <button class="secondary-button" style="margin-top:10px" @click="loadData">重试</button>
+      <div v-else-if="fillsError && fills.length === 0" class="table-state">
+        <strong class="down">复盘事实不可用</strong>
+        <span>成交请求失败，不能将当前结果解释为暂无成交。</span>
+        <button class="secondary-button" style="margin-top:10px" @click="loadData">重试加载</button>
       </div>
       <div v-else-if="fills.length === 0" class="table-state">
         <span>暂无成交记录，无法生成复盘分析。</span>
@@ -133,27 +135,19 @@ onUnmounted(() => market.stopPolling())
       </div>
 
       <template v-else>
-        <!-- 按标的分组复盘 -->
+        <!-- 按标的整理成交事实；收益指标等待后端权威 projection。 -->
         <div class="review-section">
-          <h2 class="section-heading">标的分析 <small>BY INSTRUMENT</small></h2>
+          <h2 class="section-heading">成交事实 <small>BY INSTRUMENT</small></h2>
           <div class="review-table">
             <div class="rtable-header">
               <span class="col-sym">标的</span>
-              <span class="col-num">买入</span>
-              <span class="col-num">卖出</span>
-              <span class="col-num">均价买</span>
-              <span class="col-num">均价卖</span>
-              <span class="col-num">已实现盈亏</span>
+              <span class="col-num">成交笔数</span>
+              <span class="col-result">复盘指标</span>
             </div>
-            <div v-for="p in pnlBySymbol" :key="p.symbol" class="rtable-row">
+            <div v-for="p in fillFactsBySymbol" :key="p.symbol" class="rtable-row">
               <strong class="col-sym">{{ p.symbol }}</strong>
-              <span class="col-num">{{ p.buyCount }}</span>
-              <span class="col-num">{{ p.sellCount }}</span>
-              <span class="col-num">{{ formatNumber(p.avgBuy) }}</span>
-              <span class="col-num">{{ p.avgSell > 0 ? formatNumber(p.avgSell) : '—' }}</span>
-              <span class="col-num" :class="p.realized >= 0 ? 'up' : 'down'">
-                {{ p.realized !== 0 ? (p.realized > 0 ? '+' : '') + formatNumber(p.realized) : '—' }}
-              </span>
+              <span class="col-num">{{ p.fillCount }}</span>
+              <span class="col-result">后端暂无权威 projection，暂不可计算</span>
             </div>
           </div>
         </div>
@@ -163,10 +157,11 @@ onUnmounted(() => market.stopPolling())
           <h2 class="section-heading">成交详情 <small>FILL DETAIL</small></h2>
           <div class="detail-card">
             <div class="detail-row"><span>标的</span><strong>{{ selectedFill.instrument_id }}</strong></div>
-            <div class="detail-row"><span>方向</span><strong :class="selectedFill.side === 'buy' ? 'up' : 'down'">{{ selectedFill.side }}</strong></div>
-            <div class="detail-row"><span>数量</span><strong>{{ selectedFill.quantity ?? selectedFill.fill_quantity }}</strong></div>
-            <div class="detail-row"><span>价格</span><strong>{{ formatNumber(selectedFill.price ?? selectedFill.fill_price) }}</strong></div>
-            <div class="detail-row"><span>订单 ID</span><strong style="font-size:11px;word-break:break-all;">{{ selectedFill.order_id || '—' }}</strong></div>
+            <div class="detail-row"><span>数量</span><strong>{{ selectedFill.quantity }}</strong></div>
+            <div class="detail-row"><span>价格</span><strong>{{ formatNumber(selectedFill.price) }}</strong></div>
+            <div class="detail-row"><span>费用</span><strong>{{ formatNumber(selectedFill.fee) }}</strong></div>
+            <div class="detail-row"><span>成交时间</span><strong>{{ selectedFill.occurred_at }}</strong></div>
+            <div class="detail-row"><span>订单 ID</span><strong style="font-size:11px;word-break:break-all;">{{ selectedFill.order_id }}</strong></div>
           </div>
         </div>
       </template>
@@ -181,25 +176,23 @@ onUnmounted(() => market.stopPolling())
         <div class="summary-grid">
           <div class="summary-row">
             <span>总成交</span>
-            <strong>{{ totalTrades }}</strong>
+            <strong>{{ fillsError && fills.length === 0 ? '暂不可用' : totalTrades }}</strong>
           </div>
           <div class="summary-row">
             <span>涉及标的</span>
-            <strong>{{ pnlBySymbol.length }}</strong>
+            <strong>{{ fillsError && fills.length === 0 ? '暂不可用' : fillFactsBySymbol.length }}</strong>
           </div>
           <div class="summary-row">
             <span>已实现盈亏</span>
-            <strong :class="totalRealized >= 0 ? 'up' : 'down'">
-              {{ totalRealized >= 0 ? '+' : '' }}{{ formatNumber(totalRealized) }}
-            </strong>
+            <strong>暂不可计算</strong>
           </div>
           <div class="summary-row">
             <span>胜率</span>
-            <strong>{{ winRate }}%</strong>
+            <strong>暂不可计算</strong>
           </div>
           <div class="summary-row">
             <span>总订单</span>
-            <strong>{{ orders.length }}</strong>
+            <strong>{{ ordersError ? '暂不可用' : executionOrders.length }}</strong>
           </div>
         </div>
       </section>
@@ -258,6 +251,12 @@ onUnmounted(() => market.stopPolling())
 
 .table-state { padding: 40px 20px; color: var(--muted-ink); font-size: 14px; text-align: center; }
 .table-state strong { display: block; margin-bottom: 4px; }
+.data-warning {
+  margin: 0 20px 12px; padding: 9px 12px; border: 1px solid var(--risk);
+  color: var(--risk); font-size: 12px;
+}
+.data-warning p { margin: 0; }
+.data-warning p + p { margin-top: 4px; }
 
 .review-section { margin-top: 20px; }
 .section-heading {
@@ -272,13 +271,13 @@ onUnmounted(() => market.stopPolling())
 
 .review-table { border-top: 1px solid var(--rule); }
 .rtable-header {
-  display: grid; grid-template-columns: minmax(0,1fr) 50px 50px 80px 80px 100px; gap: 4px;
+  display: grid; grid-template-columns: minmax(0,1fr) 80px minmax(170px,1.5fr); gap: 4px;
   padding: 8px 20px 6px; font-size: 11px; font-weight: 900;
   color: var(--muted-ink); letter-spacing: 0.04em; border-bottom: 1px solid var(--rule);
 }
 .rtable-header .col-num { text-align: right; }
 .rtable-row {
-  display: grid; grid-template-columns: minmax(0,1fr) 50px 50px 80px 80px 100px; gap: 4px;
+  display: grid; grid-template-columns: minmax(0,1fr) 80px minmax(170px,1.5fr); gap: 4px;
   padding: 10px 20px; border-bottom: 1px solid var(--faint-rule); font-size: 14px;
 }
 .rtable-row .col-num { text-align: right; font-family: var(--font-numeric); font-size: 13px; }
@@ -286,6 +285,7 @@ onUnmounted(() => market.stopPolling())
   font-family: var(--font-numeric); font-weight: 700;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.col-result { text-align: right; color: var(--muted-ink); font-size: 12px; }
 
 .detail-card { padding: 14px 20px; }
 .detail-row {

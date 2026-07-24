@@ -11,6 +11,7 @@ from finance_god.domain import (
     ExchangeOrder,
     FundOrder,
     OrderDraft,
+    OrderSide,
     RiskCheckResult,
     VersionReference,
 )
@@ -56,14 +57,37 @@ class ManualReviewResult(StrictModel):
         return self
 
 
+class CostEstimate(StrictModel):
+    """Backend-computed pre-submission cost projection for a draft.
+
+    All monetary values follow the authoritative ``SimulationRuleSet``; the
+    frontend must display these figures rather than compute its own.  This is an
+    *estimate* — the executed fill uses the next real PandaData bar at reconcile.
+    """
+
+    reference_price: Decimal = Field(gt=0)
+    price_source: str = Field(pattern=r"^(limit_price|market_reference)$")
+    quantity: Decimal = Field(gt=0)
+    notional: Decimal = Field(ge=0)
+    fee: Decimal = Field(ge=0)
+    total: Decimal
+    cash_flow: str = Field(pattern=r"^(outflow|inflow)$")
+    fee_bps: Decimal = Field(ge=0)
+    slippage_bps: Decimal = Field(ge=0)
+    currency: str = Field(default="CNY", min_length=3, max_length=3)
+    rule_version: str = Field(min_length=1, max_length=80)
+
+
 class StoredDraft(StrictModel):
     record_revision: int = Field(default=1, ge=1)
     owner_id: str = Field(min_length=1, max_length=160)
     mode: DraftMode
     draft: OrderDraft
     plan_reference: VersionReference | None = None
+    reference_price: Decimal | None = Field(default=None, gt=0)
     review: ManualReviewResult | None = None
     risk_result: RiskCheckResult | None = None
+    cost_estimate: CostEstimate | None = None
     immutable_summary_hash: str | None = Field(
         default=None,
         pattern=r"^[0-9a-f]{64}$",
@@ -131,6 +155,9 @@ class SimulationFill(StrictModel):
     order_id: str = Field(min_length=1, max_length=160)
     account_id: str = Field(min_length=1, max_length=160)
     instrument_id: str = Field(min_length=1, max_length=160)
+    # Optional for backward compatibility with fills persisted before the
+    # side field existed; new fills always carry the originating draft side.
+    side: OrderSide | None = None
     quantity: Decimal = Field(gt=0)
     price: Decimal = Field(gt=0)
     fee: Decimal = Field(ge=0)
@@ -140,6 +167,54 @@ class SimulationFill(StrictModel):
     rule_version: str = Field(pattern=r"^simulation-rules-v[0-9]+$")
     occurred_at: AwareDatetime
     ledger_fill_id: str = Field(min_length=1, max_length=160)
+
+
+class OrderTimelineEntry(StrictModel):
+    """A single, evidence-backed step in an order's lifecycle.
+
+    Entries are only produced from facts the execution store actually holds
+    (draft confirmation, recorded fills, and the current order transition);
+    the service never fabricates intermediate transitions it cannot prove.
+    """
+
+    status: str = Field(min_length=1, max_length=40)
+    occurred_at: AwareDatetime
+    actor_id: str = Field(min_length=1, max_length=160)
+    detail: str | None = Field(default=None, max_length=400)
+
+
+class StoredOrderView(StrictModel):
+    """Read model that joins a stored order with its originating draft and fills.
+
+    Order-level parameters (instrument, side, type, limit price, time-in-force)
+    are sourced from the authoritative ``OrderDraft`` so the client receives the
+    complete order regardless of exchange/fund shape.  Execution figures
+    (average fill price, fee total, filled notional) are derived from recorded
+    simulation fills only.
+    """
+
+    order_id: str = Field(min_length=1, max_length=160)
+    owner_id: str = Field(min_length=1, max_length=160)
+    order_kind: str = Field(pattern=r"^(exchange|fund)$")
+    status: str = Field(min_length=1, max_length=40)
+    instrument_id: str = Field(min_length=1, max_length=160)
+    side: str = Field(min_length=1, max_length=40)
+    order_type: str = Field(min_length=1, max_length=40)
+    time_in_force: str | None = Field(default=None, max_length=40)
+    limit_price: Decimal | None = Field(default=None, gt=0)
+    quantity: Decimal = Field(gt=0)
+    cumulative_filled: Decimal = Field(ge=0)
+    remaining_quantity: Decimal = Field(ge=0)
+    average_fill_price: Decimal | None = Field(default=None, gt=0)
+    total_fee_rmb: Decimal = Field(ge=0)
+    filled_notional_rmb: Decimal = Field(ge=0)
+    revision: int = Field(ge=1)
+    confirmed_at: AwareDatetime | None = None
+    updated_at: AwareDatetime
+    draft_reference: VersionReference
+    execution_error: str | None = Field(default=None, max_length=2_000)
+    fills: tuple[SimulationFill, ...] = ()
+    timeline: tuple[OrderTimelineEntry, ...] = ()
 
 
 class SubmissionStatus(str, Enum):

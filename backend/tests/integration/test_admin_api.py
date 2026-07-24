@@ -4,9 +4,9 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.ai_config import AIModelConfig, AdminAuditRecord, PromptVersion
-from app.models.user import User
 from app.config import settings
+from app.models.ai_config import AdminAuditRecord, AIModelConfig, PromptVersion
+from app.models.user import User
 
 
 def register(client: TestClient, email: str) -> tuple[str, str]:
@@ -85,6 +85,47 @@ async def test_deepseek_key_reference_is_fixed_and_secret_is_redacted(
         assert "api_key_ref" not in payload
         assert "DEEPSEEK_API_KEY" not in payload
         assert "deepseek-secret-value" not in payload
+
+
+@pytest.mark.asyncio
+async def test_stepfun_key_reference_is_fixed_and_secret_is_redacted(
+    client: TestClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "stepfun_api_key", SecretStr("stepfun-secret-value"))
+    admin_token, admin_id = register(client, "stepfun-admin@example.com")
+    async with session_factory() as session:
+        admin = await session.get(User, admin_id)
+        admin.role = "admin"
+        await session.commit()
+
+    response = client.put(
+        "/api/v1/admin/ai-settings",
+        headers=headers(admin_token),
+        json={
+            "capability": "text",
+            "provider": "stepfun",
+            "model_name": "step-3.5-flash-2603",
+            "prompt_version": "v1",
+            "min_rounds": 6,
+            "max_rounds": 12,
+            "enabled": True,
+        },
+    )
+
+    async with session_factory() as session:
+        config = await session.scalar(
+            select(AIModelConfig).where(AIModelConfig.capability == "text")
+        )
+        key_ref = config.api_key_ref
+
+    assert response.status_code == 200
+    assert response.json()["data"]["base_url"] == "https://api.stepfun.com/v1"
+    assert response.json()["data"]["api_key_configured"] is True
+    assert key_ref == "STEPFUN_API_KEY"
+    assert "STEPFUN_API_KEY" not in response.text
+    assert "stepfun-secret-value" not in response.text
 
 
 @pytest.mark.asyncio

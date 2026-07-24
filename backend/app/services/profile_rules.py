@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from app.services.ai_orchestrator import PROFILE_DIMENSIONS
 
-
 DIRECTIONS = (
     "cash_fixed_income",
     "public_funds",

@@ -19,19 +19,26 @@ from .contracts import (
     DataDiagnostic,
     DataEnvelope,
     DataFrequency,
+    DiagnosticCode,
     EmptyMeaning,
     InstrumentId,
     MarketType,
     NormalizedBar,
     NormalizedSnapshot,
+    ReleaseState,
 )
 from .coordinator import SnapshotCoordinator
 from .errors import (
+    ErrorKind,
     MarketDataConfigurationError,
     MarketDataError,
     MarketDataResponseError,
 )
-from .instruments import DEFAULT_INSTRUMENT_MASTER, InstrumentMaster
+from .instruments import (
+    DEFAULT_INSTRUMENT_MASTER,
+    InstrumentMaster,
+    UnknownInstrumentError,
+)
 from .quality import (
     DQTriggerRequest,
     DQWorkflowPort,
@@ -51,6 +58,8 @@ from .release import (
 from .transport import InjectedSDKTransportPolicy
 
 _UTC = ZoneInfo("UTC")
+_READINESS_CANARY_SYMBOL = "000001.SZ"
+_READINESS_CACHE_SECONDS = 30.0
 
 
 class MarketQuote(BaseModel):
@@ -130,6 +139,7 @@ class MarketBarsResult(BaseModel):
     quality: QualityDecision
     dq_request: DQTriggerRequest | None
     error_message: str | None = None
+    error_kind: ErrorKind | None = Field(default=None, exclude=True)
 
 
 class QuoteExecution(BaseModel):
@@ -157,7 +167,6 @@ class MarketDataService:
         published_state: PublishedStatePort | None = None,
         quality_gate: QualityGate | None = None,
     ) -> None:
-        del clock
         if adapter is None:
             if sdk is None:
                 raise MarketDataConfigurationError(
@@ -177,6 +186,8 @@ class MarketDataService:
         self._adapter = adapter
         self._master = instrument_master
         self._now = now or (lambda: datetime.now(_UTC))
+        self._clock = clock
+        self._readiness_cache: tuple[float, tuple[bool, str]] | None = None
         self._published_state = published_state or FailClosedPublishedState()
         self._quality_gate = quality_gate or QualityGate(
             InMemoryScopeFreezeRepository()
@@ -209,8 +220,8 @@ class MarketDataService:
         )
         publication = self._published_state.evaluate(
             instrument=instrument,
-            category=DataCategory.SNAPSHOT,
-            frequency=DataFrequency.SNAPSHOT,
+            category=DataCategory.BAR,
+            frequency=DataFrequency.MINUTE_1,
             trading_date=trading_date,
             observed_at=observed_at,
         )
@@ -273,17 +284,53 @@ class MarketDataService:
             quality=outcome.decision,
             dq_request=outcome.dq_request,
             error_message=error_message,
+            error_kind=_envelope_error_kind(envelope) if not envelope.items else None,
         )
 
     def catalog(self) -> tuple[dict[str, object], ...]:
         return self._adapter.catalog()
 
     def probe_readiness(self) -> tuple[bool, str]:
+        clock_value = self._clock()
+        cached = self._readiness_cache
+        if cached is not None and clock_value - cached[0] < _READINESS_CACHE_SECONDS:
+            return cached[1]
         try:
-            self._published_state.probe(self._aware_now())
+            observed_at = self._aware_now()
+            self._published_state.probe(observed_at)
+            self._probe_page_dependencies()
         except MarketDataError as error:
-            return False, error.public_code.value
-        return True, "ready"
+            result = False, error.public_code.value
+        else:
+            result = True, "ready"
+        self._readiness_cache = (clock_value, result)
+        return result
+
+    def _probe_page_dependencies(self) -> None:
+        instrument = self.resolve(_READINESS_CANARY_SYMBOL)
+        quote = self._adapter.fetch_snapshot(
+            instrument,
+            release_state=ReleaseState.RELEASED,
+        )
+        if quote.diagnostics or len(quote.items) != 1:
+            raise MarketDataResponseError(
+                "quote readiness canary did not return one normalized item",
+                endpoint=_single_source_endpoint(quote),
+            )
+        trading_date = quote.items[0].source.trading_date
+        bars = self._adapter.fetch_bars(
+            instrument,
+            frequency=DataFrequency.MINUTE_1,
+            start_date=trading_date,
+            end_date=trading_date,
+            limit=1,
+            release_state=ReleaseState.RELEASED,
+        )
+        if bars.diagnostics or not bars.items:
+            raise MarketDataResponseError(
+                "bar readiness canary did not return a normalized item",
+                endpoint=_single_source_endpoint(bars),
+            )
 
     def resolve_quality_freeze(
         self,
@@ -367,37 +414,62 @@ class _QuoteCoordinator:
 
     async def get(self, symbols: Iterable[str]) -> QuoteExecution:
         requested = _bounded_symbols(symbols)
-        instruments = tuple(self._service.resolve(symbol) for symbol in requested)
-        cache_hit = all(item.symbol in self._seen for item in instruments)
-        result = await self._coordinator.get(instruments)
-        successful = {item.instrument.symbol for item in result.items}
+        instruments: list[InstrumentId] = []
+        resolution_errors: dict[str, str] = {}
+        for symbol in requested:
+            try:
+                instruments.append(self._service.resolve(symbol))
+            except UnknownInstrumentError as error:
+                resolution_errors[symbol] = str(error)
+        cache_hit = not resolution_errors and all(
+            item.symbol in self._seen for item in instruments
+        )
+        if instruments:
+            result = await self._coordinator.get(instruments)
+            result_items = result.items
+            diagnostics = result.diagnostics
+        else:
+            result_items = ()
+            diagnostics = ()
+        successful = {item.instrument.symbol for item in result_items}
         self._seen.update(successful)
-        errors = {
+        errors = resolution_errors | {
             item.scope.split(":", maxsplit=1)[0]: item.message
-            for item in result.diagnostics
+            for item in diagnostics
         }
         quality: dict[str, QualityDecision] = {}
         dq_requests: list[DQTriggerRequest] = []
         for instrument in instruments:
-            items = tuple(
+            instrument_items = tuple(
                 item
-                for item in result.items
+                for item in result_items
                 if item.instrument.symbol == instrument.symbol
             )
-            diagnostics = tuple(
+            instrument_diagnostics = tuple(
                 item
-                for item in result.diagnostics
+                for item in diagnostics
                 if item.scope.split(":", maxsplit=1)[0] == instrument.symbol
             )
             empty_meaning = (
-                EmptyMeaning.NOT_EMPTY if items else EmptyMeaning.UNEXPECTED_MISSING
+                EmptyMeaning.NOT_EMPTY
+                if instrument_items
+                else EmptyMeaning.UNEXPECTED_MISSING
             )
-            envelope = DataEnvelope(items, diagnostics, empty_meaning)
+            envelope = DataEnvelope(
+                instrument_items,
+                instrument_diagnostics,
+                empty_meaning,
+            )
+            frequency = (
+                instrument_items[0].source.frequency
+                if instrument_items
+                else DataFrequency.SNAPSHOT
+            )
             outcome = self._service.evaluate_quality(
                 envelope,
                 instrument.symbol,
                 category=DataCategory.SNAPSHOT,
-                frequency=DataFrequency.SNAPSHOT,
+                frequency=frequency,
             )
             quality[instrument.symbol] = outcome.decision
             if outcome.dq_request is not None:
@@ -405,9 +477,9 @@ class _QuoteCoordinator:
         batch = QuoteBatch(
             requested_at=datetime.now(_UTC),
             cache_hit=cache_hit,
-            quotes=tuple(_quote(item) for item in result.items),
+            quotes=tuple(_quote(item) for item in result_items),
             errors=errors,
-            diagnostics=result.diagnostics,
+            diagnostics=diagnostics,
             quality=quality,
         )
         return QuoteExecution(batch=batch, dq_requests=tuple(dq_requests))
@@ -448,8 +520,9 @@ class MarketDataApplication:
         requests = (result.dq_request,) if result.dq_request is not None else ()
         await self._dispatch(requests)
         if not result.bars:
-            raise MarketDataResponseError(
-                result.error_message or "PandaData returned no normalized bars"
+            raise MarketDataError(
+                result.error_kind or ErrorKind.SCHEMA,
+                result.error_message or "PandaData returned no normalized bars",
             )
         return result
 
@@ -587,3 +660,17 @@ def _single_source_endpoint(envelope: DataEnvelope[Any]) -> str | None:
     if len(endpoints) > 1:
         raise ValueError("quality envelope contains conflicting source endpoints")
     return next(iter(endpoints), None)
+
+
+def _envelope_error_kind(envelope: DataEnvelope[Any]) -> ErrorKind:
+    if not envelope.diagnostics:
+        return ErrorKind.SCHEMA
+    return {
+        DiagnosticCode.CAPABILITY_DISABLED: ErrorKind.CAPABILITY,
+        DiagnosticCode.UNSUPPORTED_CATEGORY: ErrorKind.CAPABILITY,
+        DiagnosticCode.INVALID_PARAMETER: ErrorKind.PARAMETER,
+        DiagnosticCode.AUTHENTICATION_FAILED: ErrorKind.AUTHENTICATION,
+        DiagnosticCode.PERMISSION_DENIED: ErrorKind.PERMISSION,
+        DiagnosticCode.TRANSIENT_UPSTREAM: ErrorKind.TRANSIENT,
+        DiagnosticCode.UNEXPECTED_MISSING: ErrorKind.EMPTY,
+    }.get(envelope.diagnostics[-1].code, ErrorKind.SCHEMA)

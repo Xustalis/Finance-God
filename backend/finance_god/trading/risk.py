@@ -60,8 +60,8 @@ from .rules_v1 import (
     SOFT_BROAD_ETF_RATIO,
     SOFT_DAILY_TURNOVER_RATIO,
     SOFT_INDUSTRY_RATIO,
-    SOFT_OTC_FUND_RATIO,
     SOFT_ORDER_RATIO,
+    SOFT_OTC_FUND_RATIO,
     SOFT_PRICE_DEVIATION_RATIO,
     SOFT_SHORT_GROSS_RATIO,
     SOFT_SINGLE_ASSET_RATIO,
@@ -2030,11 +2030,7 @@ def _formal_input_versions(
 
 
 def _reason_summary_hash(result: RiskCheckResult) -> str:
-    payload = "|".join(
-        f"{reason.code}:{reason.severity.value}:{reason.message}"
-        for reason in result.reasons
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return result.reason_hash
 
 
 def _nominal(

@@ -6,39 +6,85 @@
  */
 import Masthead from './Masthead.vue'
 import BottomRail from './BottomRail.vue'
+import { useDeskLayoutPreference, type DeskPanel } from '@/composables/useDeskLayoutPreference'
 
 defineSlots<{
   left(): unknown
   main(): unknown
   right(): unknown
 }>()
+
+const { panels, storageError, layoutStatus, togglePanel, resetLayout } = useDeskLayoutPreference()
+
+const panelLabels: Record<DeskPanel, string> = {
+  left: '标的栏',
+  right: '摘要栏',
+  bottom: '底部栏',
+}
+
+function toggleLabel(panel: DeskPanel) {
+  return `${panels[panel] ? '隐藏' : '显示'}${panelLabels[panel]}`
+}
 </script>
 
 <template>
-  <div class="desk-page">
+  <div
+    class="desk-page"
+    :class="{
+      'left-hidden': !panels.left,
+      'right-hidden': !panels.right,
+      'bottom-hidden': !panels.bottom,
+    }"
+  >
     <Masthead />
-    <aside class="desk-left" aria-label="选择与比较">
+    <nav class="layout-toolbar" aria-label="交易台布局">
+      <span class="layout-toolbar__label">工作区</span>
+      <button
+        v-for="panel in (['left', 'right', 'bottom'] as DeskPanel[])"
+        :key="panel"
+        type="button"
+        class="layout-button"
+        :aria-pressed="panels[panel]"
+        :data-testid="`toggle-${panel}-panel`"
+        @click="togglePanel(panel)"
+      >
+        {{ toggleLabel(panel) }}
+      </button>
+      <button type="button" class="layout-button reset-button" data-testid="reset-layout" @click="resetLayout">
+        重置布局
+      </button>
+      <span v-if="storageError" class="layout-message layout-message--error" role="alert">{{ storageError }}</span>
+      <span v-else-if="layoutStatus" class="layout-message" role="status">{{ layoutStatus }}</span>
+    </nav>
+    <aside v-show="panels.left" class="desk-left" aria-label="选择与比较">
       <slot name="left" />
     </aside>
     <main class="desk-main">
       <slot name="main" />
     </main>
-    <aside class="desk-right" aria-label="摘要与证据">
+    <aside v-show="panels.right" class="desk-right" aria-label="摘要与证据">
       <slot name="right" />
     </aside>
-    <BottomRail />
+    <BottomRail v-show="panels.bottom" />
   </div>
 </template>
 
 <style scoped>
 .desk-page {
+  --desk-left-width: 282px;
+  --desk-right-width: 290px;
+  --desk-bottom-height: 150px;
+
   display: grid;
+  width: 100%;
   min-height: 100vh;
+  overflow: hidden;
   grid-template:
     "masthead masthead masthead" 64px
-    "left     main     right"    minmax(520px, calc(100vh - 214px))
-    "bottom   bottom   bottom"   150px
-    / 282px minmax(0, 1fr) 290px;
+    "toolbar  toolbar  toolbar"  38px
+    "left     main     right"    minmax(482px, calc(100vh - 252px))
+    "bottom   bottom   bottom"   var(--desk-bottom-height)
+    / var(--desk-left-width) minmax(0, 1fr) var(--desk-right-width);
   border-top: 10px solid var(--ink);
   background-color: var(--paper);
   background-image:
@@ -49,6 +95,61 @@ defineSlots<{
   background-size: cover, 1200px 1200px;
   font-variant-numeric: tabular-nums lining-nums;
   isolation: isolate;
+}
+
+.desk-page.left-hidden { --desk-left-width: 0px; }
+.desk-page.right-hidden { --desk-right-width: 0px; }
+.desk-page.bottom-hidden { --desk-bottom-height: 0px; }
+
+.layout-toolbar {
+  grid-area: toolbar;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-light);
+  white-space: nowrap;
+}
+
+.layout-toolbar__label {
+  margin-right: 4px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.layout-button {
+  min-height: 28px;
+  padding: 2px 9px;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.layout-button:hover {
+  background: rgb(33 26 18 / 7%);
+}
+
+.reset-button {
+  border-color: transparent;
+  border-bottom-color: var(--ink);
+}
+
+.layout-message {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted-ink);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+}
+
+.layout-message--error {
+  color: var(--risk);
 }
 
 .desk-left {
@@ -78,14 +179,22 @@ defineSlots<{
   scrollbar-color: var(--faint-rule) transparent;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1279px) {
   .desk-page {
-    grid-template:
-      "masthead masthead" 64px
-      "left     main"     minmax(420px, calc(100vh - 214px))
-      "bottom   bottom"   150px
-      / 240px minmax(0, 1fr);
+    --desk-left-width: 220px;
+    --desk-right-width: 260px;
   }
-  .desk-right { display: none; }
+
+  .desk-page.left-hidden {
+    --desk-left-width: 0px;
+  }
+
+  .desk-page.right-hidden {
+    --desk-right-width: 0px;
+  }
+
+  .desk-main {
+    padding-inline: 14px;
+  }
 }
 </style>

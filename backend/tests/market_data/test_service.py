@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from finance_god.market_data import (
     DQTriggerRequest,
     DQWorkflowReceipt,
+    ErrorKind,
     FailClosedPublishedState,
     MarketDataApplication,
     MarketDataConfigurationError,
+    MarketDataError,
     MarketDataService,
     PandaCalendarPublishedState,
     StaticPublishedState,
@@ -15,7 +19,7 @@ from finance_god.market_data import (
 from finance_god.market_data.contracts import ReleaseState
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
-from .conftest import NOW, FakeSDK, adapter, stock_snapshot
+from .conftest import NOW, FakeSDK, adapter, bar
 
 
 class RecordingWorkflow:
@@ -51,7 +55,7 @@ def test_service_fails_closed_before_sdk_when_publication_state_is_unknown() -> 
 
 def test_service_exposes_research_data_but_never_marks_it_trade_eligible() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,
@@ -79,8 +83,8 @@ def test_service_exposes_research_data_but_never_marks_it_trade_eligible() -> No
 
 def test_service_creates_audited_data_quality_review_for_conflict() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_rt_daily"] = [
-        stock_snapshot("600519.SH"),
+    sdk.responses["get_stock_rt_min"] = [
+        bar("20260723 10:31:00", symbol="600519.SH"),
     ]
     workflow = RecordingWorkflow()
     service = MarketDataService(
@@ -132,7 +136,7 @@ def test_official_calendar_response_authorizes_released_session() -> None:
             "next_trade_date": 20260724,
         },
     ]
-    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
     data_adapter = adapter(sdk)
     service = MarketDataService(
         adapter=data_adapter,
@@ -152,7 +156,56 @@ def test_official_calendar_response_authorizes_released_session() -> None:
     assert reason == "ready"
     calls = [name for name, _ in sdk.calls]
     assert calls.count("get_trade_cal") == 2
-    assert calls.count("get_stock_rt_daily") == 1
+    assert calls.count("get_stock_rt_daily") == 0
+    assert calls.count("get_stock_rt_min") == 3
+
+
+def test_readiness_probes_quote_and_page_bar_contract_once_per_cache_window() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        clock=lambda: 100.0,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    assert service.probe_readiness() == (True, "ready")
+    assert service.probe_readiness() == (True, "ready")
+
+    calls = [name for name, _ in sdk.calls]
+    assert calls.count("get_stock_rt_daily") == 0
+    assert calls.count("get_stock_rt_min") == 2
+
+
+def test_readiness_fails_when_page_bar_contract_has_schema_drift() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_min"] = [{"symbol": "000001.SZ"}]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    assert service.probe_readiness() == (False, "MARKET_DATA_SCHEMA_INVALID")
+
+
+def test_unsupported_default_bar_symbol_preserves_capability_error() -> None:
+    service = MarketDataService(
+        adapter=adapter(FakeSDK()),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
+    )
+
+    with pytest.raises(MarketDataError) as captured:
+        asyncio.run(application.bars("510300.SH"))
+
+    assert captured.value.kind is ErrorKind.CAPABILITY
+    assert captured.value.public_code.value == "MARKET_DATA_CAPABILITY_UNAVAILABLE"
 
 
 def test_readiness_fails_when_workflow_command_port_is_unconfigured() -> None:
@@ -172,7 +225,9 @@ def test_readiness_fails_when_workflow_command_port_is_unconfigured() -> None:
 
 def test_quality_failure_without_workflow_port_fails_explicitly() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_stock_rt_daily"] = [stock_snapshot("600519.SH")]
+    sdk.responses["get_stock_rt_min"] = [
+        bar("20260723 10:31:00", symbol="600519.SH")
+    ]
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,
@@ -186,3 +241,23 @@ def test_quality_failure_without_workflow_port_fails_explicitly() -> None:
         assert error.public_code.value == "MARKET_DATA_CONFIGURATION_ERROR"
     else:
         raise AssertionError("missing workflow command port must fail explicitly")
+
+
+def test_quote_batch_keeps_supported_results_and_reports_unknown_symbols() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
+    )
+
+    batch = asyncio.run(application.quotes(["000001.SZ", "999999.SZ"]))
+
+    assert [quote.symbol for quote in batch.quotes] == ["000001.SZ"]
+    assert "999999.SZ" in batch.errors
+    assert "authoritative master" in batch.errors["999999.SZ"]

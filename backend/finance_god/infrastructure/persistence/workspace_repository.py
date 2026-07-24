@@ -8,7 +8,10 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from finance_god.domain.errors import ConcurrentCommandConflict, DomainInvariantViolation
+from finance_god.domain.errors import (
+    ConcurrentCommandConflict,
+    DomainInvariantViolation,
+)
 from finance_god.domain.models import (
     AuditReference,
     Notification,

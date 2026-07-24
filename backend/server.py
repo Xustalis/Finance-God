@@ -1,18 +1,44 @@
-"""Serve the Finance-God desktop prototype and normalized PandaData APIs."""
+"""Finance API composition mounted exclusively by ``app.main:app``."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC
-import logging
-import os
-from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
-from dotenv import load_dotenv
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+
+from app.config import settings
+from app.core.security import decode_access_token
+from app.db.session import create_db_session
+from finance_god.api.agent_routes import (
+    AgentRuntimeUnavailable,
+    create_agent_routes,
+)
+from finance_god.api.auth import AuthenticationError
+from finance_god.api.simulation import create_simulation_routes
+from finance_god.api.workspace_routes import create_workspace_routes
+from finance_god.application.decision_inbox import DecisionInboxService
+from finance_god.application.ledger_service import SimulationLedgerService
+from finance_god.application.portfolio_query import PortfolioQueryService
+from finance_god.domain import Notification
+from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
+from finance_god.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
+from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
+from finance_god.infrastructure.simulation_wiring import (
+    SystemClock,
+    UuidIdGenerator,
+    build_simulation_services,
+)
 from finance_god.market_data import (
     DQTriggerRequest,
     DQWorkflowReceipt,
@@ -21,20 +47,7 @@ from finance_god.market_data import (
     MarketDataService,
     capability_catalog_summary,
 )
-from finance_god.api.workspace_routes import create_workspace_routes
-from finance_god.api.simulation import create_simulation_routes
-from finance_god.application.ledger_service import SimulationLedgerService
-from finance_god.application.ports import Clock as LedgerClock, IdGenerator as LedgerIdGenerator
-from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
-from finance_god.infrastructure.persistence.uow import (
-    SqlAlchemyUnitOfWork,
-    create_session_factory,
-)
-from finance_god.infrastructure.simulation_wiring import (
-    SystemClock,
-    UuidIdGenerator,
-    build_simulation_services,
-)
+from finance_god.orchestration.multi_agent import MultiAgentRuntime
 from finance_god.orchestration.workflows import (
     WorkflowCommandPort,
     WorkflowCommandRuntime,
@@ -42,29 +55,19 @@ from finance_god.orchestration.workflows import (
     WorkflowKey,
     create_workflow_command_runtime_from_environment,
 )
-from pydantic import ValidationError
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route, WebSocketRoute
-from starlette.staticfiles import StaticFiles
-from starlette.websockets import WebSocket
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-_BACKEND_ROOT = Path(__file__).resolve().parent
-_PROJECT_ROOT = _BACKEND_ROOT.parent
 _LOGGER = logging.getLogger(__name__)
-load_dotenv(_BACKEND_ROOT / ".env", override=False)
 
 market_data: MarketDataService | None = None
 market_application: MarketDataApplication | None = None
 workflow_commands: WorkflowCommandPort | None = None
 workflow_runtime: WorkflowCommandRuntime | None = None
 workflow_runtime_readiness_reason: str | None = None
-workspace_engine: AsyncEngine | None = None
-workspace_sessions: async_sessionmaker[AsyncSession] | None = None
 simulation_execution = None
 simulation_accounts = None
+agent_runtime = None
+agent_runtime_reason: str | None = None
+_agent_lock = Lock()
 _service_lock = Lock()
 
 
@@ -128,24 +131,18 @@ def _services() -> tuple[MarketDataService, MarketDataApplication]:
 
 
 def _workspace_session() -> AsyncSession:
-    global workspace_engine, workspace_sessions
-    if workspace_sessions is not None:
-        return workspace_sessions()
-    database_url = os.getenv("FINANCE_GOD_DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("FINANCE_GOD_DATABASE_URL is required for workspace APIs")
-    with _service_lock:
-        if workspace_sessions is None:
-            workspace_engine, workspace_sessions = create_session_factory(database_url)
-    assert workspace_sessions is not None
-    return workspace_sessions()
+    return create_db_session()
 
 
-def _workspace_owner(_: Request) -> str:
-    """Resolve the single simulated desktop identity from server configuration."""
-    owner_id = os.getenv("FINANCE_GOD_WORKSPACE_OWNER_ID", "").strip()
-    if not owner_id:
-        raise PermissionError("workspace identity is not configured")
+def _authenticated_owner(request: Request) -> str:
+    """Resolve the owner exclusively from the signed Bearer token subject."""
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    owner_id = decode_access_token(token) if scheme.lower() == "bearer" and token else None
+    if not isinstance(owner_id, str):
+        raise AuthenticationError("valid Bearer authentication is required")
+    owner_id = owner_id.strip()
+    if not owner_id or len(owner_id) > 160:
+        raise AuthenticationError("valid Bearer authentication is required")
     return owner_id
 
 
@@ -154,8 +151,8 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     global market_data, market_application
     global workflow_commands, workflow_runtime
     global workflow_runtime_readiness_reason
-    global workspace_engine, workspace_sessions
     global simulation_execution, simulation_accounts
+    global agent_runtime, agent_runtime_reason
     market_data = None
     market_application = None
     workflow_commands = None
@@ -163,8 +160,12 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     workflow_runtime_readiness_reason = None
     simulation_execution = None
     simulation_accounts = None
+    agent_runtime = None
+    agent_runtime_reason = None
     try:
-        workflow_runtime = create_workflow_command_runtime_from_environment()
+        workflow_runtime = create_workflow_command_runtime_from_environment(
+            database_url=settings.database_url
+        )
         workflow_commands = workflow_runtime
     except Exception as error:  # noqa: BLE001 - readiness reports stable safe reason
         _LOGGER.error(
@@ -176,19 +177,16 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         yield
     finally:
         runtime = workflow_runtime
-        engine = workspace_engine
         workflow_commands = None
         workflow_runtime = None
-        workspace_sessions = None
-        workspace_engine = None
         simulation_execution = None
         simulation_accounts = None
         market_application = None
         market_data = None
+        agent_runtime = None
+        agent_runtime_reason = None
         if runtime is not None:
             await runtime.close()
-        if engine is not None:
-            await engine.dispose()
 
 
 def _json(model: object, *, status_code: int = 200) -> JSONResponse:
@@ -300,6 +298,71 @@ async def bars(request: Request) -> JSONResponse:
     )
 
 
+def _instrument_frequency(market: str, asset_class: str) -> str:
+    """Display the bar frequency the market-data service uses for this asset."""
+    if market == "CN" and asset_class == "equity":
+        return "1min"
+    return "daily"
+
+
+def _supports_live_quote(market: str, asset_class: str) -> bool:
+    """Only CN equities have a verified PandaData real-time snapshot endpoint.
+
+    Instruments without a live quote are not surfaced by the software so users
+    never search, select, or trade something the terminal cannot price.
+    """
+    return market == "CN" and asset_class == "equity"
+
+
+async def instruments(request: Request) -> JSONResponse:
+    """Search the authoritative instrument master (no PandaData credentials)."""
+    query = request.query_params.get("q", "").strip().upper()
+    try:
+        service, _application = _services()
+        master = service.instrument_master.all()
+    except MarketDataError as error:
+        return _json({"error": error.public_payload()}, status_code=502)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
+        return _internal_error()
+    results = []
+    for instrument in master:
+        market = instrument.market.value
+        asset_class = instrument.asset_class.value
+        if not _supports_live_quote(market, asset_class):
+            # Hide instruments the terminal cannot fetch live quotes for.
+            continue
+        haystack = (
+            instrument.symbol,
+            instrument.provider_symbol,
+            market,
+            asset_class,
+            *instrument.aliases,
+        )
+        if query and not any(query in field.upper() for field in haystack):
+            continue
+        results.append(
+            {
+                "symbol": instrument.symbol,
+                "provider_symbol": instrument.provider_symbol,
+                "market": market,
+                "asset_class": asset_class,
+                "currency": instrument.currency,
+                "aliases": list(instrument.aliases),
+                "frequency": _instrument_frequency(market, asset_class),
+                "simulation_supported": _supports_live_quote(market, asset_class),
+            }
+        )
+    return _json(
+        {
+            "provider": "PandaData",
+            "query": query,
+            "instrument_master_identity": service.instrument_master.identity,
+            "instrument_master_version": service.instrument_master.version,
+            "instruments": results,
+        }
+    )
+
+
 async def catalog(_request: Request) -> JSONResponse:
     try:
         service, _application = _services()
@@ -344,19 +407,44 @@ def _internal_error() -> JSONResponse:
     )
 
 
-async def reject_websocket(websocket: WebSocket) -> None:
-    """Reject unsupported upgrade probes before they reach StaticFiles."""
-    await websocket.close(code=1008, reason="Finance-God prototype uses HTTP polling")
+def _simulation_uow_factory() -> SqlAlchemyUnitOfWork:
+    return SqlAlchemyUnitOfWork(_workspace_session)
+
+
+class _WorkspaceNotificationSource:
+    """Read unread notifications through the workspace unit of work."""
+
+    async def list_unread(self, owner_id: str) -> list[Notification]:
+        async with WorkspaceUnitOfWork(_workspace_session) as uow:
+            return await uow.notifications.list_unread(owner_id)
+
+
+def _assemble_simulation_routes() -> list:
+    clock = SystemClock()
+    portfolio = PortfolioQueryService(
+        uow_factory=_simulation_uow_factory,
+        clock=clock,
+        rule_version=SIMULATION_RULE_VERSION,
+    )
+    decision_inbox = DecisionInboxService(
+        orders=simulation_execution,
+        notifications=_WorkspaceNotificationSource(),
+        clock=clock,
+    )
+    return create_simulation_routes(
+        execution=simulation_execution,
+        accounts=simulation_accounts,
+        portfolio=portfolio,
+        decision_inbox=decision_inbox,
+        owner_resolver=_authenticated_owner,
+    )
 
 
 def _simulation_routes() -> list:
     """Lazily build and cache simulation execution + account services."""
     global simulation_execution, simulation_accounts
     if simulation_execution is not None and simulation_accounts is not None:
-        return create_simulation_routes(
-            execution=simulation_execution,
-            accounts=simulation_accounts,
-        )
+        return _assemble_simulation_routes()
     try:
         clock = SystemClock()
         ids = UuidIdGenerator()
@@ -364,15 +452,14 @@ def _simulation_routes() -> list:
         class _StaticRuleCatalog:
             simulation_rule_version = SIMULATION_RULE_VERSION
 
-        uow_factory = lambda: SqlAlchemyUnitOfWork(_workspace_session)
         ledger = SimulationLedgerService(
-            uow_factory=uow_factory,
+            uow_factory=_simulation_uow_factory,
             clock=clock,
             ids=ids,
             rules=_StaticRuleCatalog(),
         )
         simulation_execution, simulation_accounts = build_simulation_services(
-            uow_factory=uow_factory,
+            uow_factory=_simulation_uow_factory,
             simulation_session_factory=_workspace_session,
             ledger=ledger,
         )
@@ -384,10 +471,55 @@ def _simulation_routes() -> list:
             error,
         )
         return []
-    return create_simulation_routes(
-        execution=simulation_execution,
-        accounts=simulation_accounts,
-    )
+    return _assemble_simulation_routes()
+
+
+def _build_agent_runtime() -> MultiAgentRuntime:
+    """Construct the Multi-Agent runtime, degrading gracefully on missing deps.
+
+    FinRobot/FMP metrics are opt-in and never block startup. If PandaData is
+    unavailable the runtime is rebuilt without the market-data provider so that
+    evidence-only prompt agents still run; only a missing model endpoint makes
+    the whole capability unavailable.
+    """
+    try:
+        return MultiAgentRuntime.from_environment(
+            enable_panda_data=True,
+            enable_finrobot_metrics=False,
+        )
+    except Exception as first_error:  # noqa: BLE001 - retry without PandaData
+        _LOGGER.warning(
+            "agent runtime with PandaData failed (%s); retrying evidence-only",
+            type(first_error).__name__,
+        )
+        return MultiAgentRuntime.from_environment(
+            enable_panda_data=False,
+            enable_finrobot_metrics=False,
+        )
+
+
+async def _agent_runtime_provider() -> MultiAgentRuntime:
+    """Lazily build and cache the Multi-Agent runtime; report explicit failure."""
+    global agent_runtime, agent_runtime_reason
+    if agent_runtime is not None:
+        return agent_runtime
+    try:
+        runtime = await asyncio.to_thread(_build_agent_runtime)
+    except Exception as error:  # noqa: BLE001 - safe public unavailability boundary
+        _LOGGER.error(
+            "agent runtime initialization failed: %s",
+            type(error).__name__,
+        )
+        agent_runtime_reason = "AI_RUNTIME_UNAVAILABLE"
+        raise AgentRuntimeUnavailable(
+            "The Multi-Agent runtime is not configured. Set the model endpoint "
+            "environment variables to enable AI research."
+        ) from error
+    with _agent_lock:
+        if agent_runtime is None:
+            agent_runtime = runtime
+            agent_runtime_reason = None
+    return agent_runtime
 
 
 finance_routes = [
@@ -396,12 +528,13 @@ finance_routes = [
     Route("/health", health),
     Route("/market/quotes", quotes),
     Route("/market/bars", bars),
+    Route("/market/instruments", instruments),
     Route("/market/catalog", catalog),
     Mount(
         "/workspace",
         routes=create_workspace_routes(
             session_factory=_workspace_session,
-            owner_resolver=_workspace_owner,
+            owner_resolver=_authenticated_owner,
         ),
         name="workspace",
     ),
@@ -410,22 +543,14 @@ finance_routes = [
         routes=_simulation_routes(),
         name="simulation",
     ),
-]
-
-finance_app = Starlette(debug=False, routes=finance_routes)
-
-routes = [
-    Mount("/api", finance_app, name="finance-api"),
-    WebSocketRoute("/{path:path}", reject_websocket),
     Mount(
-        "/",
-        app=StaticFiles(
-            directory=_PROJECT_ROOT / "prototype",
-            html=True,
-            check_dir=False,
+        "/agent",
+        routes=create_agent_routes(
+            runtime_provider=_agent_runtime_provider,
+            owner_resolver=_authenticated_owner,
         ),
-        name="prototype",
+        name="agent",
     ),
 ]
 
-app = Starlette(debug=False, routes=routes, lifespan=lifespan)
+finance_app = Starlette(debug=False, routes=finance_routes)

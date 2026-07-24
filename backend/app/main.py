@@ -5,17 +5,21 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from server import finance_app
+from server import lifespan as finance_lifespan
 
 from app.config import settings
 from app.core.exceptions import register_exception_handlers
-from server import finance_app
-from server import lifespan as finance_lifespan
+from app.db.session import dispose_database
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with finance_lifespan(finance_app):
-        yield
+    try:
+        async with finance_lifespan(finance_app):
+            yield
+    finally:
+        await dispose_database()
 
 
 app = FastAPI(

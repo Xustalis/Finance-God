@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from pydantic import ValidationError
+
 from finance_god.market_data import (
     AssetClass,
     DataCategory,
@@ -19,7 +21,6 @@ from finance_god.market_data import (
     UnknownInstrumentError,
 )
 from finance_god.market_data.normalization import PandaDataNormalizer
-from pydantic import ValidationError
 
 from .conftest import NOW, bar
 
@@ -159,6 +160,39 @@ def test_historical_minute_accepts_declared_provider_descending_order_only() -> 
     assert [item.source.data_time.minute for item in descending.items] == [31, 30]
     assert mixed.items == ()
     assert "out-of-order" in mixed.diagnostics[0].message
+
+
+def test_historical_minute_uses_pandadata_012_datetime_column() -> None:
+    instrument = InstrumentId(
+        symbol="000001.SZ",
+        provider_symbol="000001.SZ",
+        market=MarketType.CN,
+        asset_class=AssetClass.EQUITY,
+        currency="CNY",
+    )
+    provider_row = bar("20260723")
+    provider_row.update(
+        {
+            "datetime": "2026-07-23 10:30:00",
+            "minute": "103000",
+        }
+    )
+
+    result = PandaDataNormalizer(FreshnessPolicy()).bars(
+        [provider_row],
+        instrument=instrument,
+        endpoint="get_stock_min",
+        frequency=DataFrequency.MINUTE_1,
+        ingested_at=NOW,
+        release_state=ReleaseState.RELEASED,
+        start_date="20260723",
+        end_date="20260723",
+        limit=1,
+    )
+
+    assert result.items[0].source.data_time.strftime("%Y%m%d %H:%M:%S") == (
+        "20260723 10:30:00"
+    )
 
 
 def test_freshness_distinguishes_trade_date_from_release_state() -> None:

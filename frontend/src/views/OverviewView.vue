@@ -3,7 +3,7 @@
  * OverviewView — 总览 · 市场头版
  * 复制 localhost:3001 的报纸式双栏布局：
  *   左栏 = 头条 + 指数条 + K线 + 成交量
- *   右栏 = AI简报(倾向/置信度) + 关键驱动 + 模型证据
+ *   右栏 = 市场信号（行情派生）+ 关键驱动 + 技术指标
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Masthead from '@/components/desk/Masthead.vue'
@@ -19,7 +19,8 @@ import type { MarketQuote } from '@/types/desk'
 
 const market = useMarketStore()
 const activeTab = ref('市场')
-const TABS = ['市场', '全球', '股票', '利率', '外汇', '商品', 'AI 简报', '观察列表']
+// 仅保留有真实行情数据的栏目：PandaData 当前仅提供 A 股实时快照。
+const TABS = ['市场', '股票', '观察列表']
 
 /* ── 行情数据 ─────────────────────────────────── */
 const leadSymbol = ref(DEFAULT_SYMBOLS[0])
@@ -27,8 +28,8 @@ const leadQuote = computed<MarketQuote | null>(
   () => market.quotesMap.get(leadSymbol.value) ?? null,
 )
 
-/* ── AI 简报（从真实行情派生） ──────────────────── */
-const sentiment = computed(() => market.aiSentiment)
+/* 市场信号（从真实行情派生，非模型输出） */
+const signal = computed(() => market.marketSignal)
 
 /** 关键驱动：从真实行情数据提取前 4 个信号 */
 const marketForces = computed(() => {
@@ -54,8 +55,8 @@ const marketForces = computed(() => {
   return forces
 })
 
-/** 模型证据：从 K 线数据派生的指标评分 */
-const modelEvidence = computed(() => {
+/** 技术指标：从 K 线数据派生的指标评分（行情统计，非模型输出） */
+const technicalIndicators = computed(() => {
   const bars = market.bars
   const qs = market.quotes
   if (bars.length < 2 && qs.length === 0)
@@ -88,7 +89,7 @@ const modelEvidence = computed(() => {
 
   let freshScore = 0
   if (qs.length > 0) {
-    const freshCount = qs.filter(q => q.freshness === 'realtime' || q.freshness === 'live').length
+    const freshCount = qs.filter(q => q.freshness === 'current').length
     freshScore = Math.round((freshCount / qs.length) * 100)
   }
 
@@ -109,12 +110,7 @@ const trendLabel = computed(() => {
 /* ── 标签过滤 ────────────────────────────────── */
 const TAB_SYMBOL_FILTER: Record<string, string[] | null> = {
   '市场': null,
-  '全球': ['000300.SH', '000016.SH'],
   '股票': ['000001.SZ', '000002.SZ', '600519.SH', '601318.SH'],
-  '利率': [],
-  '外汇': [],
-  '商品': [],
-  'AI 简报': null,
   '观察列表': null,
 }
 
@@ -128,18 +124,12 @@ const filteredQuotes = computed(() => {
 const tabHeadline = computed(() => {
   const map: Record<string, string> = {
     '市场': 'MARKET HEADLINE · 综合版',
-    '全球': 'GLOBAL MARKETS · 指数与宏观',
     '股票': 'EQUITIES · A 股市场',
-    '利率': 'RATES · 利率与债券',
-    '外汇': 'FX · 外汇市场',
-    '商品': 'COMMODITIES · 商品期货',
-    'AI 简报': 'AI BRIEFING · 智能摘要',
     '观察列表': 'WATCHLIST · 关注标的',
   }
   return map[activeTab.value] || 'MARKET HEADLINE'
 })
 
-const isAiTab = computed(() => activeTab.value === 'AI 简报')
 const isWatchlistTab = computed(() => activeTab.value === '观察列表')
 const hasDataForTab = computed(() => filteredQuotes.value.length > 0 || TAB_SYMBOL_FILTER[activeTab.value] === null)
 
@@ -181,7 +171,7 @@ onUnmounted(() => market.stopPolling())
               {{ leadQuote.name || leadQuote.symbol }}
               {{ formatPercent(leadQuote.change_percent) }}
               <span class="headline-sub">
-                {{ isAiTab ? `AI 倾向: ${sentiment.tendency} · 置信度 ${sentiment.confidence}%` : `市场随收益率走高回落；AI 信号提示${sentiment.tendency}` }}
+                市场信号：{{ signal.tendency }} · 方向一致性 {{ signal.consistency }}%（行情派生）
               </span>
             </template>
             <template v-else-if="isWatchlistTab">
@@ -192,7 +182,7 @@ onUnmounted(() => market.stopPolling())
               {{ activeTab }}数据加载中…
             </template>
           </h1>
-          <p class="headline-edition">全球资本与利率观察 · PandaData</p>
+          <p class="headline-edition">A 股实时行情 · PandaData</p>
         </div>
 
         <!-- 指数条 -->
@@ -266,18 +256,19 @@ onUnmounted(() => market.stopPolling())
         </div>
       </div>
 
-      <!-- ═══ 右栏：AI 简报 ═══ -->
+      <!-- ═══ 右栏：市场信号（行情派生） ═══ -->
       <div class="col-ai">
-        <!-- 倾向 + 置信度 -->
+        <!-- 市场倾向 + 方向一致性 -->
         <section class="ai-section">
           <h2 class="ai-heading">
-            <span>AI 简报</span>
-            <small>AI BRIEFING</small>
+            <span>市场信号</span>
+            <small>MARKET SIGNALS</small>
           </h2>
+          <p class="signal-note">以下为真实行情的统计派生值，非模型输出；模型分析请使用右侧 AI 侧栏。</p>
           <div class="tendency-row">
             <div class="tendency-label">
-              <span>倾向</span>
-              <strong>{{ sentiment.tendency }}</strong>
+              <span>市场倾向</span>
+              <strong>{{ signal.tendency }}</strong>
             </div>
             <div class="confidence-gauge">
               <svg viewBox="0 0 100 56" class="gauge-arc">
@@ -289,11 +280,11 @@ onUnmounted(() => market.stopPolling())
                   fill="none"
                   stroke="var(--risk)"
                   stroke-width="6"
-                  :stroke-dasharray="`${sentiment.confidence * 1.38} 200`"
+                  :stroke-dasharray="`${signal.consistency * 1.38} 200`"
                 />
               </svg>
-              <span class="gauge-value mono">{{ sentiment.confidence }}%</span>
-              <span class="gauge-label">置信度</span>
+              <span class="gauge-value mono">{{ signal.consistency }}%</span>
+              <span class="gauge-label">方向一致性</span>
             </div>
           </div>
         </section>
@@ -312,14 +303,14 @@ onUnmounted(() => market.stopPolling())
           </ul>
         </section>
 
-        <!-- 模型证据 -->
+        <!-- 技术指标 -->
         <section class="ai-section">
           <h3 class="ai-subheading">
-            <span>模型证据</span>
-            <small>MODEL EVIDENCE</small>
+            <span>技术指标</span>
+            <small>TECHNICAL INDICATORS</small>
           </h3>
           <ul class="evidence-list">
-            <li v-for="e in modelEvidence" :key="e.name" class="evidence-item">
+            <li v-for="e in technicalIndicators" :key="e.name" class="evidence-item">
               <span class="evidence-name">{{ e.name }}</span>
               <div class="evidence-bar-track">
                 <div class="evidence-bar-fill" :style="{ width: e.score + '%' }" />
@@ -360,7 +351,11 @@ onUnmounted(() => market.stopPolling())
 .headline-page {
   display: grid;
   min-height: 100vh;
-  grid-template-rows: 64px auto 1fr;
+  grid-template:
+    "masthead" 64px
+    "tabs" auto
+    "body" minmax(0, 1fr)
+    / 1fr;
   border-top: 10px solid var(--ink);
   background-color: var(--paper);
   background-image:
@@ -371,9 +366,11 @@ onUnmounted(() => market.stopPolling())
   background-size: cover, 1200px 1200px;
   font-variant-numeric: tabular-nums lining-nums;
 }
+.headline-page > :deep(.masthead) { grid-area: masthead; }
 
 /* ═══ 栏目标签 ═══ */
 .section-tabs {
+  grid-area: tabs;
   display: flex;
   align-items: center;
   gap: 0;
@@ -417,6 +414,7 @@ onUnmounted(() => market.stopPolling())
 
 /* ═══ 双栏主体 ═══ */
 .headline-body {
+  grid-area: body;
   display: grid;
   grid-template-columns: 1fr 340px;
   min-height: 0;
@@ -610,6 +608,13 @@ onUnmounted(() => market.stopPolling())
   border-bottom: 1px solid var(--rule);
 }
 .ai-section:last-child { border-bottom: 0; }
+
+.signal-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-ink);
+}
 
 .ai-heading {
   display: flex;

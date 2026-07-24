@@ -10,6 +10,9 @@ import pytest
 import server
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
 from finance_god.market_data import (
     CATALOG,
     DQTriggerRequest,
@@ -17,14 +20,12 @@ from finance_god.market_data import (
     MarketDataError,
 )
 from finance_god.orchestration.workflows import (
-    WorkflowCreateCommand,
     WorkflowCommandRuntime,
+    WorkflowCreateCommand,
     WorkflowCreationReceipt,
     WorkflowRun,
     create_workflow_command_runtime_from_environment,
 )
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from .conftest import NOW
 
@@ -223,7 +224,7 @@ def test_lifespan_keeps_live_up_and_ready_down_when_workflow_runtime_fails(
     )
 
     async def exercise() -> None:
-        async with server.lifespan(server.app):
+        async with server.lifespan(server.finance_app):
             live_response = await server.live(_request(b""))
             ready_response = await server.ready(_request(b""))
             assert live_response.status_code == 200
@@ -259,8 +260,9 @@ def test_lifespan_owns_one_workflow_runtime_and_closes_it(
     runtime = RuntimeStub()
     calls = 0
 
-    def build_runtime() -> WorkflowCommandRuntime:
+    def build_runtime(*, database_url: str | None = None) -> WorkflowCommandRuntime:
         nonlocal calls
+        del database_url
         calls += 1
         return cast(WorkflowCommandRuntime, runtime)
 
@@ -271,7 +273,7 @@ def test_lifespan_owns_one_workflow_runtime_and_closes_it(
     )
 
     async def exercise() -> None:
-        async with server.lifespan(server.app):
+        async with server.lifespan(server.finance_app):
             assert server.workflow_commands is runtime
             assert calls == 1
             first = await server.live(_request(b""))

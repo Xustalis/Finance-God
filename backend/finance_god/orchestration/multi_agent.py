@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+
 from dotenv import load_dotenv
 from research_runtime import (
     AgentDefinition,
@@ -17,7 +18,7 @@ from research_runtime.llm import OpenAICompatibleChat
 
 from .market_data_provider import FinanceGodMarketDataProvider
 
-_PROJECT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+_PROJECT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class MultiAgentRuntime:

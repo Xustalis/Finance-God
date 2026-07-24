@@ -5,12 +5,12 @@ from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
 )
-from sqlalchemy import text
 
 from finance_god.domain import WorkflowRun
 

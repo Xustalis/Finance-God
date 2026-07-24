@@ -10,23 +10,52 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.ai_catalog import STEPFUN_PROFILE_MODEL
 from app.config import settings
 from app.core.response import ApiResponse
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.models.onboarding import OnboardingSession, ProfileMessage
 from app.models.ai_config import AIModelConfig, PromptVersion
+from app.models.onboarding import OnboardingSession, ProfileMessage
 from app.models.profile import DirectionRecommendation, InvestmentProfile
 from app.models.user import User
-from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
-from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question, user_facing_error_detail
+from app.schemas.onboarding import (
+    AITurnResult,
+    MessageInput,
+    MessageTurnResponse,
+    ObjectiveProfileInput,
+    ProfileDimension,
+    ProfileWithRecommendationsResponse,
+    SessionResponse,
+    SkipInput,
+)
 from app.services import emotion_lexicon
+from app.services.ai_orchestrator import (
+    INITIAL_RISK_QUESTION,
+    ONBOARDING_SYSTEM_PROMPT,
+    PROFILE_DIMENSIONS,
+    SENSITIVE_DIMENSIONS,
+    AIAdapterRegistry,
+    AIProviderError,
+    get_ai_adapter_registry,
+    user_facing_error_detail,
+)
 from app.services.profile_rules import assess_profile, rank_directions
 from app.services.question_bank import select_question
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 MESSAGE_CLAIM_LEASE = timedelta(minutes=2)
+
+
+def default_text_provider(registry: AIAdapterRegistry) -> tuple[str, str]:
+    """无显式 AI 配置时优先使用实测最快的 StepFun 画像模型，其次 ARK，
+    否则回退到仅开发环境可用的 mock。返回 (provider, model)。"""
+    if "stepfun" in registry.text_providers:
+        return "stepfun", STEPFUN_PROFILE_MODEL
+    if "ark" in registry.text_providers and settings.ark_model:
+        return "ark", settings.ark_model
+    return "mock", "mock"
 
 
 def asked_question_texts(session: OnboardingSession) -> list[str]:
@@ -244,14 +273,17 @@ async def create_session(
             AIModelConfig.capability == "text", AIModelConfig.enabled.is_(True)
         )
     )
-    if settings.app_env != "development" and (
-        config is None or config.provider == "mock"
-    ):
+    if config is not None:
+        provider_name = config.provider
+        model_name = config.model_name
+    else:
+        provider_name, model_name = default_text_provider(adapter_registry)
+    if settings.app_env != "development" and provider_name == "mock":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Production onboarding requires an enabled non-mock text provider",
         )
-    if config is not None and config.provider not in adapter_registry.text_providers:
+    if provider_name not in adapter_registry.text_providers:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Configured text provider is not available",
@@ -259,8 +291,8 @@ async def create_session(
     session = OnboardingSession(
         user_id=user_id,
         live_key=user_id,
-        provider_name=config.provider if config else "mock",
-        model_name=config.model_name if config else "mock",
+        provider_name=provider_name,
+        model_name=model_name,
         prompt_version=config.prompt_version if config else "v1",
         min_rounds=config.min_rounds if config else 6,
         max_rounds=config.max_rounds if config else 12,
@@ -450,7 +482,8 @@ async def add_message(
         await release_message_claim(db, session_id, user_message.id)
         # 原始异常仅记录服务端日志，对外返回按错误码映射的固定中文文案
         logger.warning("AI provider error on session %s: code=%s", session_id, exc.code, exc_info=exc)
-        retryable = exc.code in {"DEEPSEEK_TIMEOUT", "DEEPSEEK_UNAVAILABLE", "DEEPSEEK_RATE_LIMITED"}
+        # 适配任意提供方前缀（DEEPSEEK_/ARK_ 等）：瞬时性错误按后缀判定为可重试
+        retryable = exc.code.endswith(("_TIMEOUT", "_UNAVAILABLE", "_RATE_LIMITED"))
         raise HTTPException(
             status_code=(
                 status.HTTP_503_SERVICE_UNAVAILABLE

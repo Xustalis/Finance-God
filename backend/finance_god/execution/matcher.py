@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 
 from finance_god.domain import OrderDraft, OrderSide, OrderType, VersionReference
 from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
@@ -46,6 +46,10 @@ class MatchResult:
 class DeterministicMatcher:
     def __init__(self, rules: SimulationRuleSet | None = None) -> None:
         self._rules = rules or SimulationRuleSet()
+
+    @property
+    def rules(self) -> SimulationRuleSet:
+        return self._rules
 
     def match(
         self,

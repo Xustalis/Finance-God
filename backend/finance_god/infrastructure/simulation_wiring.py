@@ -9,8 +9,6 @@ implementations.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -18,6 +16,12 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from finance_god.api.simulation import (
+    SimulationAccountCreate,
+    SimulationAccountReset,
+    SimulationAccountView,
+    SimulationPositionView,
+)
 from finance_god.application.ledger_service import (
     CreateAccountCommand,
     RecordBuyFillCommand,
@@ -28,46 +32,28 @@ from finance_god.application.ledger_service import (
 from finance_god.application.ports import UnitOfWorkFactory
 from finance_god.domain import (
     AccountStatus,
+    AuditReference,
     ExchangeOrder,
     OrderDraft,
     OrderSide,
     RiskCheckResult,
     RiskCheckStatus,
-    RiskReason,
-    RiskSeverity,
     VersionReference,
 )
 from finance_god.execution import (
     DeterministicMatcher,
     ManualReviewResult,
     SimulationExecutionService,
-    SimulationFill,
     StoredDraft,
     StoredOrder,
     SubmissionOutcome,
     SubmissionStatus,
 )
 from finance_god.execution.contracts import (
-    AccountOwnershipPort,
-    BarProvider,
-    ExecutionRepositoryPort,
-    LedgerExecutionPort,
     SimulationBar,
-    SubmissionTransport,
-    TradePlanPort,
-    TrustedRiskPort,
 )
-from finance_god.execution.contracts import Clock as ExecutionClock
-from finance_god.execution.contracts import IdGenerator as ExecutionIdGenerator
-from finance_god.infrastructure.persistence.simulation_repository import (
-    SimulationRepository,
-)
-
-from finance_god.api.simulation import (
-    SimulationAccountApplication,
-    SimulationAccountCreate,
-    SimulationAccountReset,
-    SimulationAccountView,
+from finance_god.infrastructure.persistence.simulation_uow import (
+    SimulationUnitOfWork,
 )
 
 ZERO = Decimal("0")
@@ -187,15 +173,15 @@ class SimulationRiskAdapter:
         result: RiskCheckResult,
         seen_reason_hash: str,
     ) -> RiskCheckResult:
+        if seen_reason_hash != result.reason_hash:
+            raise ValueError("risk reason summary changed")
         now = self._clock.now()
-        return result.model_copy(
-            update={
-                "soft_confirmation": {
-                    "audit_id": self._ids.new_id("audit"),
-                    "actor_id": owner_id,
-                    "recorded_at": now,
-                },
-            }
+        return result.confirm_soft_risk(
+            AuditReference(
+                audit_id=self._ids.new_id("audit"),
+                actor_id=owner_id,
+                recorded_at=now,
+            )
         )
 
 
@@ -219,53 +205,6 @@ class MarketDataBarProvider:
 
     async def next_bar(self, draft: OrderDraft) -> SimulationBar | None:
         return None
-
-
-class PerRequestSimulationRepository:
-    """Wrap SimulationRepository to create a fresh session per operation.
-
-    ``SimulationRepository`` holds an ``AsyncSession`` reference.  In an HTTP
-    server each request should use its own session.  This wrapper delegates
-    every ``ExecutionRepositoryPort`` call to a freshly-created repository.
-    """
-
-    def __init__(
-        self, session_factory: Callable[[], AsyncSession]
-    ) -> None:
-        self._session_factory = session_factory
-
-    def _repo(self) -> SimulationRepository:
-        return SimulationRepository(self._session_factory())
-
-    async def create_draft(self, draft: StoredDraft, *, idempotency_key: str, request_hash: str) -> StoredDraft:
-        return await self._repo().create_draft(draft, idempotency_key=idempotency_key, request_hash=request_hash)
-
-    async def get_draft(self, draft_id: str) -> StoredDraft | None:
-        return await self._repo().get_draft(draft_id)
-
-    async def save_draft(self, draft: StoredDraft, *, expected_revision: int) -> None:
-        await self._repo().save_draft(draft, expected_revision=expected_revision)
-
-    async def create_order(self, order: StoredOrder, *, idempotency_key: str, request_hash: str) -> StoredOrder:
-        return await self._repo().create_order(order, idempotency_key=idempotency_key, request_hash=request_hash)
-
-    async def get_order(self, order_id: str) -> StoredOrder | None:
-        return await self._repo().get_order(order_id)
-
-    async def get_order_for_draft(self, draft_id: str) -> StoredOrder | None:
-        return await self._repo().get_order_for_draft(draft_id)
-
-    async def save_order(self, order: StoredOrder, *, expected_revision: int) -> None:
-        await self._repo().save_order(order, expected_revision=expected_revision)
-
-    async def append_fill(self, fill: SimulationFill) -> None:
-        await self._repo().append_fill(fill)
-
-    async def list_fills(self, order_id: str | None = None) -> tuple[SimulationFill, ...]:
-        return await self._repo().list_fills(order_id)
-
-    async def list_orders(self, owner_id: str) -> tuple[StoredOrder, ...]:
-        return await self._repo().list_orders(owner_id)
 
 
 class LedgerFillAdapter:
@@ -299,7 +238,6 @@ class LedgerFillAdapter:
         rule_version: str,
         idempotency_key: str,
     ) -> str:
-        now = self._clock.now()
         source = VersionReference(
             object_type="exchange_order",
             object_id=order.order_id,
@@ -360,7 +298,6 @@ class SimulationAccountApplicationImpl:
         idempotency_key: str,
         request_hash: str,
     ) -> SimulationAccountView:
-        now = self._clock.now()
         source = VersionReference(
             object_type="api",
             object_id="simulation-account-create",
@@ -423,6 +360,30 @@ class SimulationAccountApplicationImpl:
                 revision=account.revision,
             )
 
+    async def positions(
+        self, *, owner_id: str
+    ) -> tuple[SimulationPositionView, ...]:
+        async with self._uow_factory() as uow:
+            account = await uow.accounts.get_current(owner_id)
+            if account is None:
+                return ()
+            projections = await uow.position_projections.list(account.account_id)
+            return tuple(
+                SimulationPositionView(
+                    account_id=projection.account_id,
+                    instrument_id=projection.instrument_id,
+                    currency=projection.currency,
+                    long_quantity=projection.long_quantity,
+                    settled_quantity=projection.settled_quantity,
+                    frozen_quantity=projection.frozen_quantity,
+                    cost_rmb=projection.long_cost_rmb,
+                    revision=projection.revision,
+                )
+                for projection in projections
+                if projection.long_quantity > ZERO
+                or projection.short_quantity > ZERO
+            )
+
     async def _view(
         self, owner_id: str, account_id: str
     ) -> SimulationAccountView:
@@ -460,10 +421,11 @@ def build_simulation_services(
     """Wire all port adapters and return (execution, accounts) pair."""
     clock = SystemClock()
     ids = UuidIdGenerator()
-    repository = PerRequestSimulationRepository(simulation_session_factory)
 
     execution = SimulationExecutionService(
-        repository=repository,
+        uow_factory=lambda: SimulationUnitOfWork(
+            simulation_session_factory
+        ),
         accounts=LedgerAccountOwnership(uow_factory),
         plans=PermissiveTradePlanPort(),
         manual_review=AutoPassManualReview(),

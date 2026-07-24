@@ -1,20 +1,23 @@
-from abc import ABC, abstractmethod
 import json
 import re
+from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from app.ai_catalog import (
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODELS,
+    STEPFUN_BASE_URL,
+    STEPFUN_PROFILE_MODEL,
+)
 from app.config import settings
 from app.schemas.onboarding import AITurnResult, ProfileDimension
 from app.services.question_bank import QUESTION_TEMPLATES, make_excerpt, select_question
 
-
 PROFILE_DIMENSIONS = tuple(item.value for item in ProfileDimension)
 SENSITIVE_DIMENSIONS = {ProfileDimension.INCOME_STABILITY.value}
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
 # 与 question_bank 的 rt_initial_direct_01 模板引用同一文本，保证单一事实来源
 INITIAL_RISK_QUESTION = QUESTION_TEMPLATES[ProfileDimension.RISK_TOLERANCE.value][0].content
 
@@ -293,6 +296,20 @@ AI_PROVIDER_ERROR_USER_MESSAGES = {
     "DEEPSEEK_UPSTREAM_ERROR": "AI 服务暂时不可用，请稍后重试",
     "DEEPSEEK_REQUEST_REJECTED": "AI 服务拒绝了当前请求，请稍后重试",
     "DEEPSEEK_INVALID_RESPONSE": "AI 服务返回了无法解析的结果，请稍后重试",
+    "STEPFUN_TIMEOUT": "AI 服务响应超时，请稍后重试",
+    "STEPFUN_UNAVAILABLE": "AI 服务暂时无法连接，请稍后重试",
+    "STEPFUN_RATE_LIMITED": "AI 服务请求过于频繁，请稍后重试",
+    "STEPFUN_AUTH_FAILED": "AI 服务凭据无效，请联系管理员检查配置",
+    "STEPFUN_UPSTREAM_ERROR": "AI 服务暂时不可用，请稍后重试",
+    "STEPFUN_REQUEST_REJECTED": "AI 服务拒绝了当前请求，请稍后重试",
+    "STEPFUN_INVALID_RESPONSE": "AI 服务返回了无法解析的结果，请稍后重试",
+    "ARK_TIMEOUT": "AI 服务响应超时，请稍后重试",
+    "ARK_UNAVAILABLE": "AI 服务暂时无法连接，请稍后重试",
+    "ARK_RATE_LIMITED": "AI 服务请求过于频繁，请稍后重试",
+    "ARK_AUTH_FAILED": "AI 服务凭据无效，请联系管理员检查配置",
+    "ARK_UPSTREAM_ERROR": "AI 服务暂时不可用，请稍后重试",
+    "ARK_REQUEST_REJECTED": "AI 服务拒绝了当前请求，请稍后重试",
+    "ARK_INVALID_RESPONSE": "AI 服务返回了无法解析的结果，请稍后重试",
 }
 
 
@@ -366,18 +383,30 @@ def extract_json_object(raw: str) -> Any:
         return parsed
 
 
-class DeepSeekOrchestrator(AIOrchestrator):
+class OpenAICompatibleStructuredChat(AIOrchestrator):
+    """OpenAI 兼容 /chat/completions 结构化访谈编排基类。
+
+    DeepSeek 与火山方舟 ARK 均走同一契约（response_format=json_object），
+    仅 base_url/model/error_prefix 不同，因此抽象出统一实现，子类只提供默认值。
+    """
+
     def __init__(
         self,
         *,
         api_key: str,
+        base_url: str,
         model_name: str,
         system_prompt: str,
+        error_prefix: str,
+        generation_options: dict[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
         self.model_name = model_name
         self.system_prompt = system_prompt
+        self.error_prefix = error_prefix
+        self.generation_options = dict(generation_options or {})
         self.transport = transport
 
     async def respond(
@@ -444,36 +473,50 @@ class DeepSeekOrchestrator(AIOrchestrator):
                     ),
                 },
             ],
+            **self.generation_options,
         }
-        timeout = httpx.Timeout(30.0, connect=5.0)
+        timeout = httpx.Timeout(settings.ai_request_timeout_seconds, connect=5.0)
         try:
             async with httpx.AsyncClient(
-                base_url=DEEPSEEK_BASE_URL,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=timeout,
                 transport=self.transport,
             ) as client:
-                response = await client.post("/chat/completions", json=body)
+                # 使用绝对 URL，避免 base_url 携带路径（如 ARK 的 /api/v3）被 httpx join 丢弃
+                response = await client.post(f"{self.base_url}/chat/completions", json=body)
         except httpx.TimeoutException as exc:
-            raise AIProviderError("DEEPSEEK_TIMEOUT", "AI 服务响应超时，请稍后重试") from exc
+            raise AIProviderError(
+                f"{self.error_prefix}_TIMEOUT", "AI 服务响应超时，请稍后重试"
+            ) from exc
         except httpx.RequestError as exc:
-            raise AIProviderError("DEEPSEEK_UNAVAILABLE", "AI 服务暂时无法连接，请稍后重试") from exc
+            raise AIProviderError(
+                f"{self.error_prefix}_UNAVAILABLE", "AI 服务暂时无法连接，请稍后重试"
+            ) from exc
 
         if response.status_code in {401, 403}:
-            raise AIProviderError("DEEPSEEK_AUTH_FAILED", "DeepSeek API 凭据无效")
+            raise AIProviderError(f"{self.error_prefix}_AUTH_FAILED", "AI 服务凭据无效")
         if response.status_code == 429:
-            raise AIProviderError("DEEPSEEK_RATE_LIMITED", "DeepSeek 请求过于频繁，请稍后重试")
+            raise AIProviderError(
+                f"{self.error_prefix}_RATE_LIMITED", "AI 服务请求过于频繁，请稍后重试"
+            )
         if response.status_code >= 500:
-            raise AIProviderError("DEEPSEEK_UPSTREAM_ERROR", "DeepSeek 服务暂时不可用")
+            raise AIProviderError(
+                f"{self.error_prefix}_UPSTREAM_ERROR", "AI 服务暂时不可用，请稍后重试"
+            )
         if response.is_error:
-            raise AIProviderError("DEEPSEEK_REQUEST_REJECTED", "DeepSeek 拒绝了当前请求")
+            raise AIProviderError(
+                f"{self.error_prefix}_REQUEST_REJECTED", "AI 服务拒绝了当前请求，请稍后重试"
+            )
 
         try:
             envelope = response.json()
             raw_content = envelope["choices"][0]["message"]["content"]
             parsed = DeepSeekTurnPayload.model_validate(extract_json_object(raw_content))
         except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as exc:
-            raise AIProviderError("DEEPSEEK_INVALID_RESPONSE", "DeepSeek 返回了无法解析的结构化结果") from exc
+            raise AIProviderError(
+                f"{self.error_prefix}_INVALID_RESPONSE",
+                "AI 服务返回了无法解析的结构化结果，请稍后重试",
+            ) from exc
 
         # 归一化维度：真实模型可能自造枚举外维度或偏离当前维度，
         # 本轮证据始终归属会话当前维度；非法的下一问题维度置空，由服务端兜底补问。
@@ -500,6 +543,68 @@ class DeepSeekOrchestrator(AIOrchestrator):
         )
 
 
+class DeepSeekOrchestrator(OpenAICompatibleStructuredChat):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_name: str,
+        system_prompt: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=DEEPSEEK_BASE_URL,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            error_prefix="DEEPSEEK",
+            transport=transport,
+        )
+
+
+class StepFunOrchestrator(OpenAICompatibleStructuredChat):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_name: str,
+        system_prompt: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=STEPFUN_BASE_URL,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            error_prefix="STEPFUN",
+            generation_options={
+                "max_tokens": 2048,
+                "reasoning_effort": "low",
+            },
+            transport=transport,
+        )
+
+
+class ArkOrchestrator(OpenAICompatibleStructuredChat):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        system_prompt: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            error_prefix="ARK",
+            transport=transport,
+        )
+
+
 class DeepSeekTextProvider(TextProvider):
     def __init__(
         self,
@@ -521,18 +626,80 @@ class DeepSeekTextProvider(TextProvider):
         )
 
 
+class StepFunTextProvider(TextProvider):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.transport = transport
+
+    def create(self, *, model_name: str, system_prompt: str) -> AIOrchestrator:
+        if model_name != STEPFUN_PROFILE_MODEL:
+            raise LookupError(f"Unsupported StepFun model: {model_name}")
+        return StepFunOrchestrator(
+            api_key=self.api_key,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            transport=self.transport,
+        )
+
+
+class ArkTextProvider(TextProvider):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.transport = transport
+
+    def create(self, *, model_name: str, system_prompt: str) -> AIOrchestrator:
+        # ARK 模型标识由控制台下发（如 doubao-seed-*），不做本地白名单限制，仅要求非空
+        if not model_name.strip():
+            raise LookupError("No configured ARK model")
+        return ArkOrchestrator(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            transport=self.transport,
+        )
+
+
 class AIAdapterRegistry:
     def __init__(
         self,
         *,
         deepseek_api_key: str | None = None,
         deepseek_transport: httpx.AsyncBaseTransport | None = None,
+        stepfun_api_key: str | None = None,
+        stepfun_transport: httpx.AsyncBaseTransport | None = None,
+        ark_api_key: str | None = None,
+        ark_base_url: str | None = None,
+        ark_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.text_providers: dict[str, TextProvider] = {"mock": MockTextProvider()}
         if deepseek_api_key:
             self.text_providers["deepseek"] = DeepSeekTextProvider(
                 api_key=deepseek_api_key,
                 transport=deepseek_transport,
+            )
+        if stepfun_api_key:
+            self.text_providers["stepfun"] = StepFunTextProvider(
+                api_key=stepfun_api_key,
+                transport=stepfun_transport,
+            )
+        if ark_api_key and ark_base_url:
+            self.text_providers["ark"] = ArkTextProvider(
+                api_key=ark_api_key,
+                base_url=ark_base_url,
+                transport=ark_transport,
             )
         self.stt_adapters: dict[str, SpeechToTextAdapter] = {"browser": BrowserSpeechToTextAdapter()}
         self.tts_adapters: dict[str, TextToSpeechAdapter] = {"browser": BrowserTextToSpeechAdapter()}
@@ -579,4 +746,19 @@ def get_ai_adapter_registry() -> AIAdapterRegistry:
         if settings.deepseek_api_key is not None
         else None
     )
-    return AIAdapterRegistry(deepseek_api_key=key)
+    ark_key = (
+        settings.ark_api_key.get_secret_value()
+        if settings.ark_api_key is not None
+        else None
+    )
+    stepfun_key = (
+        settings.stepfun_api_key.get_secret_value()
+        if settings.stepfun_api_key is not None
+        else None
+    )
+    return AIAdapterRegistry(
+        deepseek_api_key=key,
+        stepfun_api_key=stepfun_key,
+        ark_api_key=ark_key,
+        ark_base_url=settings.ark_base_url,
+    )

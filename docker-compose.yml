@@ -22,8 +22,10 @@ services:
     env_file:
       - .env
     environment:
+      # 全环境统一使用 PostgreSQL。容器内指向 db 服务；生产见 deploy/docker-compose.prod.yml。
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/finance_god
       DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@db:5432/finance_god
+      FINANCE_GOD_DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/finance_god
       APP_ENV: ${APP_ENV:-development}
       DEV_ADMIN_EMAIL: ${DEV_ADMIN_EMAIL:-admin@finance-god.local}
     depends_on:
@@ -31,7 +33,9 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      sh -c "alembic upgrade head &&
+      python -m app.startup"
 
   frontend:
     build: ./frontend

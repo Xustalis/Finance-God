@@ -24,13 +24,14 @@ export interface MarketQuote {
   provider_time: string
   retrieved_at: string
   frequency: string
-  freshness: string
-  market_status: string
+  freshness: 'current' | 'stale' | 'not_released' | 'unknown'
+  market_status: 'in_session' | 'closed_pending' | 'released' | 'unknown'
   source_endpoint: string
   capability_version: string
   instrument_master_identity: string
   instrument_master_version: string
-  trade_eligible: boolean
+  /** PandaData live-trading eligibility; simulation support is a separate UI rule. */
+  trade_eligible: false
 }
 
 export interface QuoteBatch {
@@ -63,12 +64,13 @@ export interface MarketBar {
   close: number
   volume: number
   amount: number | null
-  freshness: string
+  freshness: 'current' | 'stale' | 'not_released' | 'unknown'
   provider_time: string
   source_endpoint: string
   capability_version: string
   instrument_master_identity: string
   instrument_master_version: string
+  trade_eligible: false
 }
 
 export interface BarsResponse {
@@ -91,6 +93,27 @@ export interface CatalogResponse {
   provider: string
   summary: Record<string, unknown>
   datasets: CatalogDataset[]
+}
+
+// ─── 标的搜索（标的主数据） ─────────────────
+
+export interface InstrumentSummary {
+  symbol: string
+  provider_symbol: string
+  market: string
+  asset_class: string
+  currency: string
+  aliases: string[]
+  frequency: string
+  simulation_supported: boolean
+}
+
+export interface InstrumentSearchResponse {
+  provider: string
+  query: string
+  instrument_master_identity: string
+  instrument_master_version: string
+  instruments: InstrumentSummary[]
 }
 
 // ─── 健康检查 ─────────────────────────────────────
@@ -116,6 +139,295 @@ export interface SimulationAccount {
   revision: number
 }
 
+export interface VersionReference {
+  object_type: string
+  object_id: string
+  version: string
+}
+
+export interface AuditReference {
+  audit_id: string
+  actor_id: string
+  recorded_at: string
+}
+
+export type OrderSide = 'buy' | 'sell'
+export type OrderType = 'market' | 'limit'
+export type TimeInForce = 'day' | 'good_til_cancelled' | 'immediate_or_cancel'
+export type RiskStatus = 'checking' | 'passed' | 'confirmation_required' | 'blocked' | 'expired'
+
+export interface OrderDraftCreate {
+  mode: 'manual'
+  account_id: string
+  instrument_id: string
+  side: OrderSide
+  order_type: OrderType
+  quantity: number
+  amount: null
+  limit_price: number | null
+  reference_price: number | null
+  time_in_force: TimeInForce
+  fund_rule_version: null
+  valid_until: string
+  input_versions: VersionReference[]
+  plan_reference: null
+}
+
+export interface RiskReason {
+  code: string
+  severity: 'soft' | 'hard'
+  message: string
+}
+
+export interface RiskCheckResult {
+  risk_check_id: string
+  revision: number
+  status: RiskStatus
+  reasons: RiskReason[]
+  reason_hash: string
+  checked_at: string
+  expires_at: string
+  soft_confirmation: Record<string, unknown> | null
+  order_version: VersionReference
+  rule_version: VersionReference
+  input_versions: VersionReference[]
+  audit_reference: Record<string, unknown>
+}
+
+/** 后端计算的下单前成本估算（金额/手续费/总支出）。前端仅展示，不自行计算。 */
+export interface CostEstimate {
+  reference_price: number
+  price_source: 'limit_price' | 'market_reference'
+  quantity: number
+  notional: number
+  fee: number
+  total: number
+  cash_flow: 'outflow' | 'inflow'
+  fee_bps: number
+  slippage_bps: number
+  currency: string
+  rule_version: string
+}
+
+export interface StoredDraft {
+  record_revision: number
+  owner_id: string
+  mode: 'manual' | 'planned'
+  draft: {
+    draft_id: string
+    revision: number
+    status: 'draft' | 'pending_review' | 'confirmed' | 'expired' | 'cancelled'
+    account_id: string
+    instrument_id: string
+    side: string
+    order_type: string
+    quantity: number | null
+    amount: number | null
+    limit_price: number | null
+    time_in_force: string | null
+    fund_rule_version: VersionReference | null
+    valid_until: string
+    input_versions: VersionReference[]
+    audit_reference: Record<string, unknown>
+  }
+  plan_reference: VersionReference | null
+  reference_price: number | null
+  review: {
+    succeeded: boolean
+    summary: string | null
+    error: string | null
+  } | null
+  risk_result: RiskCheckResult | null
+  cost_estimate: CostEstimate | null
+  immutable_summary_hash: string | null
+  confirmed_at: string | null
+}
+
+export interface StoredOrder {
+  owner_id: string
+  draft_reference: VersionReference
+  exchange_order: ExchangeOrder | null
+  fund_order: FundOrder | null
+  execution_error: string | null
+}
+
+export interface ExchangeOrder {
+  order_id: string
+  revision: number
+  status:
+    | 'submitting'
+    | 'unknown'
+    | 'accepted'
+    | 'partially_filled'
+    | 'filled'
+    | 'cancelling'
+    | 'cancelled'
+    | 'rejected'
+    | 'expired'
+  idempotency_key: string
+  draft_reference: VersionReference
+  quantity: number
+  cumulative_filled: number
+  audit_reference: AuditReference
+}
+
+export interface FundOrder {
+  order_id: string
+  revision: number
+  status:
+    | 'draft'
+    | 'pending_review'
+    | 'submitted'
+    | 'accepted'
+    | 'pending_nav'
+    | 'confirming'
+    | 'confirmed'
+    | 'partially_confirmed'
+    | 'cancelled'
+    | 'rejected'
+  idempotency_key: string
+  draft_reference: VersionReference
+  requested_amount: number | null
+  requested_units: number | null
+  audit_reference: AuditReference
+}
+
+export interface SimulationFill {
+  fill_id: string
+  order_id: string
+  account_id: string
+  instrument_id: string
+  /** originating draft side; older fills persisted before this field may be null. */
+  side: OrderSide | null
+  quantity: number
+  price: number
+  fee: number
+  slippage_bps: number
+  market_evidence: VersionReference
+  model_version: string
+  rule_version: string
+  occurred_at: string
+  ledger_fill_id: string
+}
+
+/** 持仓 projection（后端只出数量与成本，市值/浮盈由前端用实时行情计算）。 */
+export interface SimulationPosition {
+  account_id: string
+  instrument_id: string
+  currency: string
+  long_quantity: number
+  settled_quantity: number
+  frozen_quantity: number
+  cost_rmb: number
+  revision: number
+}
+
+// ─── 权威持仓与估值（GET /simulation/portfolio） ───
+// 后端只给出数量、成本、已实现盈亏等“事实”；市值与浮动盈亏由前端
+// 用已轮询的实时行情（market store）乘以数量计算，不与仿真事实混存。
+
+export interface PortfolioPosition {
+  instrument_id: string
+  currency: string
+  quantity: number
+  settled_quantity: number
+  frozen_quantity: number
+  available_quantity: number
+  cost_basis_rmb: number
+  average_cost_rmb: number | null
+  realized_pnl_rmb: number
+  revision: number
+}
+
+export interface PortfolioView {
+  account_id: string
+  owner_id: string
+  as_of: string
+  rule_version: string
+  positions: PortfolioPosition[]
+  realized_pnl_rmb: number
+}
+
+// ─── 订单执行视图（GET /simulation/orders 及 /orders/{id}） ───
+// 完整订单字段 + 状态时间线，供执行中心对账与异常查询。
+
+export type ExchangeOrderStatus =
+  | 'submitting'
+  | 'unknown'
+  | 'accepted'
+  | 'partially_filled'
+  | 'filled'
+  | 'cancelling'
+  | 'cancelled'
+  | 'rejected'
+  | 'expired'
+
+export interface OrderTimelineEntry {
+  status: string
+  occurred_at: string
+  actor_id: string
+  detail: string | null
+}
+
+export interface StoredOrderView {
+  order_id: string
+  owner_id: string
+  order_kind: 'exchange' | 'fund'
+  status: ExchangeOrderStatus
+  instrument_id: string
+  side: string
+  order_type: string
+  time_in_force: string | null
+  limit_price: number | null
+  quantity: number
+  cumulative_filled: number
+  remaining_quantity: number
+  average_fill_price: number | null
+  total_fee_rmb: number
+  filled_notional_rmb: number
+  revision: number
+  confirmed_at: string | null
+  updated_at: string
+  draft_reference: VersionReference
+  execution_error: string | null
+  fills: SimulationFill[]
+  timeline: OrderTimelineEntry[]
+}
+
+// ─── 决策收件箱（GET /simulation/decision-inbox） ───
+// 聚合订单异常与未读通知，按 P0-P3 优先级排序；不创造待办。
+
+export type DecisionPriority = 'P0' | 'P1' | 'P2' | 'P3'
+
+export interface DecisionInboxItem {
+  item_id: string
+  priority: DecisionPriority
+  kind: 'order' | 'notification'
+  category: string
+  title: string
+  detail: string
+  source_object_type: string
+  source_object_id: string
+  occurred_at: string
+  required: boolean
+  action_route: string | null
+}
+
+export interface DecisionInboxCounts {
+  p0: number
+  p1: number
+  p2: number
+  p3: number
+  total: number
+}
+
+export interface DecisionInboxView {
+  owner_id: string
+  as_of: string
+  counts: DecisionInboxCounts
+  items: DecisionInboxItem[]
+}
+
 // ─── 工作区 ───────────────────────────────────────
 
 export interface WatchlistGroup {
@@ -135,6 +447,12 @@ export interface WatchlistInstrument {
   added_at: string
 }
 
+export interface NotificationPreference {
+  owner_user_id: string
+  category_preferences: Record<string, boolean>
+  updated_at: string
+}
+
 // ─── 错误 ─────────────────────────────────────────
 
 export interface BackendError {
@@ -143,6 +461,66 @@ export interface BackendError {
     message: string
     trace_id?: string
   }
+}
+
+// ─── AI 研究运行（Multi-Agent 运行时） ────────────
+// 与后端 research_runtime.contracts.AgentRun 对齐；所有结论均来自真实
+// Agent 运行，不在前端派生或伪造。
+
+export interface AgentEvidence {
+  identifier: string
+  source: string
+  excerpt: string
+}
+
+export interface AgentClaim {
+  claim_id: string
+  author_agent_id: string
+  kind: 'fact' | 'inference'
+  statement: string
+  evidence_ids: string[]
+  unknowns: string[]
+  invalidation_conditions: string[]
+}
+
+export interface AgentResult {
+  agent_id: string
+  summary: string
+  claims: AgentClaim[]
+  evidence: AgentEvidence[]
+  proposed_actions: string[]
+  metadata: Record<string, unknown>
+}
+
+export interface AgentAssignment {
+  agent_id: string
+  reason: string
+}
+
+export interface AgentRoutingNotice {
+  agent_id: string
+  reason: string
+  missing_resources: string[]
+  missing_authorizations: string[]
+}
+
+export interface AgentRun {
+  run_id: string
+  plan: {
+    run_id: string
+    assignments: AgentAssignment[]
+    notices: AgentRoutingNotice[]
+  }
+  results: AgentResult[]
+}
+
+export interface AgentResearchRequest {
+  subject: string
+  task_type?: string
+  asset_kind?: 'equity' | 'fund' | 'portfolio' | 'market' | 'software' | 'other'
+  scope?: string
+  evidence?: AgentEvidence[]
+  max_agents?: number
 }
 
 // ─── 前端辅助 ─────────────────────────────────────
@@ -178,8 +556,17 @@ export function formatVolume(value: number | null | undefined): string {
   return value.toFixed(0)
 }
 
-/** 默认行情标的列表 */
+/** 默认行情标的列表：仅包含 instrument master 中已验证可取快照的 A 股标的。 */
 export const DEFAULT_SYMBOLS = [
-  '000001.SZ', '000002.SZ', '600519.SH', '601318.SH',
-  '399001.SZ', '399006.SZ', '000300.SH', '000016.SH',
+  '000001.SZ',
+  '000002.SZ',
+  '600519.SH',
+  '601318.SH',
+  '600036.SH',
+  '000858.SZ',
+  '002594.SZ',
+  '300750.SZ',
 ]
+
+/** 钱包重置后固定恢复的仿真现金（人民币）。 */
+export const DEFAULT_SIMULATION_CASH_RMB = 1_000_000

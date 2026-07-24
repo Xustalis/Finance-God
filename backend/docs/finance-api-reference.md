@@ -23,12 +23,13 @@ reusing stale values as current data.
 ## Persisted simulation APIs
 
 `/api/finance/workspace/*` provides server-owned watchlists, notifications and
-notification preferences. It requires `FINANCE_GOD_DATABASE_URL` and
-`FINANCE_GOD_WORKSPACE_OWNER_ID`; the browser cannot choose the owner.
+notification preferences. It uses the shared `DATABASE_URL`; the unique owner
+comes from the verified Bearer JWT `sub`, and the browser cannot override it.
 
 `/api/finance/simulation/*` provides simulation-only accounts, order drafts,
 risk confirmation, order submission, reconciliation, cancellation and fills.
-All mutating calls require `x-finance-god-owner-id` and `idempotency-key`.
+It uses the same verified Bearer JWT `sub` as the owner. Mutating calls require
+`idempotency-key`; client-supplied owner headers are ignored.
 The account, order and fill data is simulation data, not broker execution data.
 
 ## Running and verifying

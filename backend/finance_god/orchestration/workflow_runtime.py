@@ -7,7 +7,7 @@ from types import TracebackType
 from typing import Self
 from uuid import uuid4
 
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from finance_god.domain.models import WorkflowRun
 from finance_god.infrastructure.persistence.workflow_persistence import (

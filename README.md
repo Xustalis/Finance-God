@@ -3,8 +3,16 @@
 Finance-God is a Chinese-first educational investment profiling application.
 The current release covers authentication, objective information collection,
 AI-assisted text/voice onboarding, a deterministic profile report, investment
-direction selection, and administrator AI settings. It does not execute trades
-or recommend specific funds.
+direction selection, administrator AI settings, PandaData-backed market views,
+and simulation-only trading services. It does not execute broker trades or
+recommend specific funds.
+
+## Documentation
+
+- [文档中心](docs/README.md)：现行规范、参考资料与历史记录的统一入口
+- [项目索引](docs/项目索引.md)：代码结构、路由、API、迁移与验证入口
+- [Backend architecture](backend/docs/architecture-overview.md)：后端组合与路径约定
+- [Finance API reference](backend/docs/finance-api-reference.md)：行情、工作区与仿真 API
 
 ## Stack
 
@@ -40,17 +48,21 @@ make seed-dev-admin
 Start the services in separate terminals:
 
 ```bash
-cd backend
-.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+make backend
 
 cd frontend
 npm run dev
 ```
 
-- Frontend: `http://localhost:5173`
-- API: `http://localhost:8001`
-- OpenAPI UI: `http://localhost:8001/docs`
-- OpenAPI JSON: `http://localhost:8001/openapi.json`
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:8000`
+- OpenAPI UI: `http://localhost:8000/docs`
+- OpenAPI JSON: `http://localhost:8000/openapi.json`
+
+`app.main:app` is the only supported ASGI application. `make backend` runs a
+port preflight before starting it and fails explicitly if port 8000 is already
+owned by another process; it never stops that process or starts a second
+backend. The former `server:app` static-prototype entry point no longer exists.
 
 ## Existing Workspace Database
 
@@ -96,6 +108,22 @@ remote hosts, other database names, and missing URLs.
 
 ## Configuration
 
+Copy only the repository-root example:
+
+```bash
+cp .env.example .env
+```
+
+The root `.env` is the sole implicit local configuration file. Both typed
+settings and adapters that read `os.getenv` receive values from it.
+`backend/.env` is not loaded and must not be used.
+
+Existing checkouts that still contain `backend/.env` fail startup explicitly
+instead of silently losing those settings or restoring a second source.
+Run `make migrate-legacy-env` once: it adds only non-empty keys missing from the
+root `.env`, never overwrites existing root keys or prints values, and preserves
+the original as `backend/.env.migrated`.
+
 Important environment variables:
 
 | Variable | Purpose |
@@ -106,6 +134,9 @@ Important environment variables:
 | `SECRET_KEY` | JWT signing secret; the development default is rejected outside development |
 | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
 | `DEEPSEEK_API_KEY` | Server-only DeepSeek credential; never exposed to the frontend or admin API |
+| `STEPFUN_API_KEY` | Server-only StepFun credential for the controlled `step-3.5-flash-2603` profile model |
+| `ARK_API_KEY` / `ARK_MODEL` | Server-only ARK credential and required model identifier |
+| `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` | Server-only PandaData credentials required by production readiness |
 | `DEV_ADMIN_EMAIL` | Development administrator email, default `admin@finance-god.local` |
 | `DEV_ADMIN_PASSWORD` | Development-only seed password; required by `make seed-dev-admin`, minimum 12 characters |
 | `VITE_WORKBENCH_ORIGIN` | Browser build variable containing the exact target origin for the profile completion handoff |
@@ -125,6 +156,28 @@ the same browser.
 
 The development admin seed command refuses to run outside `APP_ENV=development`.
 Keep its password in the ignored local `.env`, then open `/admin/login`.
+
+## Production deployment
+
+Production deployment does not create an environment file automatically. Copy
+`deploy/production.env.example` to `deploy/.env.production`, provide a strong
+database password and JWT secret, both PandaData credentials, and at least one
+real text provider. DeepSeek uses `DEEPSEEK_API_KEY` with its model selected
+through the existing administrator whitelist; StepFun uses `STEPFUN_API_KEY`
+with the fixed `step-3.5-flash-2603` profile model; ARK requires both
+`ARK_API_KEY` and `ARK_MODEL`.
+
+Validate the file before deploying:
+
+```bash
+deploy/check-production-config.sh deploy/.env.production
+docker compose --env-file deploy/.env.production \
+  -f deploy/docker-compose.prod.yml config --quiet
+```
+
+Container health and the final deployment probe both use `/api/ready`.
+Readiness failures therefore fail the deployment instead of being replaced by
+the shallow application `/health` response.
 
 ## Tests
 
@@ -161,10 +214,12 @@ runtime uses the bundled research framework:
 cd backend
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+cd ..
+make backend
 ```
 
-`FINANCE_GOD_DATABASE_URL` and `FINANCE_GOD_WORKSPACE_OWNER_ID` enable the
-persisted workspace and simulation APIs. PandaData credentials enable live
-market requests. Missing configuration produces explicit readiness or service
-errors; it never substitutes fabricated market data.
+`DATABASE_URL` enables the persisted workspace and simulation APIs. Their
+unique owner is the `sub` claim from the verified Bearer JWT; clients cannot
+select an owner through headers or configuration. PandaData credentials enable
+live market requests. Missing configuration produces explicit readiness or
+service errors; it never substitutes fabricated market data.

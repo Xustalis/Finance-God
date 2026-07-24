@@ -8,8 +8,7 @@ import re
 from collections.abc import Iterable
 from enum import Enum
 from types import MappingProxyType
-from typing import Any
-from typing import Final
+from typing import Any, Final
 
 from research_runtime import (
     AgentAdapterKind,

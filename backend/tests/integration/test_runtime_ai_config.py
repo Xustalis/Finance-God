@@ -2,11 +2,18 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.main import app
+from app.ai_catalog import STEPFUN_PROFILE_MODEL
+from app.api.v1.onboarding import default_text_provider
 from app.config import settings
+from app.main import app
 from app.models.ai_config import AIModelConfig, PromptVersion
 from app.models.user import User
-from app.services.ai_orchestrator import AIAdapterRegistry, MockTextProvider, ONBOARDING_SYSTEM_PROMPT, get_ai_adapter_registry
+from app.services.ai_orchestrator import (
+    ONBOARDING_SYSTEM_PROMPT,
+    AIAdapterRegistry,
+    MockTextProvider,
+    get_ai_adapter_registry,
+)
 
 
 class CapturingRegistry(AIAdapterRegistry):
@@ -23,6 +30,16 @@ class ProductionRegistry(AIAdapterRegistry):
     def __init__(self) -> None:
         super().__init__()
         self.text_providers["cloud"] = MockTextProvider()
+
+
+def test_stepfun_is_default_profile_provider_when_credential_is_configured() -> None:
+    registry = AIAdapterRegistry(
+        stepfun_api_key="stepfun-secret",
+        ark_api_key="ark-secret",
+        ark_base_url="https://ark.example/v1",
+    )
+
+    assert default_text_provider(registry) == ("stepfun", STEPFUN_PROFILE_MODEL)
 
 
 @pytest.mark.asyncio
