@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # 部分模型（如豆包 lite）单轮延迟可超过 30s，默认放宽到 60s，可按需覆盖。
     ai_request_timeout_seconds: float = 60.0
 
+    # 服务端行情监控（Phase 1）：常驻轮询器按较长间隔拉取有界标的池、落库并
+    # 检测异动。阈值为涨跌幅的绝对分数（0.05 = 5%）。universe 为空时由启动处
+    # 依据标的主数据中支持快照的 A 股推导。
+    market_poll_enabled: bool = True
+    market_poll_interval_seconds: float = 30.0
+    market_alert_threshold: float = 0.05
+    market_alert_escalate_threshold: float = 0.09
+    market_poll_universe: str | None = None
+
     @model_validator(mode="after")
     def validate_production_secret(self):
         if self.app_env != "development" and self.secret_key == "change-me-in-production-please-use-a-long-random-string":
