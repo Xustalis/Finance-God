@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory } from 'vue-router'
 import { createAppRouter } from '@/router'
+import { useAdminAuthStore } from '@/stores/adminAuth'
 import { objectiveSteps, useOnboardingStore } from '@/stores/onboarding'
 import { createSpeechController } from '@/composables/useSpeech'
 import { emitProfileCompleted, saveAndEmitProfileCompleted } from '@/services/workbench'
@@ -18,7 +19,7 @@ const baseSession = (): Session => ({
   turn_count: 0, row_version: 1, min_rounds: 6, max_rounds: 12, completeness: 0.4,
   provider_name: 'mock', model_name: 'mock', prompt_version: 'v1', prompt_id: null,
   prompt_hash: 'a'.repeat(64), objective_profile: null, dimension_scores: {}, profile_evidence: {},
-  pending_profile_evidence: null, skipped_dimensions: [], followup_counts: {}, current_dimension: 'risk_tolerance', current_question: '服务端固定问题',
+  skipped_dimensions: [], followup_counts: {}, current_dimension: 'risk_tolerance', current_question: '服务端固定问题',
 })
 
 describe('route permissions', () => {
@@ -29,14 +30,40 @@ describe('route permissions', () => {
     expect(router.currentRoute.value.path).toBe('/login')
   })
 
-  it('rejects a regular user from admin settings', async () => {
+  it('redirects admin settings to the dedicated login without clearing a user session', async () => {
     localStorage.setItem('finance-god-token', 'token')
     localStorage.setItem('finance-god-user', JSON.stringify({ id: 'u', email: 'u@test.cn', role: 'user', status: 'active' }))
     const router = createAppRouter(createMemoryHistory())
     await router.push('/admin/ai-settings')
     await router.isReady()
-    expect(router.currentRoute.value.fullPath).toContain('/app/exe')
-    expect(router.currentRoute.value.query.notice).toBe('admin_required')
+    expect(router.currentRoute.value.path).toBe('/admin/login')
+    expect(localStorage.getItem('finance-god-token')).toBe('token')
+  })
+
+  it('allows an independent admin session while preserving the user session', async () => {
+    localStorage.setItem('finance-god-token', 'user-token')
+    localStorage.setItem('finance-god-user', JSON.stringify({ id: 'u', role: 'user' }))
+    localStorage.setItem('finance-god-admin-token', 'admin-token')
+    localStorage.setItem('finance-god-admin-user', JSON.stringify({ id: 'a', role: 'admin' }))
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/admin/ai-settings')
+    await router.isReady()
+    expect(router.currentRoute.value.path).toBe('/admin/ai-settings')
+    expect(localStorage.getItem('finance-god-token')).toBe('user-token')
+  })
+})
+
+describe('admin authentication state', () => {
+  it('stores and clears only the independent admin credentials', async () => {
+    setActivePinia(createPinia())
+    localStorage.setItem('finance-god-token', 'user-token')
+    const store = useAdminAuthStore()
+    store.configureApi({ login: vi.fn().mockResolvedValue({ access_token: 'admin-token', user: { id: 'a', email: 'admin@test.cn', role: 'admin', status: 'active' } }) } as never)
+    await store.login('admin@test.cn', 'correct-horse-123')
+    expect(localStorage.getItem('finance-god-admin-token')).toBe('admin-token')
+    store.logout()
+    expect(localStorage.getItem('finance-god-admin-token')).toBeNull()
+    expect(localStorage.getItem('finance-god-token')).toBe('user-token')
   })
 })
 
@@ -71,28 +98,12 @@ describe('objective profile state', () => {
   it('isolates drafts and messages when restoring another user session',async()=>{setActivePinia(createPinia());const first={...baseSession(),id:'s-a',user_id:'user-a',step:'objective_profile' as const};const second={...baseSession(),id:'s-b',user_id:'user-b',step:'objective_profile' as const};const current=vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second);const store=useOnboardingStore();store.configureApi({current} as never);await store.restore();store.selectObjective('prefer_not_to_say');store.messages.push({role:'user',content:'private-a'});store.persistMessages();await store.restore();expect(store.objective).toEqual({});expect(store.objectiveIndex).toBe(0);expect(store.messages).toEqual([]);store.reset();expect(store.session).toBeNull()})
 })
 
-describe('conversation evidence', () => {
-  it('sends confirmation separately and blocks new content while evidence is pending', async () => {
-    setActivePinia(createPinia())
-    const sendMessage = vi.fn().mockResolvedValue({ session: { ...baseSession(), pending_profile_evidence: null }, accepted: true, confirmed_evidence: {} })
-    const store = useOnboardingStore()
-    store.session = { ...baseSession(), pending_profile_evidence: { dimension: 'risk_tolerance', value: 0.3, confidence: 0.8, proposed_followup_count: 1, proposed_round_count: 1, should_continue: true, end_reason: null } }
-    store.configureApi({ sendMessage } as never)
-    await expect(store.sendContent('下一条')).rejects.toThrow('请先确认')
-    await store.confirmEvidence(true)
-    expect(sendMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({ confirm_pending: true, request_id: expect.any(String) }))
-    expect(sendMessage.mock.calls[0][1]).not.toHaveProperty('content')
-  })
-
-  it('reuses the same confirmation request id after a failed attempt', async () => {
-    setActivePinia(createPinia());const sendMessage=vi.fn().mockRejectedValueOnce(new Error('lost')).mockResolvedValueOnce({session:{...baseSession(),pending_profile_evidence:null},accepted:true,confirmed_evidence:{}});const store=useOnboardingStore();store.session={...baseSession(),pending_profile_evidence:{dimension:'risk_tolerance',value:.2,confidence:.8,proposed_followup_count:1,proposed_round_count:1,should_continue:true,end_reason:null}};store.configureApi({sendMessage} as never)
-    await expect(store.confirmEvidence(true)).rejects.toThrow('lost');await store.confirmEvidence(true)
-    expect(sendMessage.mock.calls[0][1].request_id).toBe(sendMessage.mock.calls[1][1].request_id)
-  })
-
+describe('direct conversation updates', () => {
   it('reuses a content request id after a lost response', async () => {
-    setActivePinia(createPinia());const result={session:{...baseSession(),pending_profile_evidence:{dimension:'risk_tolerance',value:.2,confidence:.8,proposed_followup_count:1,proposed_round_count:1,should_continue:true,end_reason:null}},user_message:{id:'u',content:'我能承受一些波动',input_mode:'text'},assistant_message:{id:'a',content:'收到'},turn:{reply:'收到'}};const sendMessage=vi.fn().mockRejectedValueOnce(new Error('lost')).mockResolvedValueOnce(result);const store=useOnboardingStore();store.session=baseSession();store.configureApi({sendMessage} as never)
+    setActivePinia(createPinia());const result={session:{...baseSession(),round_count:1,current_dimension:'liquidity_need'},user_message:{id:'u',content:'我能承受一些波动',input_mode:'text'},assistant_message:{id:'a',content:'收到'},turn:{reply:'收到'}};const sendMessage=vi.fn().mockRejectedValueOnce(new Error('lost')).mockResolvedValueOnce(result);const store=useOnboardingStore();store.session=baseSession();store.configureApi({sendMessage} as never)
     await expect(store.sendContent('我能承受一些波动')).rejects.toThrow('lost');await store.sendContent('我能承受一些波动');expect(sendMessage.mock.calls[0][1].request_id).toBe(sendMessage.mock.calls[1][1].request_id)
+    expect(sendMessage.mock.calls[0][1]).not.toHaveProperty('confirm_pending')
+    expect(store.session?.current_dimension).toBe('liquidity_need')
   })
 })
 
@@ -142,14 +153,13 @@ describe('profile restrictions', () => {
 })
 
 describe('admin settings privacy', () => {
-  it('never maps an API key value from the server response', async () => {
+  it('never creates an editable API key field from the server response', async () => {
     const { editableSetting } = await import('@/services/admin')
-    expect(editableSetting({ id: '1', capability: 'text', provider: 'mock', model_name: 'm', api_key_configured: true, prompt_version: 'v1', min_rounds: 6, max_rounds: 12, enabled: true, version: 1 })).toEqual(expect.objectContaining({ api_key_ref: '' }))
-    expect(JSON.stringify(editableSetting({ id: null, capability: 'stt', provider: 'browser', model_name: 'speech', api_key_configured: false, prompt_version: 'v1', min_rounds: 6, max_rounds: 12, enabled: true, version: 0 }))).not.toContain('secret')
+    const setting=editableSetting({ id: '1', capability: 'text', provider: 'mock', model_name: 'mock-structured-v1', base_url:'https://api.deepseek.com',api_key_configured: true, prompt_version: 'v1', min_rounds: 6, max_rounds: 12, enabled: true, version: 1 })
+    expect(setting).not.toHaveProperty('api_key_ref')
+    expect(setting).not.toHaveProperty('api_key')
   })
-  it('omits an unchanged configured key reference from updates',()=>{const payload=adminUpdatePayload({id:'1',capability:'text',provider:'mock',model_name:'m',api_key_configured:true,api_key_ref:'',clear_api_key_ref:false,prompt_version:'v2',prompt_content:'new prompt content here',min_rounds:6,max_rounds:12,enabled:true,version:2});expect(payload).not.toHaveProperty('api_key_ref')})
-  it('omits an empty key reference even when no key is configured',()=>{const payload=adminUpdatePayload({id:null,capability:'stt',provider:'browser',model_name:'speech',api_key_configured:false,api_key_ref:'',clear_api_key_ref:false,prompt_version:'v1',prompt_content:'',min_rounds:6,max_rounds:12,enabled:true,version:0});expect(payload).not.toHaveProperty('api_key_ref')})
-  it('supports preserve, replace, and explicit clear key states',()=>{const base={id:'1',capability:'text' as const,provider:'mock',model_name:'m',api_key_configured:true,api_key_ref:'',clear_api_key_ref:false,prompt_version:'v2',prompt_content:'new prompt content here',min_rounds:6,max_rounds:12,enabled:true,version:2};expect(adminUpdatePayload(base)).not.toHaveProperty('api_key_ref');expect(adminUpdatePayload({...base,api_key_ref:'NEW_KEY'}).api_key_ref).toBe('NEW_KEY');expect(adminUpdatePayload({...base,clear_api_key_ref:true}).api_key_ref).toBeNull()})
+  it('uses only the fixed server-side key reference for DeepSeek',()=>{const base={id:'1',capability:'text' as const,provider:'deepseek',model_name:'deepseek-v4-flash',base_url:'https://api.deepseek.com',api_key_configured:true,prompt_version:'v2',prompt_content:'new prompt content here',min_rounds:6,max_rounds:12,enabled:true,version:2};expect(adminUpdatePayload(base).api_key_ref).toBe('DEEPSEEK_API_KEY');expect(adminUpdatePayload({...base,provider:'mock',model_name:'mock-structured-v1'})).not.toHaveProperty('api_key_ref')})
 })
 
 describe('application contract',()=>{
