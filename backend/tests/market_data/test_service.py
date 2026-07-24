@@ -250,6 +250,49 @@ def test_official_calendar_response_authorizes_released_session() -> None:
     assert calls.count("get_stock_rt_min") == 3
 
 
+def test_weekend_cold_start_uses_latest_authoritative_open_session() -> None:
+    weekend_now = NOW.replace(day=25)
+    sdk = FakeSDK()
+    sdk.responses["get_trade_cal"] = [
+        {
+            "nature_date": 20260724,
+            "is_trade": 1,
+            "exchange": "SH",
+            "pretrade_date": 20260723,
+            "next_trade_date": 20260727,
+        },
+        {
+            "nature_date": 20260725,
+            "is_trade": 0,
+            "exchange": "SH",
+            "pretrade_date": 20260724,
+            "next_trade_date": 20260727,
+        },
+    ]
+    sdk.responses["get_stock_min"] = [bar("20260724 15:00:00")]
+    data_adapter = adapter(sdk, now=weekend_now)
+    service = MarketDataService(
+        adapter=data_adapter,
+        now=lambda: weekend_now,
+        published_state=PandaCalendarPublishedState(data_adapter),
+    )
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
+    )
+
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
+
+    assert len(batch.quotes) == 1
+    quote = batch.quotes[0]
+    assert str(quote.last) == "10.2"
+    assert quote.provider_time.startswith("2026-07-24T15:00:00")
+    assert quote.source_endpoint == "get_stock_min"
+    assert quote.market_status == "released"
+    assert quote.freshness == "unknown"
+    assert not any(name == "get_stock_rt_min" for name, _ in sdk.calls)
+
+
 def test_readiness_probes_quote_and_page_bar_contract_once_per_cache_window() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]

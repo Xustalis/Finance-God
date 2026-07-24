@@ -233,7 +233,7 @@ class MarketDataService:
         trading_date = observed_at.astimezone(_market_zone(instrument.market)).strftime(
             "%Y%m%d"
         )
-        publication = self._published_state.evaluate(
+        publication = self._published_state.latest_released(
             instrument=instrument,
             category=DataCategory.BAR,
             frequency=DataFrequency.MINUTE_1,
@@ -264,13 +264,17 @@ class MarketDataService:
             frequency = DataFrequency.DAILY
             end = market_today.strftime("%Y%m%d")
             start = (market_today - timedelta(days=120)).strftime("%Y%m%d")
-        publication = self._published_state.evaluate(
+        publication = self._published_state.latest_released(
             instrument=instrument,
             category=DataCategory.BAR,
             frequency=frequency,
             trading_date=end,
             observed_at=now,
         )
+        if frequency is DataFrequency.MINUTE_1:
+            start = end = publication.trading_date
+        else:
+            end = publication.trading_date
         envelope = self._adapter.fetch_bars(
             instrument,
             frequency=frequency,

@@ -16,8 +16,12 @@ from starlette.responses import JSONResponse
 from finance_god.market_data import (
     CATALOG,
     DQTriggerRequest,
+    DQWorkflowReceipt,
     ErrorKind,
+    MarketDataApplication,
     MarketDataError,
+    MarketDataService,
+    PandaCalendarPublishedState,
 )
 from finance_god.orchestration.workflows import (
     WorkflowCommandRuntime,
@@ -27,7 +31,7 @@ from finance_god.orchestration.workflows import (
     create_workflow_command_runtime_from_environment,
 )
 
-from .conftest import NOW
+from .conftest import NOW, FakeSDK, adapter, bar
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -126,6 +130,48 @@ def test_market_api_returns_stable_safe_errors_without_raw_exception_text(
             invalid_payload,
         )
     )
+
+
+def test_overview_api_returns_latest_open_session_during_weekend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RecordingWorkflow:
+        async def start(self, request: DQTriggerRequest) -> DQWorkflowReceipt:
+            return DQWorkflowReceipt(
+                workflow_run_id="weekend-api-regression",
+                idempotency_key=request.idempotency_key,
+            )
+
+    weekend_now = NOW.replace(day=25)
+    sdk = FakeSDK()
+    sdk.responses["get_trade_cal"] = [
+        {"nature_date": 20260724, "is_trade": 1},
+        {"nature_date": 20260725, "is_trade": 0},
+    ]
+    sdk.responses["get_stock_min"] = [bar("20260724 15:00:00")]
+    data_adapter = adapter(sdk, now=weekend_now)
+    service = MarketDataService(
+        adapter=data_adapter,
+        now=lambda: weekend_now,
+        published_state=PandaCalendarPublishedState(data_adapter),
+    )
+    application = MarketDataApplication(
+        service,
+        dq_workflow=RecordingWorkflow(),
+    )
+    monkeypatch.setattr(server, "market_data", service)
+    monkeypatch.setattr(server, "market_application", application)
+
+    response = asyncio.run(
+        server.market_overview(_request(b"symbols=000001.SZ"))
+    )
+    payload = _payload(response)
+
+    assert response.status_code == 200
+    quote = payload["data"]["quotes"][0]
+    assert quote["provider_time"].startswith("2026-07-24T15:00:00")
+    assert quote["source_endpoint"] == "get_stock_min"
+    assert quote["market_status"] == "released"
 
 
 def test_catalog_api_separates_availability_trade_and_stability_counts(

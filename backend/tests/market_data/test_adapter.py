@@ -212,6 +212,33 @@ def test_snapshot_without_expected_date_uses_the_provider_trading_date() -> None
     assert result.items[0].source.trading_date == "20260723"
 
 
+def test_snapshot_for_prior_authoritative_date_uses_historical_minute_endpoint() -> (
+    None
+):
+    sdk = FakeSDK()
+    sdk.responses["get_stock_min"] = [bar("20260723 15:00:00")]
+    subject = adapter(sdk, now=US_NOW)
+
+    result = subject.fetch_snapshot(
+        DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ"),
+        release_state=ReleaseState.RELEASED,
+        expected_date="20260723",
+    )
+
+    assert result.items
+    assert result.items[0].source.endpoint == "get_stock_min"
+    calls = [arguments for name, arguments in sdk.calls if name == "get_stock_min"]
+    assert calls == [
+        {
+            "symbol": "000001.SZ",
+            "start_date": "20260723",
+            "end_date": "20260723",
+            "frequency": "1m",
+        }
+    ]
+    assert not any(name == "get_stock_rt_min" for name, _ in sdk.calls)
+
+
 def test_master_and_calendar_normalizers_validate_schema() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_detail"] = [{"symbol": "000001.SZ", "name": "平安银行"}]

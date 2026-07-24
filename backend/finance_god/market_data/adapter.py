@@ -223,26 +223,45 @@ class PandaDataAdapter:
                 "HK/US verified capability is closed-session daily data, not snapshot",
                 None,
             )
-        endpoint = "get_stock_rt_min"
         if release_state is not ReleaseState.RELEASED:
             return self._not_released(
                 instrument.symbol,
-                endpoint,
+                "get_stock_rt_min",
                 release_state,
             )
-        frame = self._request(
-            endpoint,
-            {"A_SHARE_STOCK", "frequency=1m"},
-            symbol=instrument.provider_symbol,
-            frequency="1m",
+        market_today = (
+            self._utc_now()
+            .astimezone(ZoneInfo("Asia/Shanghai"))
+            .strftime("%Y%m%d")
         )
-        records = records_from_frame(frame, endpoint=endpoint)
         trading_date = (
             _validate_date(expected_date)
             if expected_date
-            else _reported_trading_date(records)
-            or self._utc_now().astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+            else market_today
         )
+        if trading_date > market_today:
+            raise ValueError("future snapshot data cannot be requested")
+        if trading_date < market_today:
+            endpoint = "get_stock_min"
+            frame = self._request(
+                endpoint,
+                {"A_SHARE_STOCK", "frequency=1m"},
+                symbol=instrument.provider_symbol,
+                start_date=trading_date,
+                end_date=trading_date,
+                frequency="1m",
+            )
+        else:
+            endpoint = "get_stock_rt_min"
+            frame = self._request(
+                endpoint,
+                {"A_SHARE_STOCK", "frequency=1m"},
+                symbol=instrument.provider_symbol,
+                frequency="1m",
+            )
+        records = records_from_frame(frame, endpoint=endpoint)
+        if expected_date is None:
+            trading_date = _reported_trading_date(records) or trading_date
         bars = self._normalizer.bars(
             records,
             instrument=instrument,

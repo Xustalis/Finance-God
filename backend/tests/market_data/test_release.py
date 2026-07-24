@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-
 import pytest
+
 from finance_god.market_data import (
     DataCategory,
     DataEnvelope,
@@ -16,14 +16,14 @@ from finance_god.market_data import (
     ReleaseState,
     SourceStamp,
 )
-from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
-from finance_god.market_data.normalization import diagnostic
 from finance_god.market_data.contracts import (
     DiagnosticCode,
     DiagnosticSeverity,
 )
+from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
+from finance_god.market_data.normalization import diagnostic
 
-from .conftest import NOW
+from .conftest import NOW, FakeSDK, adapter
 
 
 class CalendarStub:
@@ -154,3 +154,27 @@ def test_unknown_freshness_never_becomes_released() -> None:
         evaluate(DataEnvelope((unknown,), (), EmptyMeaning.NOT_EMPTY))
         is ReleaseState.UNKNOWN
     )
+
+
+def test_latest_released_selects_prior_open_day_when_observation_day_is_closed() -> (
+    None
+):
+    weekend_now = NOW.replace(day=25)
+    sdk = FakeSDK()
+    sdk.responses["get_trade_cal"] = [
+        {"nature_date": 20260724, "is_trade": 1},
+        {"nature_date": 20260725, "is_trade": 0},
+    ]
+    state = PandaCalendarPublishedState(adapter(sdk, now=weekend_now))
+
+    decision = state.latest_released(
+        instrument=DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ"),
+        category=DataCategory.SNAPSHOT,
+        frequency=DataFrequency.MINUTE_1,
+        trading_date="20260725",
+        observed_at=weekend_now,
+    )
+
+    assert decision.state is ReleaseState.RELEASED
+    assert decision.trading_date == "20260724"
+    assert decision.provider_published_at is None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -29,6 +29,7 @@ _MARKET_ZONES = {
     "HK": ZoneInfo("Asia/Hong_Kong"),
     "US": ZoneInfo("America/New_York"),
 }
+_LATEST_RELEASE_LOOKBACK_DAYS = 14
 
 
 class PublishedStateDecision(BaseModel):
@@ -42,6 +43,16 @@ class PublishedStateDecision(BaseModel):
 
 
 class PublishedStatePort(Protocol):
+    def latest_released(
+        self,
+        *,
+        instrument: InstrumentId,
+        category: DataCategory,
+        frequency: DataFrequency,
+        trading_date: str,
+        observed_at: datetime,
+    ) -> PublishedStateDecision: ...
+
     def evaluate(
         self,
         *,
@@ -75,6 +86,23 @@ class FailClosedPublishedState:
             reason="no published-state/calendar adapter is configured",
         )
 
+    def latest_released(
+        self,
+        *,
+        instrument: InstrumentId,
+        category: DataCategory,
+        frequency: DataFrequency,
+        trading_date: str,
+        observed_at: datetime,
+    ) -> PublishedStateDecision:
+        return self.evaluate(
+            instrument=instrument,
+            category=category,
+            frequency=frequency,
+            trading_date=trading_date,
+            observed_at=observed_at,
+        )
+
     def probe(self, observed_at: datetime) -> None:
         del observed_at
         raise MarketDataResponseError(
@@ -106,6 +134,23 @@ class StaticPublishedState:
             ),
             evidence_ref="published-state:static-injected",
             reason="explicit injected publication state",
+        )
+
+    def latest_released(
+        self,
+        *,
+        instrument: InstrumentId,
+        category: DataCategory,
+        frequency: DataFrequency,
+        trading_date: str,
+        observed_at: datetime,
+    ) -> PublishedStateDecision:
+        return self.evaluate(
+            instrument=instrument,
+            category=category,
+            frequency=frequency,
+            trading_date=trading_date,
+            observed_at=observed_at,
         )
 
     def probe(self, observed_at: datetime) -> None:
@@ -146,6 +191,89 @@ class PandaCalendarPublishedState:
         observed_at: datetime,
     ) -> PublishedStateDecision:
         calendar_day = self._calendar_day(instrument.market, trading_date)
+        return self._decision(
+            calendar_day=calendar_day,
+            instrument=instrument,
+            category=category,
+            frequency=frequency,
+            observed_at=observed_at,
+        )
+
+    def latest_released(
+        self,
+        *,
+        instrument: InstrumentId,
+        category: DataCategory,
+        frequency: DataFrequency,
+        trading_date: str,
+        observed_at: datetime,
+    ) -> PublishedStateDecision:
+        target = datetime.strptime(trading_date, "%Y%m%d")
+        start_date = (
+            target - timedelta(days=_LATEST_RELEASE_LOOKBACK_DAYS)
+        ).strftime("%Y%m%d")
+        calendar_days = self._calendar_days(
+            instrument.market,
+            start_date,
+            trading_date,
+        )
+        current = next(
+            (item for item in calendar_days if item.trade_date == trading_date),
+            None,
+        )
+        if current is None:
+            raise MarketDataResponseError(
+                "trading calendar omitted the requested observation date",
+                endpoint="get_trade_cal",
+            )
+        decision = self._decision(
+            calendar_day=current,
+            instrument=instrument,
+            category=category,
+            frequency=frequency,
+            observed_at=observed_at,
+        )
+        if decision.state is ReleaseState.RELEASED:
+            return decision
+        if decision.state is ReleaseState.UNKNOWN:
+            return decision
+        previous_open = next(
+            (
+                item
+                for item in reversed(calendar_days)
+                if item.trade_date < trading_date and item.is_open
+            ),
+            None,
+        )
+        if previous_open is None:
+            raise MarketDataResponseError(
+                "trading calendar has no prior open date within the release window",
+                endpoint="get_trade_cal",
+            )
+        return PublishedStateDecision(
+            state=ReleaseState.RELEASED,
+            trading_date=previous_open.trade_date,
+            provider_published_at=None,
+            evidence_ref=(
+                "PandaData:get_trade_cal:"
+                f"{instrument.market.value}:{previous_open.trade_date}"
+            ),
+            reason=(
+                "current session is not released; using the most recent "
+                "authoritative open trading date"
+            ),
+        )
+
+    def _decision(
+        self,
+        *,
+        calendar_day: NormalizedCalendarDay,
+        instrument: InstrumentId,
+        category: DataCategory,
+        frequency: DataFrequency,
+        observed_at: datetime,
+    ) -> PublishedStateDecision:
+        trading_date = calendar_day.trade_date
         evidence_ref = (
             f"PandaData:get_trade_cal:{instrument.market.value}:{trading_date}"
         )
@@ -200,29 +328,57 @@ class PandaCalendarPublishedState:
     def _calendar_day(
         self, market: MarketType, trading_date: str
     ) -> NormalizedCalendarDay:
+        items = self._calendar_days(market, trading_date, trading_date)
+        if len(items) != 1:
+            raise MarketDataResponseError(
+                "trading calendar did not return exactly one normalized day",
+                endpoint="get_trade_cal",
+            )
+        return items[0]
+
+    def _calendar_days(
+        self,
+        market: MarketType,
+        start_date: str,
+        end_date: str,
+    ) -> tuple[NormalizedCalendarDay, ...]:
         envelope = self._calendar.fetch_calendar(
             market=market,
-            start_date=trading_date,
-            end_date=trading_date,
+            start_date=start_date,
+            end_date=end_date,
         )
         if envelope.diagnostics:
             raise MarketDataResponseError(
                 "trading calendar returned quality diagnostics",
                 endpoint="get_trade_cal",
             )
-        if len(envelope.items) != 1:
+        if not envelope.items:
             raise MarketDataResponseError(
-                "trading calendar did not return exactly one normalized day",
+                "trading calendar did not return normalized days",
                 endpoint="get_trade_cal",
             )
-        item = envelope.items[0]
+        for item in envelope.items:
+            self._validate_calendar_day(item, market)
+            if not start_date <= item.trade_date <= end_date:
+                raise MarketDataResponseError(
+                    "trading calendar date is outside the requested range",
+                    endpoint="get_trade_cal",
+                )
+        return envelope.items
+
+    def _validate_calendar_day(
+        self,
+        item: NormalizedCalendarDay,
+        market: MarketType,
+    ) -> None:
         if not isinstance(item, NormalizedCalendarDay):
             raise MarketDataResponseError(
                 "trading calendar returned a non-canonical normalized item",
                 endpoint="get_trade_cal",
             )
         source = item.source
-        if item.market is not market or item.trade_date != trading_date:
+        trading_date = item.trade_date
+        if item.market is not market:
             raise MarketDataResponseError(
                 "trading calendar identity does not match the requested market/date",
                 endpoint="get_trade_cal",
@@ -258,7 +414,6 @@ class PandaCalendarPublishedState:
         # fields (nature_date/is_trade) but no provider publication timestamp.
         # A successful, identity-validated response is therefore the only
         # truthful publication evidence for this static calendar dataset.
-        return item
 
 
 def _official_calendar_response_confirms_publication(
