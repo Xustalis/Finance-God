@@ -1,0 +1,23 @@
+{
+  "name": "finance-god-agent-workbench-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "../../node_modules/.bin/vite --host 127.0.0.1",
+    "build": "../../node_modules/.bin/vue-tsc --noEmit && ../../node_modules/.bin/vite build",
+    "lint": "../../node_modules/.bin/eslint .",
+    "type-check": "../../node_modules/.bin/vue-tsc --noEmit",
+    "test": "../../node_modules/.bin/vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.2.0"
+  }
+}
