@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     app_debug: bool = True
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # SQLAlchemy SQL 语句回显日志，与 app_debug 解耦，默认关闭
+    sql_echo: bool = False
+
     # 数据库
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/finance_god"
     database_url_sync: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/finance_god"
@@ -45,6 +48,21 @@ class Settings(BaseSettings):
     def validate_production_secret(self):
         if self.app_env != "development" and self.secret_key == "change-me-in-production-please-use-a-long-random-string":
             raise ValueError("SECRET_KEY must be explicitly configured outside development")
+        return self
+
+    @model_validator(mode="after")
+    def validate_ai_provider_credentials(self):
+        """DEEPSEEK_API_KEY 一旦显式配置就不得为空：启动时即报错，避免运行期
+        选择 deepseek provider 时才暴露无效凭据。未配置（None）时保留开发环境
+        mock 路径；非开发环境的 mock 适配器已在适配器解析处拒绝。"""
+        if (
+            self.deepseek_api_key is not None
+            and not self.deepseek_api_key.get_secret_value().strip()
+        ):
+            raise ValueError(
+                "DEEPSEEK_API_KEY is configured but empty; provide a valid key "
+                "or remove the setting entirely"
+            )
         return self
 
 settings = Settings()

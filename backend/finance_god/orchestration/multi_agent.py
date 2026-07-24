@@ -15,6 +15,8 @@ from research_runtime import (
 from research_runtime.config import FmpSettings, Settings
 from research_runtime.llm import OpenAICompatibleChat
 
+from .market_data_provider import FinanceGodMarketDataProvider
+
 _PROJECT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
@@ -29,20 +31,19 @@ class MultiAgentRuntime:
         cls,
         *,
         max_concurrency: int = 4,
-        enable_panda_data: bool = False,
-        enable_finrobot_metrics: bool = False,
+        enable_panda_data: bool = True,
+        enable_finrobot_metrics: bool = True,
     ) -> MultiAgentRuntime:
-        """Build a runtime with explicitly enabled environment-backed adapters."""
-        if enable_panda_data:
-            raise ValueError(
-                "the vendor PandaDataProvider path was removed; inject only the "
-                "Finance-God normalized market-data boundary"
-            )
+        """Build a fully configured runtime with Finance-God owned adapters."""
         load_dotenv(_PROJECT_ENV_FILE, override=False)
         settings = Settings.from_environment()
         runner = AgentRunner(
             chat_client=OpenAICompatibleChat(settings),
-            data_provider=None,
+            data_provider=(
+                FinanceGodMarketDataProvider.from_environment()
+                if enable_panda_data
+                else None
+            ),
             fmp_settings=(
                 FmpSettings.from_environment() if enable_finrobot_metrics else None
             ),

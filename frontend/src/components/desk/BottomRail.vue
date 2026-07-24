@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * BottomRail — 底栏：趋势、波动率、事件、观察标的
+ * BottomRail — 底栏：趋势、波动率、市场宽度、数据状态、观察标的
+ * 所有指标从真实行情数据派生，无 mock
  */
 import { useMarketStore } from '@/stores/market'
 import { directionOf, formatPercent, formatNumber } from '@/types/desk'
@@ -10,29 +11,71 @@ const market = useMarketStore()
 
 /** 取前 4 只作为观察标的 */
 const leaders = computed(() => market.quotes.slice(0, 4))
+
+/** 趋势显示文本 */
+const trendText = computed(() => {
+  const t = market.marketTrend
+  return t === 'up' ? '偏多' : t === 'down' ? '偏空' : '中性'
+})
+
+/** 波动率显示文本（保留两位小数） */
+const volatilityText = computed(() => {
+  if (market.quotes.length === 0) return '—'
+  return market.marketVolatility.toFixed(2) + '%'
+})
+
+/** 市场宽度显示文本 */
+const breadthText = computed(() => {
+  if (market.quotes.length === 0) return '—'
+  const ad = market.advanceDecline
+  return `${ad.advancing}/${ad.declining}`
+})
+
+/** 从 K 线生成 sparkline polyline 点 */
+function sparklinePoints(values: number[], w = 100, h = 40): string {
+  if (values.length < 2) return ''
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const step = w / (values.length - 1)
+  return values.map((v, i) => {
+    const x = i * step
+    const y = h - ((v - min) / range) * (h - 4) - 2
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+
+/** K 线收盘价 sparkline */
+const trendSpark = computed(() => sparklinePoints(market.bars.map(b => b.close)))
+/** K 线振幅 sparkline */
+const volSpark = computed(() => sparklinePoints(market.bars.map(b => b.high - b.low)))
+/** K 线成交量 sparkline */
+const breadthSpark = computed(() => sparklinePoints(market.bars.map(b => b.volume)))
 </script>
 
 <template>
   <section class="bottom-rail" aria-label="市场状态与事件">
     <div class="metric-panel">
       <span class="metric-kicker">趋势</span>
-      <strong>—</strong>
-      <svg class="spark-line" viewBox="0 0 100 40" preserveAspectRatio="none">
-        <polyline points="0,30 20,25 40,28 60,15 80,20 100,10" fill="none" stroke="var(--ink)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+      <strong :class="{ up: market.marketTrend === 'up', down: market.marketTrend === 'down' }">
+        {{ market.quotes.length > 0 ? trendText : '—' }}
+      </strong>
+      <svg v-if="trendSpark" class="spark-line" viewBox="0 0 100 40" preserveAspectRatio="none">
+        <polyline :points="trendSpark" fill="none" stroke="var(--ink)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
       </svg>
     </div>
     <div class="metric-panel">
       <span class="metric-kicker">波动率</span>
-      <strong>—</strong>
-      <svg class="spark-line" viewBox="0 0 100 40" preserveAspectRatio="none">
-        <polyline points="0,20 20,15 40,25 60,10 80,30 100,18" fill="none" stroke="var(--ink)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+      <strong>{{ volatilityText }}</strong>
+      <svg v-if="volSpark" class="spark-line" viewBox="0 0 100 40" preserveAspectRatio="none">
+        <polyline :points="volSpark" fill="none" stroke="var(--ink)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
       </svg>
     </div>
     <div class="metric-panel">
       <span class="metric-kicker">市场宽度</span>
-      <strong>—</strong>
-      <svg class="spark-line" viewBox="0 0 100 40" preserveAspectRatio="none">
-        <polyline points="0,10 20,20 40,15 60,30 80,25 100,35" fill="none" stroke="var(--risk)" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+      <strong>{{ breadthText }}</strong>
+      <svg v-if="breadthSpark" class="spark-line" viewBox="0 0 100 40" preserveAspectRatio="none">
+        <polyline :points="breadthSpark" fill="none" :stroke="market.marketBreadth >= 0.5 ? 'var(--positive)' : 'var(--risk)'" stroke-width="1.5" vector-effect="non-scaling-stroke" />
       </svg>
     </div>
     <div class="event-panel">

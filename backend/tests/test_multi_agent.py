@@ -3,11 +3,47 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from finance_god.orchestration import MultiAgentRuntime, Orchestrator
 from research_runtime import AgentRequest, AgentRunner
-from research_runtime.models import EvidenceRecord
+from research_runtime.models import DataArtifact, DataQuery, EvidenceRecord, PandaDataDataset
+
+
+class MonitorDataProvider:
+    def fetch(self, query: DataQuery) -> DataArtifact:
+        records_by_dataset = {
+            PandaDataDataset.MARKET_BARS: [
+                {"date": "20260722", "close": 100.0},
+                {"date": "20260723", "close": 102.0},
+            ],
+            PandaDataDataset.MARGIN: [
+                {"date": "20260722", "total_balance": 100.0, "short_balance": 10.0},
+                {"date": "20260723", "total_balance": 110.0, "short_balance": 12.0},
+            ],
+            PandaDataDataset.LHB_LIST: [
+                {"date": "20260723", "amount": 10.0, "change_rate": 2.0},
+            ],
+            PandaDataDataset.FUTURE_DOMINANT_CORR: [
+                {"pair": "RB:JM", "correlation": 0.4},
+            ],
+            PandaDataDataset.OPTION_IMPLIED_VOLATILITY: [
+                {"date": "20260723", "implied_volatility": 25.0},
+            ],
+            PandaDataDataset.OPTION_UNDERLYING_VOLATILITY: [
+                {"date": "20260723", "historical_volatility": 0.2},
+            ],
+        }
+        records = records_by_dataset[query.dataset]
+        return DataArtifact(
+            provider="test",
+            query=query,
+            retrieved_at=datetime.now(timezone.utc),
+            row_count=len(records),
+            columns=sorted({key for record in records for key in record}),
+            records=records,
+        )
 
 
 class JsonChatClient:
@@ -30,12 +66,27 @@ class JsonChatClient:
 
 
 class MultiAgentIntegrationTest(unittest.IsolatedAsyncioTestCase):
-    def test_vendor_pandadata_second_source_is_explicitly_rejected(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError,
-            "vendor PandaDataProvider path was removed",
+    def test_environment_factory_injects_finance_god_market_data_provider(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "ARK_API_KEY": "test-key",
+                    "ARK_BASE_URL": "https://api.openai.com/v1",
+                    "ARK_MODEL": "test-model",
+                    "FMP_API_KEY": "test-key",
+                },
+                clear=True,
+            ),
+            patch(
+                "finance_god.orchestration.multi_agent.FinanceGodMarketDataProvider.from_environment",
+                return_value=MonitorDataProvider(),
+            ) as provider_factory,
         ):
-            MultiAgentRuntime.from_environment(enable_panda_data=True)
+            runtime = MultiAgentRuntime.from_environment(enable_panda_data=True)
+
+        self.assertEqual(len(runtime.list_agents()), 43)
+        provider_factory.assert_called_once_with()
 
     def test_runtime_exposes_the_complete_agent_catalog(self) -> None:
         runtime = MultiAgentRuntime(AgentRunner())
@@ -50,17 +101,87 @@ class MultiAgentIntegrationTest(unittest.IsolatedAsyncioTestCase):
                     "ARK_API_KEY": "test-key",
                     "ARK_BASE_URL": "https://api.openai.com/v1",
                     "ARK_MODEL": "test-model",
+                    "FMP_API_KEY": "test-key",
                 },
                 clear=True,
             ),
             patch(
                 "finance_god.orchestration.multi_agent.load_dotenv"
             ) as load_project_env,
+            patch(
+                "finance_god.orchestration.multi_agent.FinanceGodMarketDataProvider.from_environment",
+                return_value=MonitorDataProvider(),
+            ),
         ):
             runtime = MultiAgentRuntime.from_environment()
 
         self.assertEqual(len(runtime.list_agents()), 43)
         self.assertEqual(load_project_env.call_args.args[0].name, ".env")
+
+    async def test_all_monitor_agents_execute_when_product_data_boundary_is_injected(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "quantskills:agent-correlation-break-research",
+                {"future_dominant_corr"},
+                {
+                    "kind": "correlation_break",
+                    "subject": "Correlation",
+                    "future_symbols": ["RB", "JM"],
+                    "start_date": "20260722",
+                    "end_date": "20260723",
+                },
+            ),
+            (
+                "quantskills:agent-crowding-risk-monitor",
+                {"margin", "lhb_list"},
+                {
+                    "kind": "crowding_risk",
+                    "subject": "Crowding",
+                    "symbol": "000001.SZ",
+                    "start_date": "20260722",
+                    "end_date": "20260723",
+                },
+            ),
+            (
+                "quantskills:agent-derivatives-skew-sentiment-monitor",
+                {"option_implied_volatility", "option_underlying_volatility"},
+                {
+                    "kind": "derivatives_iv_premium",
+                    "subject": "Volatility",
+                    "option_underlying": "510300.SH",
+                    "start_date": "20260722",
+                    "end_date": "20260723",
+                },
+            ),
+            (
+                "quantskills:agent-market-regime-monitor",
+                {"market_bars", "margin", "lhb_list", "option_underlying_volatility"},
+                {
+                    "kind": "market_regime",
+                    "subject": "Regime",
+                    "symbol": "000001.SZ",
+                    "option_underlying": "510300.SH",
+                    "start_date": "20260722",
+                    "end_date": "20260723",
+                },
+            ),
+        )
+        runtime = MultiAgentRuntime(AgentRunner(data_provider=MonitorDataProvider()))
+
+        for agent_id, resources, payload in cases:
+            result = await runtime.run(
+                AgentRequest(
+                    run_id=f"monitor-{payload['kind']}",
+                    subject=str(payload["subject"]),
+                    task_type="research",
+                    available_resources=resources,
+                    requested_agent_ids=[agent_id],
+                    payload=payload,
+                )
+            )
+            self.assertEqual(result.results[0].agent_id, agent_id)
 
     async def test_orchestrator_executes_unified_agents_in_requested_order(
         self,

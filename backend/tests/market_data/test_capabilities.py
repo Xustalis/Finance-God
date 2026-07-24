@@ -18,7 +18,10 @@ from finance_god.market_data import (
     capability_catalog_summary,
     request_shape,
 )
-from finance_god.market_data.capabilities import endpoint_manifest_hash
+from finance_god.market_data.capabilities import (
+    CAPABILITY_RESOURCE_DIR,
+    endpoint_manifest_hash,
+)
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 from pydantic import ValidationError
 
@@ -46,11 +49,11 @@ def test_catalog_has_exact_audited_status_counts_and_reasons() -> None:
     }
 
     assert len(HARD_DISABLED) == 22
-    assert len(VERIFIED_SCOPES) == 27
+    assert len(VERIFIED_SCOPES) == 30
     assert len(NOT_DATA) == 2
     assert statuses == {
-        "verified_once_research": 27,
-        "disabled": 184,
+        "verified_once_research": 30,
+        "disabled": 181,
         "not_data": 2,
     }
     assert all(
@@ -76,17 +79,17 @@ def test_catalog_separates_exact_production_availability_from_trade_and_stabilit
     records = CATALOG.all()
     summary = capability_catalog_summary(records)
 
-    assert len(PRODUCTION_AVAILABLE_ENDPOINTS) == 26
+    assert len(PRODUCTION_AVAILABLE_ENDPOINTS) == 29
     assert {
         record.endpoint
         for record in records
         if record.availability == "production_available"
     } == set(PRODUCTION_AVAILABLE_ENDPOINTS)
     assert summary["availability"] == {
-        "production_available": 26,
+        "production_available": 29,
         "verified_research_only": 1,
         "disabled": 22,
-        "not_verified": 162,
+        "not_verified": 159,
         "not_data": 2,
     }
     assert summary["trade_eligible"] == 0
@@ -196,11 +199,11 @@ def test_verified_endpoint_allows_only_exact_probe_scope() -> None:
 
 
 def test_redacted_capability_artifacts_match_runtime_catalog() -> None:
-    project_root = Path(__file__).resolve().parents[3]
-    artifact_root = project_root / "artifacts" / "pandadata-capabilities"
-    manifest = json.loads((artifact_root / "endpoint-manifest-v1.json").read_text())
+    manifest = json.loads(
+        (CAPABILITY_RESOURCE_DIR / "endpoint-manifest-v1.json").read_text()
+    )
     verification = json.loads(
-        (artifact_root / "verification-summary-v1.json").read_text()
+        (CAPABILITY_RESOURCE_DIR / "verification-summary-v1.json").read_text()
     )
     rendered = json.dumps(
         {"manifest": manifest, "verification": verification},
@@ -228,12 +231,12 @@ def test_redacted_capability_artifacts_match_runtime_catalog() -> None:
         == list(CATALOG.get(item["endpoint"]).allowed_request_shape_hashes)
         for item in manifest["endpoints"]
     )
-    assert manifest["production_available_endpoint_count"] == 26
+    assert manifest["production_available_endpoint_count"] == 29
     assert set(manifest["production_available_endpoints"]) == set(
         PRODUCTION_AVAILABLE_ENDPOINTS
     )
-    assert verification["probe_endpoint_count"] == 27
-    assert verification["production_available_endpoint_count"] == 26
+    assert verification["probe_endpoint_count"] == 30
+    assert verification["production_available_endpoint_count"] == 29
     assert set(verification["production_available_endpoints"]) == set(
         PRODUCTION_AVAILABLE_ENDPOINTS
     )

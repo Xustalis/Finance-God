@@ -45,6 +45,16 @@ where = ["src"]
 [tool.setuptools.package-data]
 research_runtime = ["py.typed"]
 
+[tool.setuptools.data-files]
+"agent_framework/catalog" = ["catalog/agents.json", "catalog/skills.json"]
+"agent_framework/references/projects/finrobot" = [
+    "../references/projects/finrobot/LICENSE",
+    "../references/projects/finrobot/NOTICE",
+]
+"agent_framework/references/projects/finrobot/finrobot_equity/core/src/modules" = [
+    "../references/projects/finrobot/finrobot_equity/core/src/modules/financial_data_processor.py",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

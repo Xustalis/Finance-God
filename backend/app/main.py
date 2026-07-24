@@ -52,6 +52,10 @@ from app.api.v1.router import api_router  # noqa: E402
 
 app.include_router(api_router, prefix="/api/v1")
 app.mount("/api/finance", finance_app)
+# 双路径族兼容：前端以 baseURL='/api' 直接调用 /api/market/*、/api/simulation/*、
+# /api/workspace/* 等端点。/api 挂载必须放在 /api/finance 之后（避免吞掉该前缀），
+# 且 /api/v1 路由已先通过 include_router 注册，仍会优先匹配。
+app.mount("/api", finance_app)
 
 
 @app.get("/")

@@ -19,6 +19,7 @@ from .instruments import (
 
 CAPABILITY_CATALOG_VERSION = "pandadata-capabilities-v1"
 EXPECTED_SDK_VERSION = "0.0.12"
+CAPABILITY_RESOURCE_DIR = Path(__file__).with_name("resources")
 
 ALL_ENDPOINTS = tuple(  # noqa: C409 - generated audited endpoint manifest
     [
@@ -295,6 +296,9 @@ VERIFIED_SCOPES: dict[str, tuple[frozenset[str], ...]] = {
     "get_industry_constituents": (frozenset({"CN_EQUITY"}),),
     "get_macro_detail": (frozenset({"RESEARCH_ONLY", "BOUNDED_FIELDS"}),),
     "get_macro_tr": (frozenset({"RESEARCH_ONLY"}),),
+    "get_margin": (frozenset({"A_SHARE_MARGIN"}),),
+    "get_lhb_list": (frozenset({"CN_LHB_LIST"}),),
+    "get_future_dominant_corr": (frozenset({"FUTURE_DOMINANT_CORR"}),),
 }
 
 PRODUCTION_AVAILABLE_ENDPOINTS = frozenset(
@@ -323,6 +327,11 @@ PRODUCTION_AVAILABLE_ENDPOINTS = frozenset(
         "get_industry_constituents",
         "get_macro_detail",
         "get_macro_tr",
+        "get_margin",
+        "get_lhb_list",
+        "get_future_dominant_corr",
+        "get_option_implied_volatility",
+        "get_option_underlying_volatility",
         "get_last_trade_date",
         "get_trade_cal",
     }
@@ -644,6 +653,24 @@ _SHAPE_SPECS: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]] = {
         ("end_date", "fields", "start_date", "symbol"),
         ("bounded_date_range", "bounded_fields", "research_only"),
     ),
+    "get_margin": (
+        "derivative_research",
+        "1d",
+        ("end_date", "fields", "margin_type", "start_date", "symbol"),
+        ("bounded_date_range", "a_share_margin", "bounded_fields"),
+    ),
+    "get_lhb_list": (
+        "derivative_research",
+        "1d",
+        ("end_date", "fields", "start_date", "symbol", "type"),
+        ("bounded_date_range", "cn_lhb_list", "bounded_fields"),
+    ),
+    "get_future_dominant_corr": (
+        "derivative_research",
+        "1d",
+        ("end_date", "start_date", "symbol"),
+        ("bounded_date_range", "future_symbols"),
+    ),
 }
 
 
@@ -690,12 +717,7 @@ def _full_signature_hash(hashes: dict[str, str]) -> str:
 
 
 def _load_signature_manifest() -> tuple[dict[str, str], str]:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "artifacts"
-        / "pandadata-capabilities"
-        / "endpoint-manifest-v1.json"
-    )
+    path = CAPABILITY_RESOURCE_DIR / "endpoint-manifest-v1.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -845,7 +867,7 @@ class PandaDataCapabilityCatalog:
                 trade_eligible=False,
                 stability_confirmed=False,
                 evidence_ref=(
-                    "artifacts/pandadata-capabilities/verification-summary-v1.json"
+                    "finance_god/market_data/resources/verification-summary-v1.json"
                 ),
             )
         return CapabilityRecord(

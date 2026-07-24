@@ -121,10 +121,16 @@ def test_service_surfaces_dq_workflow_start_failure() -> None:
         raise AssertionError("DQ workflow failure must surface explicitly")
 
 
-def test_unknown_calendar_freshness_cannot_authorize_released_session() -> None:
+def test_official_calendar_response_authorizes_released_session() -> None:
     sdk = FakeSDK()
     sdk.responses["get_trade_cal"] = [
-        {"trade_date": "20260723", "is_trading_day": 1},
+        {
+            "nature_date": 20260723,
+            "is_trade": 1,
+            "exchange": "SH",
+            "pretrade_date": 20260722,
+            "next_trade_date": 20260724,
+        },
     ]
     sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     data_adapter = adapter(sdk)
@@ -141,12 +147,12 @@ def test_unknown_calendar_freshness_cannot_authorize_released_session() -> None:
     batch = asyncio.run(application.quotes(["000001.SZ"]))
     ready, reason = application.probe_readiness()
 
-    assert batch.quotes == ()
-    assert ready is False
-    assert reason == "MARKET_DATA_SCHEMA_INVALID"
+    assert batch.quotes
+    assert ready is True
+    assert reason == "ready"
     calls = [name for name, _ in sdk.calls]
     assert calls.count("get_trade_cal") == 2
-    assert calls.count("get_stock_rt_daily") == 0
+    assert calls.count("get_stock_rt_daily") == 1
 
 
 def test_readiness_fails_when_workflow_command_port_is_unconfigured() -> None:

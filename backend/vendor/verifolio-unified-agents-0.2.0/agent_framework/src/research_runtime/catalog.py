@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,17 @@ class CatalogError(RuntimeError):
 
 
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-_CATALOG_DIR = _WORKSPACE_ROOT / "agent_framework" / "catalog"
+_SOURCE_CATALOG_DIR = Path(__file__).resolve().parents[2] / "catalog"
+_INSTALLED_CATALOG_DIR = Path(sys.prefix) / "agent_framework" / "catalog"
+
+
+def _catalog_dir() -> Path:
+    for candidate in (_SOURCE_CATALOG_DIR, _INSTALLED_CATALOG_DIR):
+        if candidate.is_dir():
+            return candidate
+    raise CatalogError(
+        "agent catalog is missing; install the package with its catalog data files"
+    )
 
 
 def agents() -> list[dict[str, Any]]:
@@ -25,7 +36,7 @@ def agents() -> list[dict[str, Any]]:
 
 
 def skills() -> list[dict[str, Any]]:
-    path = _CATALOG_DIR / "skills.json"
+    path = _catalog_dir() / "skills.json"
     if not path.is_file():
         raise CatalogError(f"skill catalog is missing: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
@@ -33,17 +44,21 @@ def skills() -> list[dict[str, Any]]:
 
 def verify_catalog() -> dict[str, int]:
     missing = []
-    for definition in AGENT_DEFINITIONS:
-        for source_path in (definition.source_path, definition.upstream_path):
-            if not (_WORKSPACE_ROOT / source_path).exists():
-                missing.append(f"{definition.agent_id}:{source_path}")
-    for item in skills():
-        if item["source_path"] and not (_WORKSPACE_ROOT / item["source_path"]).is_file():
-            missing.append(f"{item['id']}:{item['source_path']}")
+    source_catalog = _SOURCE_CATALOG_DIR.is_dir()
+    if source_catalog:
+        for definition in AGENT_DEFINITIONS:
+            for source_path in (definition.source_path, definition.upstream_path):
+                if not (_WORKSPACE_ROOT / source_path).exists():
+                    missing.append(f"{definition.agent_id}:{source_path}")
+        for item in skills():
+            if item["source_path"] and not (
+                _WORKSPACE_ROOT / item["source_path"]
+            ).is_file():
+                missing.append(f"{item['id']}:{item['source_path']}")
     if missing:
         raise CatalogError(f"catalog references missing sources: {', '.join(missing)}")
 
-    generated_path = _CATALOG_DIR / "agents.json"
+    generated_path = _catalog_dir() / "agents.json"
     if not generated_path.is_file():
         raise CatalogError(f"generated agent catalog is missing: {generated_path}")
     generated = json.loads(generated_path.read_text(encoding="utf-8"))

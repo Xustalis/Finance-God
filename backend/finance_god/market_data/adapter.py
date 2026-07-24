@@ -34,6 +34,7 @@ from .contracts import (
     Freshness,
     InstrumentId,
     MarketType,
+    MonitorDataset,
     NormalizedBar,
     NormalizedCalendarDay,
     NormalizedFact,
@@ -47,6 +48,7 @@ from .errors import (
     ErrorKind,
     MarketDataConfigurationError,
     MarketDataError,
+    MarketDataResponseError,
     classify_upstream_error,
     redact_text,
 )
@@ -544,6 +546,66 @@ class PandaDataAdapter:
             )
         return DataEnvelope(tuple(items), (), EmptyMeaning.NOT_EMPTY)
 
+    def fetch_monitor_facts(
+        self,
+        *,
+        dataset: MonitorDataset,
+        symbols: tuple[str, ...],
+        start_date: str,
+        end_date: str,
+        volatility_period: int = 30,
+    ) -> DataEnvelope[NormalizedFact]:
+        """Fetch one verified monitor dataset as normalized research facts."""
+        start, end = _bounded_date_range(start_date, end_date)
+        endpoint, scopes, params, required_fields = _monitor_request(
+            dataset=dataset,
+            symbols=symbols,
+            start_date=start,
+            end_date=end,
+            volatility_period=volatility_period,
+        )
+        records = _monitor_records(
+            self._request(endpoint, scopes, **params), dataset=dataset
+        )
+        scope = f"agent-monitor:{dataset.value}"
+        if not records:
+            return self._unexpected_missing(scope, endpoint)
+        if any(not required_fields.issubset(record) for record in records):
+            return self._schema_drift(
+                scope, endpoint, "monitor response is missing required fields"
+            )
+        ingested_at = self._utc_now()
+        facts: list[NormalizedFact] = []
+        for record in records:
+            try:
+                data_time = _parse_fact_time(record.get("date", end))
+                source, freshness = self._reference_evidence(
+                    endpoint=endpoint,
+                    data_time=data_time,
+                    ingested_at=ingested_at,
+                    frequency=DataFrequency.DAILY,
+                    market=MarketType.CN,
+                    category=DataCategory.DERIVATIVE_RESEARCH,
+                    release_state=ReleaseState.UNKNOWN,
+                )
+                facts.append(
+                    NormalizedFact(
+                        category=DataCategory.DERIVATIVE_RESEARCH,
+                        scope=scope,
+                        source=source,
+                        freshness=freshness,
+                        fields=tuple(
+                            FactField(name=str(key), value=_safe_fact_value(value))
+                            for key, value in sorted(record.items())
+                        ),
+                    )
+                )
+            except (TypeError, ValueError):
+                return self._schema_drift(
+                    scope, endpoint, "monitor response contains an invalid fact value"
+                )
+        return DataEnvelope(tuple(facts), (), EmptyMeaning.NOT_EMPTY)
+
     def fetch_index_weights(
         self,
         index: InstrumentId,
@@ -590,6 +652,10 @@ class PandaDataAdapter:
     def catalog(self) -> tuple[dict[str, object], ...]:
         """Publish the audited catalog, never raw SDK introspection."""
         return tuple(record.model_dump(mode="json") for record in self._catalog.all())
+
+    @property
+    def instrument_master(self) -> InstrumentMaster:
+        return self._instrument_master
 
     def _request(self, endpoint: str, scopes: Iterable[str], **params: object) -> Any:
         if self._deadline_failed:
@@ -808,7 +874,7 @@ class PandaDataAdapter:
             capability_version=CAPABILITY_CATALOG_VERSION,
             verification="verified_once_research",
             evidence_ref=(
-                "artifacts/pandadata-capabilities/verification-summary-v1.json"
+                "finance_god/market_data/resources/verification-summary-v1.json"
             ),
         )
         freshness = self._freshness_policy.evaluate(
@@ -909,6 +975,94 @@ def _bounded_instruments(
     if len(unique) > _MAX_SYMBOLS:
         raise ValueError(f"at most {_MAX_SYMBOLS} instruments are allowed")
     return tuple(unique[symbol] for symbol in sorted(unique))
+
+
+def _monitor_request(
+    *,
+    dataset: MonitorDataset,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    volatility_period: int,
+) -> tuple[str, frozenset[str], dict[str, object], frozenset[str]]:
+    if dataset is MonitorDataset.MARGIN:
+        if len(symbols) != 1:
+            raise ValueError("margin monitor data requires exactly one symbol")
+        return (
+            "get_margin",
+            frozenset({"A_SHARE_MARGIN"}),
+            {
+                "symbol": symbols[0],
+                "start_date": start_date,
+                "end_date": end_date,
+                "margin_type": "stock",
+                "fields": ["symbol", "date", "total_balance", "short_balance"],
+            },
+            frozenset({"date", "total_balance", "short_balance"}),
+        )
+    if dataset is MonitorDataset.LHB_LIST:
+        return (
+            "get_lhb_list",
+            frozenset({"CN_LHB_LIST"}),
+            {
+                "symbol": "",
+                "type": "",
+                "start_date": start_date,
+                "end_date": end_date,
+                "fields": ["symbol", "date", "amount", "change_rate", "turnover"],
+            },
+            frozenset({"date", "amount", "change_rate"}),
+        )
+    if dataset is MonitorDataset.FUTURE_DOMINANT_CORR:
+        if len(symbols) < 2:
+            raise ValueError("future correlation monitor data requires two symbols")
+        return (
+            "get_future_dominant_corr",
+            frozenset({"FUTURE_DOMINANT_CORR"}),
+            {"symbol": list(symbols), "start_date": start_date, "end_date": end_date},
+            frozenset({"pair", "correlation"}),
+        )
+    if dataset is MonitorDataset.OPTION_IMPLIED_VOLATILITY:
+        return (
+            "get_option_implied_volatility",
+            frozenset({"RESEARCH_ONLY"}),
+            {
+                "symbol": list(symbols),
+                "start_date": start_date,
+                "end_date": end_date,
+                "fields": ["date", "symbol", "implied_volatility"],
+            },
+            frozenset({"date", "implied_volatility"}),
+        )
+    if len(symbols) != 1 or volatility_period not in {5, 10, 30, 60, 90, 120, 180, 250, 500}:
+        raise ValueError("option volatility monitor data has invalid symbol or period")
+    return (
+        "get_option_underlying_volatility",
+        frozenset({"RESEARCH_ONLY"}),
+        {
+            "symbol": symbols[0],
+            "start_date": start_date,
+            "end_date": end_date,
+            "exchange": "",
+            "period": volatility_period,
+            "fields": ["date", "symbol", "close", "historical_volatility", "period"],
+        },
+        frozenset({"date", "historical_volatility"}),
+    )
+
+
+def _monitor_records(frame: Any, *, dataset: MonitorDataset) -> list[dict[str, Any]]:
+    if dataset is not MonitorDataset.FUTURE_DOMINANT_CORR:
+        return records_from_frame(frame, endpoint=f"monitor:{dataset.value}")
+    if not isinstance(frame, Mapping):
+        raise MarketDataResponseError(
+            "future correlation monitor response must be a mapping",
+            endpoint="get_future_dominant_corr",
+        )
+    return [
+        {"pair": str(pair), "correlation": value}
+        for pair, value in sorted(frame.items())
+    ]
 
 
 def _master_endpoint(

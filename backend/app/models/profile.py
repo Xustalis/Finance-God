@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -47,6 +47,15 @@ class DirectionRecommendation(Base):
         ),
         UniqueConstraint(
             "profile_id", "rank", name="uq_direction_recommendations_rank"
+        ),
+        # 数据库级并发防护：每个画像至多一条被选中的方向（部分唯一索引，
+        # SQLite 与 PostgreSQL 均支持 WHERE selected 写法）
+        Index(
+            "uq_direction_recommendations_selected_one",
+            "profile_id",
+            unique=True,
+            sqlite_where=text("selected"),
+            postgresql_where=text("selected"),
         ),
     )
 

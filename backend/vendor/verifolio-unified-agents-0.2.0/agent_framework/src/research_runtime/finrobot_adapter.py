@@ -15,8 +15,20 @@ from typing import Literal
 from .config import FmpSettings
 
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-_DEFAULT_FINROBOT_ROOT = _WORKSPACE_ROOT / "references" / "projects" / "finrobot"
-_DEFAULT_OUTPUT_ROOT = _WORKSPACE_ROOT / "agent_framework" / "live-runs" / "finrobot"
+_SOURCE_FINROBOT_ROOT = _WORKSPACE_ROOT / "references" / "projects" / "finrobot"
+_INSTALLED_FINROBOT_ROOT = (
+    Path(sys.prefix) / "agent_framework" / "references" / "projects" / "finrobot"
+)
+_DEFAULT_FINROBOT_ROOT = (
+    _SOURCE_FINROBOT_ROOT
+    if _SOURCE_FINROBOT_ROOT.is_dir()
+    else _INSTALLED_FINROBOT_ROOT
+)
+_DEFAULT_OUTPUT_ROOT = (
+    _WORKSPACE_ROOT / "agent_framework" / "live-runs" / "finrobot"
+    if _SOURCE_FINROBOT_ROOT.is_dir()
+    else Path(sys.prefix) / "agent_framework" / "live-runs" / "finrobot"
+)
 _TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,15}$")
 
 

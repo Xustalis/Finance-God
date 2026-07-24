@@ -1,13 +1,16 @@
 <script setup lang="ts">
 /**
- * Masthead — 报头：品牌、栏目导航、状态、日期
+ * Masthead—报头：品牌、栏目导航、状态、日期、用户菜单
  */
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useMarketStore } from '@/stores/market'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
+const router = useRouter()
 const market = useMarketStore()
+const auth = useAuthStore()
 
 const NAV_ITEMS = [
   { label: '总览', path: '/overview' },
@@ -43,6 +46,35 @@ const healthClass = computed(() => {
 function isActive(path: string) {
   return route.path.startsWith(path)
 }
+
+/* 用户菜单 */
+const showUserMenu = ref(false)
+const menuRef = ref<HTMLElement | null>(null)
+
+function toggleMenu() {
+  showUserMenu.value = !showUserMenu.value
+}
+
+function closeMenu(e: MouseEvent) {
+  if (menuRef.value && !menuRef.value.contains(e.target as Node)) {
+    showUserMenu.value = false
+  }
+}
+
+function logout() {
+  showUserMenu.value = false
+  auth.logout()
+  router.replace('/login')
+}
+
+const displayName = computed(() => auth.user?.display_name || auth.user?.email || '用户')
+
+onMounted(() => {
+  document.addEventListener('click', closeMenu, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeMenu, true)
+})
 </script>
 
 <template>
@@ -72,6 +104,21 @@ function isActive(path: string) {
       <div class="status-indicator" :class="healthClass" :title="`后端状态: ${healthStatus}`">
         <span class="status-dot" />
         <span class="status-text">{{ healthStatus }}</span>
+      </div>
+      <!-- 用户菜单 -->
+      <div ref="menuRef" class="user-menu">
+        <button class="user-trigger" :aria-expanded="showUserMenu" aria-label="用户菜单" @click.stop="toggleMenu">
+          <span class="user-avatar">{{ displayName.charAt(0).toUpperCase() }}</span>
+          <span class="user-label">{{ displayName }}</span>
+        </button>
+        <div v-if="showUserMenu" class="user-dropdown" role="menu">
+          <router-link to="/settings" class="dropdown-item" role="menuitem" @click="showUserMenu = false">
+            设置
+          </router-link>
+          <button class="dropdown-item" role="menuitem" @click="logout">
+            退出登录
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -194,4 +241,72 @@ function isActive(path: string) {
 .status-down .status-dot { background: var(--risk); }
 .status-down .status-text { color: var(--risk); }
 .status-pending .status-text { color: var(--muted-ink); }
+
+.user-menu {
+  position: relative;
+}
+.user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s;
+}
+.user-trigger:hover {
+  border-color: var(--ink);
+}
+.user-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: var(--ink);
+  color: var(--paper-light);
+  font-family: var(--font-numeric);
+  font-size: 13px;
+  font-weight: 700;
+}
+.user-label {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 160px;
+  background: var(--paper-light);
+  border: 1px solid var(--rule);
+  box-shadow: var(--shadow);
+  z-index: 100;
+  display: grid;
+}
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.dropdown-item:hover {
+  background: var(--faint-rule);
+}
+.dropdown-item + .dropdown-item {
+  border-top: 1px solid var(--faint-rule);
+}
 </style>

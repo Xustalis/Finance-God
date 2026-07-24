@@ -1,0 +1,1030 @@
+{
+  "artifact_version": "pandadata-verification-summary-v1",
+  "sdk_version": "0.0.12",
+  "probe_policy": "one real probe; all probe results remain research/display-only and non-trade-eligible; runtime authorization requires the exact typed request-shape hash",
+  "probe_endpoint_count": 30,
+  "probe_date": "2026-07-23",
+  "contains_credentials": false,
+  "contains_full_urls": false,
+  "contains_raw_market_rows": false,
+  "instrument_master_identity": "finance-god-instrument-master",
+  "instrument_master_version": "b609d40ff1f060c163150ea4790bc4e95da928187ac6adeea399e18daf530644",
+  "limitations": [
+    "The prior probe retained success classification but not exact row counts, field names, or time-of-day; missing evidence is never reconstructed.",
+    "VERIFIED_ONCE_RESEARCH is not a production stability guarantee and cannot be extrapolated to other symbols, frequencies, sessions, categories, or parameter shapes.",
+    "Exactly 26 endpoints are production-available in the capability catalog; all 27 probe results remain non-trade-eligible and stability-unconfirmed, and research/future/option categories never gain execution permission from availability."
+  ],
+  "verified": [
+    {
+      "endpoint": "get_factor",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "5bd14a70ae2adb84b7c1a47c3594d13462c1941bdc753fa2439376887ab8e4d6"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "factor",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fina_reports",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "d348b1588ce52a1a702a8da953a8c2e1dc943fecea09d115ec8fdf5852779f4d"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "financial",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_daily",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "bf14427bc2d0b65fde95d61635faefd2e9a36de49754ec184d9e06f87863b6df"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_detail",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "929bc6224710e561bd935553e51fab48abe848136a36917f4b88dfbf156b55d8"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_dominant",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "182e2a570f1453650b1a7a9a7f13c5c419af85b12ca1b49cfaf590e1c6e7481c"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_dominant_corr",
+      "verified_scope_sets": [
+        [
+          "FUTURE_DOMINANT_CORR"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "a8bb688dee40f914255ed7011d4b76b4494c67261a75ac8a013870be0f28728c"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hk_daily",
+      "verified_scope_sets": [
+        [
+          "HK_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "4f0a90831f94f6cd79bf47c263e60ea3167bfe9d8ba51fb959862031dabb5ea0"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hk_detail",
+      "verified_scope_sets": [
+        [
+          "HK_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "1397685412232a06f0bf8921f646b8676efaa2eb0b65fb78393e12bb56de674a"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "master",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_daily",
+      "verified_scope_sets": [
+        [
+          "CN_INDEX"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "ef0589539f781c681c5ad2e8ce2d7409c73a360e462c6fd8e3a67dd2ac0ad376"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_detail",
+      "verified_scope_sets": [
+        [
+          "CN_INDEX"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "905af7daafc3b0bb73e171af0c99b964f317e45cb98d80904fbcb0b8e68b1795"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "master",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_weights",
+      "verified_scope_sets": [
+        [
+          "CN_INDEX"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "d582ceca5d5c7361c9c4abef613ec59b92b084b82cf3aa3f3fe6290cef0b9acc"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "index_weight",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_industry_constituents",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "c3801929198f982794c48f457d6abac7679ec44f0dba50744c5471b15a2deec1"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "industry",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_industry_detail",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "9301463c0895e009af9a09e37cfc7b682ebfdc4047209ac69e202faa780a46f5"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "industry",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_last_trade_date",
+      "verified_scope_sets": [
+        [
+          "SH"
+        ],
+        [
+          "HK"
+        ],
+        [
+          "US"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "499b7cc635b11418aa69ff0f20a9b5a2525061ca083458a9bfef23f1d7607125",
+        "66be162242a5e32fb78d8b654db566534554478632e73d26533659e57100bf24",
+        "b774c56e268ff75d3dfa9f8400ce17aa9a4a2241da0e77c6d981cab435f74e00"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "calendar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_lhb_list",
+      "verified_scope_sets": [
+        [
+          "CN_LHB_LIST"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "ef3874e62682a5fdb7f1669e31bfb556e6e55f283a3de9d0f9d4063a890eeae3"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_detail",
+      "verified_scope_sets": [
+        [
+          "BOUNDED_FIELDS",
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "ff91d92f0b31d894f61c51458eba91084d13bb408a58eda6c892532916916fc8"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "macro",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_tr",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "0c3c5c38f79786caf29c24d4b9adf39ca2bfcf1a2bc486cc751111f31497f702"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "macro",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_margin",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_MARGIN"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "a46d46febea68ef6faf4f961f5e79819640043ea1721812121fd552365dd383a"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_detail",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "e2de40958953fccf6f8e5affa5e3f463adbf6e65794515af48805d7837d82e49"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_implied_volatility",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "193258d1e22a6b429261e25e133a41f62265b4f1928853d403e397c05a0b6c1a"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_underlying_detail",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "39aa591b868045dce747a6dbfbf05aa08f50c74ca066037dc3d8d56c06ce5969"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_underlying_volatility",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "efcba9cee8448f98c985b970b4048fd461d9f3ce47837eb061ffe4086c39a11f"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_daily",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "cb9acdbba464cc10ebe13d5e4920ae454b13a54117e421e238c4402a217b1269"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_detail",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK_ONLY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "317fd175d1af821f09d96d9b7a1d5d0dea05d289aad36d8ed900a85d65c64830"
+      ],
+      "trade_eligible": false,
+      "availability": "verified_research_only",
+      "category": "master",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_min",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK",
+          "frequency=1m"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "3d23b18e926842d4d21100bc9efe810cb77e06c87832cfdc1d5ace9201b4c65f"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_rt_daily",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "9309a83a0f18c53938d57953c83b442c20f2a083efc44b0cf0c71e08d80f47ee"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "snapshot",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_rt_min",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK",
+          "frequency=1m"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "7922bee065715aaeaaedd0a0b83e5e633798db7ae6a333b3dcc866408a047dc0"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_trade_cal",
+      "verified_scope_sets": [
+        [
+          "SH"
+        ],
+        [
+          "HK"
+        ],
+        [
+          "US"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "bd0f1e62e108d49deab45da96ce2ce02fbc0c56d7c415b292e2b0342b60984a2",
+        "077a87316a2755312c1002e46353dda9f6acec131e7edf307d4f1b5bd119b2ca",
+        "8884d56ca0baa35883803544387ac25c5e56f29cb1fb9e0aaf78544a87376cf5"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "calendar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_us_daily",
+      "verified_scope_sets": [
+        [
+          "CLOSED_SESSION_ONLY",
+          "US_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "4ae25d4e91a1760cbb358c223cbe85bb3ea2a81463eb4ce52069f8a5e400b0b9"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_us_detail",
+      "verified_scope_sets": [
+        [
+          "US_EQUITY"
+        ]
+      ],
+      "result": "verified_once_research",
+      "rows": {
+        "classification": "non_empty_at_probe",
+        "exact_count_retained": false
+      },
+      "schema": {
+        "classification": "accepted_at_probe",
+        "field_names_retained": false
+      },
+      "probe_time": {
+        "value": "2026-07-24",
+        "precision": "day",
+        "exact_time_retained": false
+      },
+      "sdk_version": "0.0.12",
+      "request_shape_sha256s": [
+        "c661b0501dd12bfec2838249284d6bbc01b43e247db15d24f9af6001b8ffd407"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "master",
+      "stability_confirmed": false
+    }
+  ],
+  "negative_probes": [
+    {
+      "instrument": "510300.SH",
+      "asset_class": "ETF",
+      "attempted_scope": "stock endpoints",
+      "result": "0_rows",
+      "production_result": "capability_disabled"
+    },
+    {
+      "instrument": "161725.SZ",
+      "asset_class": "LOF",
+      "attempted_scope": "stock endpoints",
+      "result": "0_rows",
+      "production_result": "capability_disabled"
+    },
+    {
+      "instrument": "000001.OF",
+      "asset_class": "off_market_fund",
+      "attempted_scope": "stock endpoints",
+      "result": "provider_suffix_rejected",
+      "production_result": "capability_disabled"
+    },
+    {
+      "instrument": "AAPL.US",
+      "date": "20260723",
+      "result": "0_rows",
+      "previous_date": "20260722",
+      "previous_date_result": "non_empty",
+      "production_rule": "no_previous_day_fallback"
+    }
+  ],
+  "disabled_warning_endpoints": [
+    "get_factor_hk",
+    "get_fund_daily",
+    "get_fund_daily_post",
+    "get_fund_daily_pre",
+    "get_fund_detail",
+    "get_fund_etf_constituents",
+    "get_fund_etf_cr",
+    "get_fund_etf_cr_limits",
+    "get_fund_etf_cr_net",
+    "get_index_component",
+    "get_index_constituent",
+    "get_market_data",
+    "get_market_min_data",
+    "get_option_daily",
+    "get_option_exercise",
+    "get_option_risk_indicators",
+    "get_option_spot_market",
+    "get_option_static",
+    "get_stock_competitor_information",
+    "get_stock_intermediary_information",
+    "get_stock_rela_party_trans",
+    "get_stock_status_over_allotment"
+  ],
+  "capability_status": "verified_once_research",
+  "trade_eligible": false,
+  "catalog_availability_policy": "production availability is independent from trade eligibility and stability confirmation; runtime category, freshness, release, quality, scope, request-shape, and authorization gates still apply",
+  "production_available_endpoint_count": 29,
+  "production_available_endpoints": [
+    "get_factor",
+    "get_fina_reports",
+    "get_future_daily",
+    "get_future_detail",
+    "get_future_dominant",
+    "get_future_dominant_corr",
+    "get_hk_daily",
+    "get_hk_detail",
+    "get_index_daily",
+    "get_index_detail",
+    "get_index_weights",
+    "get_industry_constituents",
+    "get_industry_detail",
+    "get_last_trade_date",
+    "get_lhb_list",
+    "get_macro_detail",
+    "get_macro_tr",
+    "get_margin",
+    "get_option_detail",
+    "get_option_implied_volatility",
+    "get_option_underlying_detail",
+    "get_option_underlying_volatility",
+    "get_stock_daily",
+    "get_stock_min",
+    "get_stock_rt_daily",
+    "get_stock_rt_min",
+    "get_trade_cal",
+    "get_us_daily",
+    "get_us_detail"
+  ],
+  "stability_confirmed": false
+}

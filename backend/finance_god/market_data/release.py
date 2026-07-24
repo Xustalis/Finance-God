@@ -150,22 +150,15 @@ class PandaCalendarPublishedState:
         evidence_ref = (
             f"PandaData:get_trade_cal:{instrument.market.value}:{trading_date}"
         )
-        if calendar_day.freshness.status is not FreshnessStatus.CURRENT:
+        if not _official_calendar_response_confirms_publication(calendar_day):
             return PublishedStateDecision(
                 state=ReleaseState.UNKNOWN,
                 trading_date=trading_date,
                 evidence_ref=evidence_ref,
                 reason=(
-                    "authoritative trading calendar freshness is "
-                    f"{calendar_day.freshness.status.value}"
+                    "authoritative trading calendar has no accepted publication "
+                    "evidence"
                 ),
-            )
-        if calendar_day.freshness.release_state is not ReleaseState.RELEASED:
-            return PublishedStateDecision(
-                state=ReleaseState.UNKNOWN,
-                trading_date=trading_date,
-                evidence_ref=evidence_ref,
-                reason="authoritative trading calendar release state is not released",
             )
         if not calendar_day.is_open:
             return PublishedStateDecision(
@@ -199,12 +192,9 @@ class PandaCalendarPublishedState:
     def probe(self, observed_at: datetime) -> None:
         trading_date = observed_at.astimezone(_MARKET_ZONES["CN"]).strftime("%Y%m%d")
         calendar_day = self._calendar_day(MarketType.CN, trading_date)
-        if (
-            calendar_day.freshness.status is not FreshnessStatus.CURRENT
-            or calendar_day.freshness.release_state is not ReleaseState.RELEASED
-        ):
+        if not _official_calendar_response_confirms_publication(calendar_day):
             raise MarketDataResponseError(
-                "authoritative trading calendar is not currently released",
+                "authoritative trading calendar has no accepted publication evidence",
                 endpoint="get_trade_cal",
             )
 
@@ -265,7 +255,28 @@ class PandaCalendarPublishedState:
                 "trading calendar freshness evidence conflicts with its source",
                 endpoint="get_trade_cal",
             )
+        # PandaData's official get_trade_cal SDK method returns the calendar
+        # fields (nature_date/is_trade) but no provider publication timestamp.
+        # A successful, identity-validated response is therefore the only
+        # truthful publication evidence for this static calendar dataset.
         return item
+
+
+def _official_calendar_response_confirms_publication(
+    calendar_day: NormalizedCalendarDay,
+) -> bool:
+    """Accept only the official SDK's documented no-publication-time shape."""
+    source = calendar_day.source
+    freshness = calendar_day.freshness
+    return (
+        source.provider_published_at is None
+        and freshness.provider_published_at is None
+        and freshness.status is FreshnessStatus.UNKNOWN
+        and freshness.release_state is ReleaseState.UNKNOWN
+    ) or (
+        freshness.status is FreshnessStatus.CURRENT
+        and freshness.release_state is ReleaseState.RELEASED
+    )
 
 
 def _today_release(

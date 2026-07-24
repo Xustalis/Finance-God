@@ -69,8 +69,9 @@ ARK_MODEL=
 - Finance-God 未注入 Multi-Agent Runtime 时，调用入口失败。
 
 Prompt Agent 的 `proposed_actions` 只是待审核建议，不代表文件、账户、仓库或交易状态已经
-改变。FMP 和 PandaData 适配器只在构建运行时传入 `enable_finrobot_metrics=True` 或
-`enable_panda_data=True` 后启用，且仍需满足请求级资源门禁。
+改变。运行时默认注入 Finance-God 自己的规范化 PandaData 边界及 FinRobot Metrics。
+`enable_panda_data=False` 或 `enable_finrobot_metrics=False` 仅用于受控测试；生产调用必须
+保留默认值，且仍需满足请求级资源门禁。Agent 不会使用供应商运行时自带的 PandaData Provider。
 
 ## 版本升级
 

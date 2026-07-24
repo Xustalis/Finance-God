@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,8 @@ from app.services.ai_orchestrator import (
 from app.config import settings
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONFIGS = {
@@ -173,9 +177,17 @@ async def test_ai_settings(
             model_name=body.model_name,
         )
     except (LookupError, AIProviderError) as exc:
+        # 不透传上游异常内容，原始异常仅记录服务端日志
+        logger.warning(
+            "AI connection test failed: capability=%s provider=%s model=%s",
+            body.capability.value,
+            body.provider,
+            body.model_name,
+            exc_info=exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc) or "Provider connection could not be verified without a configured adapter",
+            detail="AI 服务连接测试失败，请检查配置后重试",
         ) from exc
     return ApiResponse.ok(
         {

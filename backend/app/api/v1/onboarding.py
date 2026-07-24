@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,10 +19,11 @@ from app.models.ai_config import AIModelConfig, PromptVersion
 from app.models.profile import DirectionRecommendation, InvestmentProfile
 from app.models.user import User
 from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
-from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question
+from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question, user_facing_error_detail
 from app.services.profile_rules import assess_profile, rank_directions
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 MESSAGE_CLAIM_LEASE = timedelta(minutes=2)
 
 
@@ -414,6 +416,8 @@ async def add_message(
         ) from exc
     except AIProviderError as exc:
         await release_message_claim(db, session_id, user_message.id)
+        # 原始异常仅记录服务端日志，对外返回按错误码映射的固定中文文案
+        logger.warning("AI provider error on session %s: code=%s", session_id, exc.code, exc_info=exc)
         retryable = exc.code in {"DEEPSEEK_TIMEOUT", "DEEPSEEK_UNAVAILABLE", "DEEPSEEK_RATE_LIMITED"}
         raise HTTPException(
             status_code=(
@@ -421,7 +425,7 @@ async def add_message(
                 if retryable
                 else status.HTTP_502_BAD_GATEWAY
             ),
-            detail=str(exc),
+            detail=user_facing_error_detail(exc),
         ) from exc
     except Exception as exc:
         await release_message_claim(db, session_id, user_message.id)

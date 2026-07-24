@@ -19,8 +19,6 @@ function validStoredSession(tokenKey: string, userKey: string, role?: string) {
   } catch { return false }
 }
 
-const Placeholder = () => import('@/views/placeholder/PlaceholderView.vue')
-
 export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({ history, routes: [
     { path: '/', redirect: () => validStoredSession('finance-god-token', 'finance-god-user') ? '/app/exe' : '/login' },
@@ -33,30 +31,12 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     { path: '/desk', name: 'desk', component: () => import('@/views/DeskView.vue') },
 
     // ─── 占位路由 ───────────────────────────────
-    {
-      path: '/overview', name: 'overview', component: Placeholder,
-      meta: { pageLabel: '总览', pageKicker: 'OVERVIEW', pageDesc: '投资组合总览与关键指标一览，整合行情、持仓与风险概览。' },
-    },
-    {
-      path: '/portfolio', name: 'portfolio', component: Placeholder,
-      meta: { pageLabel: '组合', pageKicker: 'PORTFOLIO', pageDesc: '持仓管理、资产分配与收益归因分析。' },
-    },
-    {
-      path: '/orders', name: 'orders', component: Placeholder,
-      meta: { pageLabel: '订单', pageKicker: 'ORDERS', pageDesc: '订单管理、历史成交与执行记录。' },
-    },
-    {
-      path: '/reviews', name: 'reviews', component: Placeholder,
-      meta: { pageLabel: '复盘', pageKicker: 'REVIEWS', pageDesc: '交易复盘、策略回顾与绩效分析。' },
-    },
-    {
-      path: '/data', name: 'data', component: Placeholder,
-      meta: { pageLabel: '数据目录', pageKicker: 'DATA CATALOG', pageDesc: 'PandaData 数据集目录、质量摘要与可用性状态。' },
-    },
-    {
-      path: '/settings', name: 'settings', component: Placeholder,
-      meta: { pageLabel: '设置', pageKicker: 'SETTINGS', pageDesc: '工作区偏好、通知设置与账户管理。' },
-    },
+    { path: '/overview', name: 'overview', component: () => import('@/views/OverviewView.vue') },
+    { path: '/portfolio', name: 'portfolio', component: () => import('@/views/PortfolioView.vue') },
+    { path: '/orders', name: 'orders', component: () => import('@/views/OrdersView.vue') },
+    { path: '/reviews', name: 'reviews', component: () => import('@/views/ReviewsView.vue') },
+    { path: '/data', name: 'data', component: () => import('@/views/DataView.vue') },
+    { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
 
     // ─── 管理路由 ───────────────────────────────
     { path: '/admin/login', name: 'admin-login', component: () => import('@/views/AdminLoginView.vue') },

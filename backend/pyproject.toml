@@ -48,3 +48,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*", "finance_god*"]
+
+[tool.setuptools.package-data]
+"finance_god.market_data" = ["resources/*.json"]

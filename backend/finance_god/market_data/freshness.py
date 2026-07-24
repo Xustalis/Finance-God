@@ -94,6 +94,12 @@ class FreshnessPolicy:
                 DataCategory.FACTOR,
                 DataFrequency.DAILY,
             ): 129_600,
+            FreshnessPolicyKey(
+                "market_display",
+                MarketType.CN,
+                DataCategory.DERIVATIVE_RESEARCH,
+                DataFrequency.DAILY,
+            ): 129_600,
         }
         if thresholds is not None:
             self._thresholds = dict(thresholds)

@@ -108,7 +108,7 @@ def test_catalog_api_separates_availability_trade_and_stability_counts(
     payload = _payload(response)
 
     assert response.status_code == 200
-    assert payload["summary"]["availability"]["production_available"] == 26
+    assert payload["summary"]["availability"]["production_available"] == 29
     assert payload["summary"]["trade_eligible"] == 0
     assert payload["summary"]["stability_confirmed"] == 0
     assert payload["summary"]["by_category"]["bar"] == {

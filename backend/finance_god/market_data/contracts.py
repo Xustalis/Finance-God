@@ -39,6 +39,16 @@ class DataCategory(StrEnum):
     DERIVATIVE_RESEARCH = "derivative_research"
 
 
+class MonitorDataset(StrEnum):
+    """Read-only datasets admitted for deterministic agent monitors."""
+
+    MARGIN = "margin"
+    LHB_LIST = "lhb_list"
+    FUTURE_DOMINANT_CORR = "future_dominant_corr"
+    OPTION_IMPLIED_VOLATILITY = "option_implied_volatility"
+    OPTION_UNDERLYING_VOLATILITY = "option_underlying_volatility"
+
+
 class DataFrequency(StrEnum):
     SNAPSHOT = "snapshot"
     MINUTE_1 = "1m"

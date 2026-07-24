@@ -1,6 +1,10 @@
+import logging
+
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 
 class FinanceGodError(Exception):
@@ -66,9 +70,11 @@ def register_exception_handlers(app) -> None:
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):
+        # 不将异常原文透传给客户端，原始异常仅记录服务端日志
+        logger.warning("Unhandled ValueError on %s", request.url.path, exc_info=exc)
         return JSONResponse(
             status_code=400,
-            content=_error_body(request, "VALIDATION_ERROR", str(exc)),
+            content=_error_body(request, "VALIDATION_ERROR", "请求参数校验失败，请检查后重试"),
         )
 
     @app.exception_handler(Exception)

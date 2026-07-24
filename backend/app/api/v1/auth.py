@@ -37,9 +37,9 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     email: str
     password: str = Field(min_length=8, max_length=128)
-    display_name: str | None = None
-    base_currency: str = "CNY"
-    region: str = "CN"
+    display_name: str | None = Field(None, max_length=100)
+    base_currency: str = Field("CNY", pattern="^[A-Z]{3}$")
+    region: str = Field("CN", pattern="^[A-Z]{2}$")
 
     @field_validator("email")
     @classmethod

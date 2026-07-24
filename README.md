@@ -41,16 +41,16 @@ Start the services in separate terminals:
 
 ```bash
 cd backend
-.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 
 cd frontend
 npm run dev
 ```
 
 - Frontend: `http://localhost:5173`
-- API: `http://localhost:8000`
-- OpenAPI UI: `http://localhost:8000/docs`
-- OpenAPI JSON: `http://localhost:8000/openapi.json`
+- API: `http://localhost:8001`
+- OpenAPI UI: `http://localhost:8001/docs`
+- OpenAPI JSON: `http://localhost:8001/openapi.json`
 
 ## Existing Workspace Database
 
@@ -161,7 +161,7 @@ runtime uses the bundled research framework:
 cd backend
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 `FINANCE_GOD_DATABASE_URL` and `FINANCE_GOD_WORKSPACE_OWNER_ID` enable the

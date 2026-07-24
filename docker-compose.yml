@@ -37,6 +37,8 @@ services:
     build: ./frontend
     env_file:
       - .env
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
     ports:
       - "3000:3000"
     volumes:

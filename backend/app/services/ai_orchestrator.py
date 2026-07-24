@@ -239,6 +239,23 @@ class AIProviderError(RuntimeError):
         self.code = code
 
 
+# 抛给用户可见路径的固定中文文案（按错误码映射，不透传上游异常内容）
+AI_PROVIDER_ERROR_USER_MESSAGES = {
+    "DEEPSEEK_TIMEOUT": "AI 服务响应超时，请稍后重试",
+    "DEEPSEEK_UNAVAILABLE": "AI 服务暂时无法连接，请稍后重试",
+    "DEEPSEEK_RATE_LIMITED": "AI 服务请求过于频繁，请稍后重试",
+    "DEEPSEEK_AUTH_FAILED": "AI 服务凭据无效，请联系管理员检查配置",
+    "DEEPSEEK_UPSTREAM_ERROR": "AI 服务暂时不可用，请稍后重试",
+    "DEEPSEEK_REQUEST_REJECTED": "AI 服务拒绝了当前请求，请稍后重试",
+    "DEEPSEEK_INVALID_RESPONSE": "AI 服务返回了无法解析的结果，请稍后重试",
+}
+
+
+def user_facing_error_detail(error: AIProviderError) -> str:
+    """将 AIProviderError 映射为固定的用户可见中文文案。"""
+    return AI_PROVIDER_ERROR_USER_MESSAGES.get(error.code, "AI 服务处理失败，请稍后重试")
+
+
 class DeepSeekTurnPayload(BaseModel):
     # 真实模型输出存在漂移：宽松接收额外字段与枚举外维度，由适配器归一化
     model_config = ConfigDict(extra="ignore")
@@ -463,6 +480,9 @@ class AIAdapterRegistry:
         self.tts_adapters: dict[str, TextToSpeechAdapter] = {"browser": BrowserTextToSpeechAdapter()}
 
     def resolve_text(self, *, provider: str, model_name: str, system_prompt: str) -> AIOrchestrator:
+        if provider == "mock" and settings.app_env != "development":
+            # mock 适配器仅限开发环境，非开发环境一律拒绝
+            raise LookupError("Mock text provider is development-only")
         adapter = self.text_providers.get(provider)
         if adapter is None:
             raise LookupError("No configured text adapter for provider")

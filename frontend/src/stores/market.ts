@@ -57,6 +57,67 @@ export const useMarketStore = defineStore('market', () => {
 
   const provider = computed(() => health.value?.market_data ?? '—')
 
+  // ─── 派生指标（从真实行情数据计算） ───────────────
+
+  /** 市场趋势：多数标的涨跌方向 */
+  const marketTrend = computed<'up' | 'down' | 'neutral'>(() => {
+    const qs = quotes.value
+    if (qs.length === 0) return 'neutral'
+    const ups = qs.filter(q => (q.change ?? 0) > 0).length
+    const downs = qs.filter(q => (q.change ?? 0) < 0).length
+    if (ups > downs && ups >= qs.length / 2) return 'up'
+    if (downs > ups && downs >= qs.length / 2) return 'down'
+    return 'neutral'
+  })
+
+  /** 波动率：涨跌幅标准差（百分比） */
+  const marketVolatility = computed(() => {
+    const pcts = quotes.value.map(q => Math.abs(q.change_percent ?? 0) * 100)
+    if (pcts.length === 0) return 0
+    const mean = pcts.reduce((a, b) => a + b, 0) / pcts.length
+    const variance = pcts.reduce((a, b) => a + (b - mean) ** 2, 0) / pcts.length
+    return Math.sqrt(variance)
+  })
+
+  /** 市场宽度：上涨占比（0-1） */
+  const marketBreadth = computed(() => {
+    const qs = quotes.value
+    if (qs.length === 0) return 0
+    const advancing = qs.filter(q => (q.change ?? 0) > 0).length
+    return advancing / qs.length
+  })
+
+  /** 上涨/下跌/持平计数 */
+  const advanceDecline = computed(() => {
+    const qs = quotes.value
+    const advancing = qs.filter(q => (q.change ?? 0) > 0).length
+    const declining = qs.filter(q => (q.change ?? 0) < 0).length
+    const unchanged = qs.length - advancing - declining
+    return { advancing, declining, unchanged }
+  })
+
+  /** AI 简报：从行情数据派生的倾向与置信度 */
+  const aiSentiment = computed(() => {
+    const trend = marketTrend.value
+    const vol = marketVolatility.value
+    const breadth = marketBreadth.value
+
+    // 倾向
+    let tendency: string
+    if (trend === 'up' && breadth > 0.6) tendency = '积极'
+    else if (trend === 'down' && breadth < 0.4) tendency = '谨慎'
+    else tendency = '中性'
+
+    // 置信度：方向一致性越高 → 置信度越高
+    const consistency = Math.abs(breadth - 0.5) * 2  // 0-1
+    const confidence = Math.round(50 + consistency * 40 + (vol > 1 ? -5 : 5))
+
+    return {
+      tendency,
+      confidence: Math.max(40, Math.min(95, confidence)),
+    }
+  })
+
   // ─── 行情拉取 ───────────────────────────────────
 
   async function loadQuotes(symbols: string[] = DEFAULT_SYMBOLS) {
@@ -158,6 +219,11 @@ export const useMarketStore = defineStore('market', () => {
     // 计算
     quotesMap,
     provider,
+    marketTrend,
+    marketVolatility,
+    marketBreadth,
+    advanceDecline,
+    aiSentiment,
     // 方法
     loadQuotes,
     loadBars,

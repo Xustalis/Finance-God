@@ -132,3 +132,94 @@ export async function fetchWatchlists() {
     throw new Error(extractError(err))
   }
 }
+
+export async function createWatchlistGroup(name: string, description?: string) {
+  try {
+    const { data } = await desk.post('/workspace/watchlists', { name, description: description ?? null })
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+export async function addWatchlistInstrument(groupId: string, instrumentId: string) {
+  try {
+    const { data } = await desk.post(`/workspace/watchlists/${groupId}/instruments`, { instrument_id: instrumentId })
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+// ─── 通知 ──────────────────────────────────────────
+
+export async function fetchNotifications() {
+  try {
+    const { data } = await desk.get('/workspace/notifications')
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+export async function markNotificationRead(notificationId: string) {
+  try {
+    const { data } = await desk.post(`/workspace/notifications/${notificationId}/read`)
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+export async function fetchNotificationPreferences() {
+  try {
+    const { data } = await desk.get('/workspace/notification-preferences')
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+export async function updateNotificationPreferences(categoryPreferences: Record<string, boolean>) {
+  try {
+    const { data } = await desk.put('/workspace/notification-preferences', { category_preferences: categoryPreferences })
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+// ─── 仿真交易扩展 ──────────────────────────────────
+
+export async function cancelOrder(orderId: string) {
+  try {
+    const { data } = await desk.post(`/simulation/orders/${orderId}/cancel`, {}, {
+      headers: simHeaders(),
+    })
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+export async function fetchOrder(orderId: string) {
+  try {
+    const { data } = await desk.get(`/simulation/orders/${orderId}`, {
+      headers: simHeaders(),
+    })
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}
+
+export async function reconcileOrder(orderId: string) {
+  try {
+    const { data } = await desk.post(`/simulation/orders/${orderId}/reconcile`, {}, {
+      headers: simHeaders(),
+    })
+    return data
+  } catch (err) {
+    throw new Error(extractError(err))
+  }
+}

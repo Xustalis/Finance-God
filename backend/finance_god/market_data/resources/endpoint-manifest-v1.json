@@ -1,0 +1,3015 @@
+{
+  "artifact_version": "pandadata-manifest-v1",
+  "sdk_distribution": "panda_data",
+  "sdk_version": "0.0.12",
+  "public_get_method_count": 213,
+  "endpoint_name_manifest_sha256": "78fb02b012648ddbbc9400a35dd5c31edde27e44f3e83a8376ef862c1e08abfd",
+  "full_signature_manifest_sha256": "50ddbe5886882de770e1c966db5f7422676b92c9ff6a40d5b529a586b1e32eb0",
+  "generated_from_local_installed_sdk": true,
+  "contains_credentials": false,
+  "instrument_master_identity": "finance-god-instrument-master",
+  "instrument_master_version": "b609d40ff1f060c163150ea4790bc4e95da928187ac6adeea399e18daf530644",
+  "endpoints": [
+    {
+      "endpoint": "get_adj_factor",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_adj_factor_hk",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_audit_opinion",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_quarter: 'Optional[str]' = None, end_quarter: 'Optional[str]' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0e0d4c26fa6e6bbb8746c46d54fed35d7d25020f260180f704baf8f76a757ba2",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_block_trade",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_build_process",
+      "signature": "(start_date: 'str', end_date: 'str', broker: 'str', symbol: 'Optional[list[str]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "6c62eb9c4c165a79f7ba42d07cf60c174f840f88453ae86404584e374092b8f2",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_flow_daily",
+      "signature": "(start_date: 'str', end_date: 'str', broker: 'Optional[str]' = None, underlying_symbol: 'Optional[Union[str, List[str]]]' = None, underlying_symbol_cn: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "34f33efc104afc4c88064fc42b95614585120118d4b06eb281ae9ccaeadb3e26",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_grade",
+      "signature": "(grade: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "4f5b5f84d91e21ff221b5f3ff7a7ba8aa80341f7c01808ddf6a1893975c77d81",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_loss_rank",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7609beb3bec5199c4b764d60ccdf7abc16101cd67c26b1490a433f4033a7deb1",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_ls_ratio",
+      "signature": "(start_date: 'str', end_date: 'str', broker: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "5f14273a801ac1cff72a337ebc4a801fe4a020fcaa9081d1f2d35dd0bb81baf5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_netmarg",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, broker: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "26c5be1735a3f09f2e109fbcc225e0e5c785cfbf7e9e9419605591ca4b81cc7e",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_netmarg_change",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, broker: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "26c5be1735a3f09f2e109fbcc225e0e5c785cfbf7e9e9419605591ca4b81cc7e",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_oi_value",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, broker: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "6658a0a17ad9f9304acc585de530a37f4b782e606646e98cbc5c15d2c999b620",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_profit",
+      "signature": "(start_date: 'str', end_date: 'str', broker: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "12a17fa8bceb0da69bd11617c2901cfd0c55390ff88fda8d518438a5914e6d81",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_profit_rank",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7609beb3bec5199c4b764d60ccdf7abc16101cd67c26b1490a433f4033a7deb1",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_totlmarg",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, broker: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "26c5be1735a3f09f2e109fbcc225e0e5c785cfbf7e9e9419605591ca4b81cc7e",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_broker_variety_profit",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, broker: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "5c8c03285397b2d0e4087915fcf5e1f92a2a4578cb63a1ed555ffbc60eabaece",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_client",
+      "signature": "(base_url: 'Optional[str]' = None) -> 'PandaServiceClient'",
+      "signature_sha256": "4c3a2db0939fc98d68a67c6d5704c21db58559bea6092fa73f973eb0b13d474c",
+      "status": "not_data",
+      "reason": "sdk_helper_not_data_endpoint",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_data",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_concept_constituents",
+      "signature": "(concept: 'Optional[Union[str, List[str]]]' = None, concept_stock: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, date: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7316a67c3abf17d40d86485ffb669826cf4014dce282f6ca24be94a9af2a30ea",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_concept_list",
+      "signature": "(concept: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "d949d3d02119856a0e6c34b7c17cb1ccf646fe124da8810e3d9a262eb65d05ea",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_factor",
+      "signature": "(symbol: 'Union[str, List[str]]' = '', start_date: 'str' = '', end_date: 'str' = '', type: 'Optional[str]' = 'stock', factors: 'Union[str, List[str]]' = None, index_component: 'Optional[str]' = '', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "51292a2a89001f3aa2382c3d4b135e766f98907da7a4b9b8617278a97a6dfeda",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "5bd14a70ae2adb84b7c1a47c3594d13462c1941bdc753fa2439376887ab8e4d6"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "factor",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_factor_hk",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', factors: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8c5221627ac7614b6631c6dfb64e8947eaf3c0fc05ac06fa77b119ee9080b776",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_factory",
+      "signature": "(base_url: 'Optional[str]' = None) -> 'ClientFactory'",
+      "signature_sha256": "96fcb3a52d99330bc030b17ba493c3d5a1009791249064b56b53f0bd9a4b7dbd",
+      "status": "not_data",
+      "reason": "sdk_helper_not_data_endpoint",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_data",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fina_ex",
+      "signature": "(start_quarter: 'str', end_quarter: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, date: 'Optional[str]' = None, is_latest: 'Optional[bool]' = True, interim_type: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "9f6fc15110b155f22f8b8b5f34c1efbd3fd8a1ed2c93ec62cb35e6aad16ada31",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fina_forecast",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, info_date: 'Optional[str]' = None, end_quarter: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8fa2c61d8142ab5ce2c76e4172a52ec21fc91c8b292ccdef940bc73963635fae",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fina_performance",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, info_date: 'Optional[str]' = None, end_quarter: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8fa2c61d8142ab5ce2c76e4172a52ec21fc91c8b292ccdef940bc73963635fae",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fina_reports",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, start_quarter: 'str' = None, end_quarter: 'str' = None, date: 'Optional[str]' = None, is_latest: 'Optional[bool]' = True, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0f862d0739034a9af065fbdbef63768b0db1721206df14d6b9787e8bfc01108e",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "d348b1588ce52a1a702a8da953a8c2e1dc943fecea09d115ec8fdf5852779f4d"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "financial",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fina_statement",
+      "signature": "(start_quarter: 'str', end_quarter: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, date: 'Optional[str]' = None, is_latest: 'Optional[bool]' = True, interim_type: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "9f6fc15110b155f22f8b8b5f34c1efbd3fd8a1ed2c93ec62cb35e6aad16ada31",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_daily",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_daily_post",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_daily_pre",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, type: 'Optional[Union[str, List[str]]]' = None, operation_mode: 'Optional[Union[str, List[str]]]' = None, etf_lof_type: 'Optional[Union[str, List[str]]]' = None, is_class_fund: 'Optional[Union[int, List[int]]]' = None, index_fund_type: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[Union[str, List[str]]]' = None, fund_status: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "77fd4a7438873038684078ca085ba2803f0630e78e22c34766f5ae25f6f45dc8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_etf_constituents",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_etf_cr",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_etf_cr_limits",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_fund_etf_cr_net",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bb1081b5966fe9b5aa035225d149f1473970261da1769e875e83f131892335e8",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_basis",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e4309152ffd3e4d2ac4bba454d92b07bd56945e6d45381f8d2bc38667047b587",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_calendar_arbitrage",
+      "signature": "(contract_symbol_1: 'str', contract_symbol_2: 'str', date: 'str', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "126ddad374d77db5a88f72b9f0f39b7eabcabff4042b1bf40fe876ceeeb38943",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_contract_indicators",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "d4b7fe0bd6c6b459ebb4d1d17faff21d1af9f4bff02129fc1861eb345abaf717",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_contract_pool",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, position_direction: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8570e9e407d217aeb21c0d5c623620e1a06883c697951e575d3a055086ffa57b",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_contract_rank",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, type: 'Optional[str]' = None, max_rank: 'Optional[int]' = None, rank_type: 'str' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e939d544907b93f9268603c9066e3e1356c6ae7c8a5f5974e3a895ee98a4b33d",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_daily",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "5122b14faf8617e4096e0b99fc393d1511a0ddb7299bbaedb374d4f7131001dc",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "bf14427bc2d0b65fde95d61635faefd2e9a36de49754ec184d9e06f87863b6df"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_daily_post",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, method: 'str' = 'close_pcs', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "dd4160c03b04cd93a8b6a9ea7c4404923091038cf99b46d8eb3ddaf55052023a",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, is_trading: 'Optional[int]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "01b579dbeeb2f8d4222727eba99e6d140cc75311a70c86e74029e8de1a9bfc81",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "929bc6224710e561bd935553e51fab48abe848136a36917f4b88dfbf156b55d8"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_dominant",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "6f75b6f2210f0ca591eaf6a5a187d203ea0009c1f8a11c10dbe8378eb7ac95ad",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "182e2a570f1453650b1a7a9a7f13c5c419af85b12ca1b49cfaf590e1c6e7481c"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_dominant_corr",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, **kwargs) -> 'dict'",
+      "signature_sha256": "4b53c0803332fb2cd5e3014adc29b6ccfbb6518e868ddbcea50dd05b0eaf5d2c",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "FUTURE_DOMINANT_CORR"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "a8bb688dee40f914255ed7011d4b76b4494c67261a75ac8a013870be0f28728c"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_free_ratio",
+      "signature": "(contract_symbol_1: 'str', contract_symbol_2: 'str', date: 'str', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "126ddad374d77db5a88f72b9f0f39b7eabcabff4042b1bf40fe876ceeeb38943",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_free_spread",
+      "signature": "(contract_symbol_1: 'str', contract_symbol_2: 'str', date: 'str', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "126ddad374d77db5a88f72b9f0f39b7eabcabff4042b1bf40fe876ceeeb38943",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_inventory",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_ls_ratio",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "56c9c41ec831b810a39d1e0be5f1c814bf55fe776c93ec9d663cae0b312cef5d",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_market_post",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_min",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, time_zone: 'Optional[Tuple[str, str]]' = None, frequency: 'Optional[str]' = '1m', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bed90df8093d56e24fadacbd94d2070befbe2d2bb622e4ac10bf92707fe77a6e",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_net_flow",
+      "signature": "(start_date: 'str', end_date: 'str', underlying_symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, broker_name: 'Optional[str]' = None, position_type: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "c1546997a6daa5a6f93e9afe8f704da78af63de9a8050d4d3bbedac7ed307324",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_netcap_change",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, broker: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "5fa0770b782ecbc17a128080b7ec185dc00491af98c2882bcf70ab6920367c7f",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_netposi_rank",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, max_rank: 'Optional[int]' = None, fields: 'Optional[Union[str, List[str]]]' = None, type: 'Optional[str]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "2c3110f1190869df002fec6b17f5293f59c85b0b1cd276c507573daeebe0fea6",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_nonbroker_net",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_spot_profit",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, underlying_symbol: 'Optional[Union[None, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "506a4f2d6be7b84f8599efef0680f002dab2978e570d473be34cb2a72f2cc900",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_symbol_posi",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, position_type: 'Optional[str]' = None, broker_name: 'Optional[str]' = None, rank_max: 'Optional[int]' = 20, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "cc3a4856f3532c5162b1d92083b0018b1f3be0a7466bb15554c82160a93cf762",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_term_structure",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_trader_quote",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, underlying_symbol: 'Optional[Union[None, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "506a4f2d6be7b84f8599efef0680f002dab2978e570d473be34cb2a72f2cc900",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_variety_mcap",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, underlying_symbol: 'Optional[Union[None, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "506a4f2d6be7b84f8599efef0680f002dab2978e570d473be34cb2a72f2cc900",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_variety_posi",
+      "signature": "(start_date: 'str', end_date: 'str', symbol: 'Optional[Union[str, List[str]]]' = None, position_type: 'Optional[str]' = None, broker_name: 'Optional[str]' = None, rank_max: 'Optional[int]' = 20, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "cc3a4856f3532c5162b1d92083b0018b1f3be0a7466bb15554c82160a93cf762",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_virtual_ratio",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[None, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "5a6692bcf9f07fdd76db6c80d4d45b0f8223845e5f53c38dd49f1b61e1523118",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_future_warehouse_receipt",
+      "signature": "(underlying_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e4309152ffd3e4d2ac4bba454d92b07bd56945e6d45381f8d2bc38667047b587",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hk_daily",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "HK_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "4f0a90831f94f6cd79bf47c263e60ea3167bfe9d8ba51fb959862031dabb5ea0"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hk_daily_post",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hk_daily_pre",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hk_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', fields: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[int]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7c271285539d8d970a9d4418fe69dc56c0b4b2d286b24242c5c8919b1f1cc56d",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "HK_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "1397685412232a06f0bf8921f646b8676efaa2eb0b65fb78393e12bb56de674a"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "master",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_holder_count",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_hsgt_hold",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_component",
+      "signature": "(stock_symbol: 'Optional[Union[str, List[str]]]' = None, index_symbol: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e9d6fb7aadbbc6d371a6ab58f11d0aea627877cefdff5b8df1f2983bae754eb9",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_constituent",
+      "signature": "(stock_symbol: 'Optional[Union[str, List[str]]]' = None, index_symbol: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e9d6fb7aadbbc6d371a6ab58f11d0aea627877cefdff5b8df1f2983bae754eb9",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_daily",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "5122b14faf8617e4096e0b99fc393d1511a0ddb7299bbaedb374d4f7131001dc",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_INDEX"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "ef0589539f781c681c5ad2e8ce2d7409c73a360e462c6fd8e3a67dd2ac0ad376"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[int]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7d726530c7bad72e6ce1c0502f8a61276a9e4fc0917bad36c078c19fe379dd66",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_INDEX"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "905af7daafc3b0bb73e171af0c99b964f317e45cb98d80904fbcb0b8e68b1795"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "master",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_indicator",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_min",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, time_zone: 'Optional[Tuple[str, str]]' = None, frequency: 'Optional[str]' = '1m', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bed90df8093d56e24fadacbd94d2070befbe2d2bb622e4ac10bf92707fe77a6e",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_index_weights",
+      "signature": "(index_symbol: 'Optional[Union[str, List[str]]]' = None, stock_symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "070a8fc4239be41279874ee42e8cadb7ebc13696fa8fb970ee053bc030a2856d",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_INDEX"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "d582ceca5d5c7361c9c4abef613ec59b92b084b82cf3aa3f3fe6290cef0b9acc"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "index_weight",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_industry_constituents",
+      "signature": "(industry_code: 'Optional[Union[str, List[str]]]' = None, stock_symbol: 'Optional[Union[str, List[str]]]' = None, level: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None) -> 'pd.DataFrame'",
+      "signature_sha256": "e332ef4f5c969991a19237a8146d676284132fb9f55dc16462fe9401b6884faa",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "c3801929198f982794c48f457d6abac7679ec44f0dba50744c5471b15a2deec1"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "industry",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_industry_detail",
+      "signature": "(level: 'Optional[str]' = 'L1', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "292f6e5c0884d78b7922f1afeb76f8f075f89c7cc3c098469e91edffcb50aaae",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "9301463c0895e009af9a09e37cfc7b682ebfdc4047209ac69e202faa780a46f5"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "industry",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_investor_activity",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_last_trade_date",
+      "signature": "(exchange: 'Optional[str]' = 'SH') -> 'Optional[str]'",
+      "signature_sha256": "7af5d034ae210757808593b3d733bd4507cf45e75586c7f6c7afb5d2d06e1897",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "SH"
+        ],
+        [
+          "HK"
+        ],
+        [
+          "US"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "499b7cc635b11418aa69ff0f20a9b5a2525061ca083458a9bfef23f1d7607125",
+        "66be162242a5e32fb78d8b654db566534554478632e73d26533659e57100bf24",
+        "b774c56e268ff75d3dfa9f8400ce17aa9a4a2241da0e77c6d981cab435f74e00"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "calendar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_lhb_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, type: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, side: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "ad7b4a70034d7e06f6994958673e80e63cf833ee1bf4b748706c5a2aa1af9718",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_lhb_list",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, type: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7f98dd4ecd586700f16bed1558299dbda2f9c568b307b0acdcaa8c9279e5d31f",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CN_LHB_LIST"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "ef3874e62682a5fdb7f1669e31bfb556e6e55f283a3de9d0f9d4063a890eeae3"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ad",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ag",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ar",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_au",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_bm",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_cal",
+      "signature": "(event_code: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "68800cb83cc8ec493c1a6c519644e5403fe7c97e404b17b71b5ef6be075e7230",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_cal_config",
+      "signature": "(event_code: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "3b98658c4c661f0aa7344ba58cd3191a429769f05c95780a64818f4008707f6b",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_cal_info",
+      "signature": "(event_code: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "68800cb83cc8ec493c1a6c519644e5403fe7c97e404b17b71b5ef6be075e7230",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ce",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ch",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ci",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_cm",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_detail",
+      "signature": "(category: 'Union[str, List[str]]', symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "58d0545d98e418c165f96f671160a681ad9712c910232d491857e17f48e702af",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "BOUNDED_FIELDS",
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "ff91d92f0b31d894f61c51458eba91084d13bb408a58eda6c892532916916fc8"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "macro",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_dt",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ec",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ed",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ee",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_eh",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_en",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ep",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ew",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_fa",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_fb",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_fe",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_fi",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_fs",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_gb",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ha",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_in",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ir",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_is",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_li",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_mb",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_md",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_me",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_na",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_nf",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_of",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_or",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ph",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_pi",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_pm",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_pp",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_pr",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_rb",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_rc",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_re",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_se",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_sm",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_st",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_te",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_th",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_tm",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_tr",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "0c3c5c38f79786caf29c24d4b9adf39ca2bfcf1a2bc486cc751111f31497f702"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "macro",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_ut",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_macro_wr",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kw) -> 'pd.DataFrame'",
+      "signature_sha256": "612ae327c1a3d0b66768118f2bd6933163781992d12079101f11ee307c6095f0",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_margin",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, margin_type: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "d291ebd67ec616174b6b0a4a1616e6636d40c43d949df94260070272da83866c",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_MARGIN"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "a46d46febea68ef6faf4f961f5e79819640043ea1721812121fd552365dd383a"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_market_data",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', type: 'Optional[str]' = 'stock', fields: 'Optional[Union[str, List[str]]]' = None, indicator: 'Optional[str]' = '', st: 'Optional[bool]' = True, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "470c38d9ce6a796252479405be5dc736072e4bec7e27ebcd8b95775cb114b73a",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_market_min_data",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', symbol_type: 'Optional[str]' = 'stock', fields: 'Optional[Union[str, List[str]]]' = None, time_zone: 'Optional[Tuple[str, str]]' = None, frequency: 'Optional[str]' = '1m', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e5b1f5d8154ad838a21971a7972ed2d1c3fdc382343a6c71b23b5381f84c2844",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_daily",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8241ade4eb09e25a09268f4b5ca18c989142fbc1a1cb66370088ece26e7591e2",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[bool]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, option_type: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "75cc02b9d0257c51af9ffdadd0e1550001d89bd67ddfc2a38ea20266e79658b1",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "e2de40958953fccf6f8e5affa5e3f463adbf6e65794515af48805d7837d82e49"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_exercise",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, call_put_code: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7fee32e79b3eac391d211f489b81b362f311896f076e646ddda916d7f499ed4b",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_implied_volatility",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8241ade4eb09e25a09268f4b5ca18c989142fbc1a1cb66370088ece26e7591e2",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "193258d1e22a6b429261e25e133a41f62265b4f1928853d403e397c05a0b6c1a"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_risk_indicators",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8b4f3e8cba26d493a2c88c67fef1abdba10bdea3ea1de910b4418a3b19ca7c8b",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_spot_market",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8241ade4eb09e25a09268f4b5ca18c989142fbc1a1cb66370088ece26e7591e2",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_static",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, underlying_symbol: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[Union[str, List[str]]]' = None, call_put_code: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "a40bdaef7aa66f11c41a481cb762c0d94a2f2247608a48d950dc6e417d48f9f1",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_underlying_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8d75eea24d330f1f467d4886a83eef183f199599240ae68a068c6d17cc2a8380",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "39aa591b868045dce747a6dbfbf05aa08f50c74ca066037dc3d8d56c06ce5969"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_option_underlying_volatility",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, exchange: 'Optional[Union[str, List[str]]]' = None, period: 'Optional[int]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "e938eb80df94d07d9af45475d85276e53b4d8afc1ef57d24b9b011ab1b283098",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "RESEARCH_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "efcba9cee8448f98c985b970b4048fd461d9f3ce47837eb061ffe4086c39a11f"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "derivative_research",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_prev_trade_date",
+      "signature": "(date: 'str', exchange: 'Optional[str]' = 'SH', n: 'Optional[int]' = 1) -> 'str'",
+      "signature_sha256": "45c0f07762963de58c7e0d441fc41c3dde37a4de685070f6b5e19581bd29983b",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_repurchase",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_restricted_list",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_share_float",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_allotment",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_cash_dividend",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_competitor_information",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8241ade4eb09e25a09268f4b5ca18c989142fbc1a1cb66370088ece26e7591e2",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_daily",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, indicator: 'Optional[str]' = '', st: 'Optional[bool]' = True, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "4096103a4d00cec81faffd68db4c23ee5ce9340d12f1aab3b8c9f74a232f6ab7",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "cb9acdbba464cc10ebe13d5e4920ae454b13a54117e421e238c4402a217b1269"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_daily_post",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, indicator: 'Optional[str]' = '', st: 'Optional[bool]' = True, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "4096103a4d00cec81faffd68db4c23ee5ce9340d12f1aab3b8c9f74a232f6ab7",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_daily_pre",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, indicator: 'Optional[str]' = '', st: 'Optional[bool]' = True, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "4096103a4d00cec81faffd68db4c23ee5ce9340d12f1aab3b8c9f74a232f6ab7",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', fields: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[int]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7c271285539d8d970a9d4418fe69dc56c0b4b2d286b24242c5c8919b1f1cc56d",
+      "status": "verified_once_research",
+      "reason": "single_probe_research_display_only_not_production_available",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK_ONLY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "317fd175d1af821f09d96d9b7a1d5d0dea05d289aad36d8ed900a85d65c64830"
+      ],
+      "trade_eligible": false,
+      "availability": "verified_research_only",
+      "category": "master",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_dividend",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_dividend_activity",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_dividend_amount",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_dividend_event",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_financial_activity",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_financial_event",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_industry",
+      "signature": "(stock_symbol: 'str', level: 'Optional[str]' = 'L1') -> 'pd.DataFrame'",
+      "signature_sha256": "67c194cf994343c8b79195404a6c6a51a03da44939a3c9bbfa3fc146c3d21d49",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_industry_median",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_insider_trade",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_insider_transaction",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_intermediary_information",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, event_type: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "aea322a7aa1f91e1c914a4f9409619f23c5474a6f5fbbbfb1e8b64a880583e2b",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_investor_centralization",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_investor_concentration",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_investor_leaderboard",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, max_rank: 'Optional[int]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "b5846c4f285772f0be3be01dc9a6c063846b8fcf4982b378696ea23f47f4b0c2",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_investor_ranking",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, max_rank: 'Optional[int]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "b5846c4f285772f0be3be01dc9a6c063846b8fcf4982b378696ea23f47f4b0c2",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_ir_activity",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_ir_event",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_market_activity",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_market_event",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_meeting_activity",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_meeting_event",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_min",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', start_date: 'str' = '', end_date: 'str' = '', fields: 'Optional[Union[str, List[str]]]' = None, time_zone: 'Optional[Tuple[str, str]]' = None, frequency: 'Optional[str]' = '1m', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "bed90df8093d56e24fadacbd94d2070befbe2d2bb622e4ac10bf92707fe77a6e",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK",
+          "frequency=1m"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "3d23b18e926842d4d21100bc9efe810cb77e06c87832cfdc1d5ace9201b4c65f"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_mktfin_indicator",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_mktfin_metric",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_ncycl_consensus",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_ncycl_estimate",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_operating_indicator",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_year: 'str' = None, end_year: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0e0927247728f17d0b2f4877a356d3756f1c38b5431e392d1d18b763bb5b8c58",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_operating_metric",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_year: 'str' = None, end_year: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0e0927247728f17d0b2f4877a356d3756f1c38b5431e392d1d18b763bb5b8c58",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_pledge",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_pledge_stat",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7609beb3bec5199c4b764d60ccdf7abc16101cd67c26b1490a433f4033a7deb1",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_private_placement",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_pv_indicator",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_pv_metric",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_recommendation_consensus",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_recommendation_estimate",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_rela_party_trans",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_rt_daily",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "c34a37d6765059d59c7fb2b1a5b905c47d5875a37d3a2a04afb31b36cbdbdd97",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "9309a83a0f18c53938d57953c83b442c20f2a083efc44b0cf0c71e08d80f47ee"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "snapshot",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_rt_min",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', fields: 'Optional[Union[str, List[str]]]' = None, time_zone: 'Optional[Tuple[str, str]]' = None, frequency: 'Optional[str]' = '1m', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "47f6a7141734d059e2652126d0c0f02c47f43f5dde610c634a4138ecf5865549",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "A_SHARE_STOCK",
+          "frequency=1m"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "7922bee065715aaeaaedd0a0b83e5e633798db7ae6a333b3dcc866408a047dc0"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_sector_median",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_shareholder_change",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_shareholder_holding",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_shareholder_report",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0c5dd8e7746548bbe0ab49fd41eaa9b9df34f502d8268cd18cb132510be4eb90",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_split",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f6079c3d73761ea5aaca103cbd91d2fa2e0d3de306823fd4c98355ae96de1aa5",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_status_change",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_status_over_allotment",
+      "signature": "(start_date: 'str' = None, end_date: 'str' = None, symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "8241ade4eb09e25a09268f4b5ca18c989142fbc1a1cb66370088ece26e7591e2",
+      "status": "disabled",
+      "reason": "sdk_warning_deprecated_or_unreleased",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "disabled",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_top20_centralization",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_stock_top20_concentration",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f7d6c7d448b8e3410aa26b512681c269b4d9ee636a940038c0506db74191c4a8",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_top_holders",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'str' = None, end_date: 'str' = None, start_rank: 'Optional[int]' = None, end_rank: 'Optional[int]' = None, stock_type: 'Optional[str]' = None, market: 'Optional[str]' = 'cn', fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "b5696ffb6fe4115ce6810eabfa7ef6e3721044157fd76d0e50a60c3fb6c9dd7e",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_trade_cal",
+      "signature": "(start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, exchange: 'Optional[str]' = 'SH', is_trading_day: 'Optional[int]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "f0ba6195aad51f826b5fbb6fb81e5d4ec91519f544719b24bfc6fa2318536f2d",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "SH"
+        ],
+        [
+          "HK"
+        ],
+        [
+          "US"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "bd0f1e62e108d49deab45da96ce2ce02fbc0c56d7c415b292e2b0342b60984a2",
+        "077a87316a2755312c1002e46353dda9f6acec131e7edf307d4f1b5bd119b2ca",
+        "8884d56ca0baa35883803544387ac25c5e56f29cb1fb9e0aaf78544a87376cf5"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "calendar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_trade_list",
+      "signature": "(date: 'Union[str, List[str]]', exchange: 'Optional[str]' = 'SH', **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "0b067cca1959ed9cda9653aa3f76a6c00c3f5f6c2cc4b407d918047e7af8b51c",
+      "status": "disabled",
+      "reason": "not_probed",
+      "verified_scope_sets": [],
+      "allowed_request_shape_hashes": [],
+      "trade_eligible": false,
+      "availability": "not_verified",
+      "category": null,
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_us_daily",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = None, start_date: 'Optional[str]' = None, end_date: 'Optional[str]' = None, fields: 'Optional[Union[str, List[str]]]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "57a7c612ad3055a7f7ad578b2731d63ba547ee8820f8e8fa6ca3d0cf214bc8ec",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "CLOSED_SESSION_ONLY",
+          "US_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "4ae25d4e91a1760cbb358c223cbe85bb3ea2a81463eb4ce52069f8a5e400b0b9"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "bar",
+      "stability_confirmed": false
+    },
+    {
+      "endpoint": "get_us_detail",
+      "signature": "(symbol: 'Optional[Union[str, List[str]]]' = '', fields: 'Optional[Union[str, List[str]]]' = None, status: 'Optional[int]' = None, **kwargs) -> 'pd.DataFrame'",
+      "signature_sha256": "7c271285539d8d970a9d4418fe69dc56c0b4b2d286b24242c5c8919b1f1cc56d",
+      "status": "verified_once_research",
+      "reason": "production_catalog_available_subject_to_runtime_data_gates",
+      "verified_scope_sets": [
+        [
+          "US_EQUITY"
+        ]
+      ],
+      "allowed_request_shape_hashes": [
+        "c661b0501dd12bfec2838249284d6bbc01b43e247db15d24f9af6001b8ffd407"
+      ],
+      "trade_eligible": false,
+      "availability": "production_available",
+      "category": "master",
+      "stability_confirmed": false
+    }
+  ],
+  "production_available_endpoint_count": 29,
+  "production_available_endpoints": [
+    "get_factor",
+    "get_fina_reports",
+    "get_future_daily",
+    "get_future_detail",
+    "get_future_dominant",
+    "get_future_dominant_corr",
+    "get_hk_daily",
+    "get_hk_detail",
+    "get_index_daily",
+    "get_index_detail",
+    "get_index_weights",
+    "get_industry_constituents",
+    "get_industry_detail",
+    "get_last_trade_date",
+    "get_lhb_list",
+    "get_macro_detail",
+    "get_macro_tr",
+    "get_margin",
+    "get_option_detail",
+    "get_option_implied_volatility",
+    "get_option_underlying_detail",
+    "get_option_underlying_volatility",
+    "get_stock_daily",
+    "get_stock_min",
+    "get_stock_rt_daily",
+    "get_stock_rt_min",
+    "get_trade_cal",
+    "get_us_daily",
+    "get_us_detail"
+  ]
+}

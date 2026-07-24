@@ -354,7 +354,7 @@ class PandaDataNormalizer:
             capability_version=CAPABILITY_CATALOG_VERSION,
             verification="verified_once_research",
             evidence_ref=(
-                "artifacts/pandadata-capabilities/verification-summary-v1.json"
+                "finance_god/market_data/resources/verification-summary-v1.json"
             ),
         )
 
