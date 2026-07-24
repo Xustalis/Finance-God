@@ -1245,6 +1245,7 @@ class NotificationCategory(str, Enum):
     FILL = "fill"
     REVIEW = "review"
     AUTHORIZATION = "authorization"
+    MARKET = "market"
 
 
 class NotificationSeverity(str, Enum):
@@ -1322,7 +1323,12 @@ class Notification(FrozenModel):
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:
-        if self.source_object_type not in {"TradePlan", "OrderDraft", "WorkflowRun"}:
+        if self.source_object_type not in {
+            "TradePlan",
+            "OrderDraft",
+            "WorkflowRun",
+            "MarketAlert",
+        }:
             raise DomainInvariantViolation(
                 "source_object_type must reference approved authoritative object"
             )

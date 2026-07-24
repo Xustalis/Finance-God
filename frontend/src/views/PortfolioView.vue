@@ -9,6 +9,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DeskLayout from '@/components/desk/DeskLayout.vue'
 import { useMarketStore } from '@/stores/market'
+import { useDeskCommandsStore } from '@/stores/deskCommands'
 import {
   fetchCurrentAccount,
   fetchPortfolio,
@@ -30,6 +31,8 @@ import type {
 
 const market = useMarketStore()
 const router = useRouter()
+const deskCommands = useDeskCommandsStore()
+let unregisterCommands: Array<() => void> = []
 
 /* ── 仿真账户（钱包） ─────────────────────────────── */
 const account = ref<SimulationAccount | null>(null)
@@ -259,8 +262,18 @@ onMounted(() => {
   market.startPolling()
   market.checkHealth()
   loadData()
+  unregisterCommands = [
+    deskCommands.register('nav.goto', (payload) => {
+      const path = typeof payload?.path === 'string' ? payload.path : null
+      if (path) void router.push(path)
+    }),
+  ]
 })
-onUnmounted(() => market.stopPolling())
+onUnmounted(() => {
+  market.stopPolling()
+  unregisterCommands.forEach((fn) => fn())
+  unregisterCommands = []
+})
 </script>
 
 <template>

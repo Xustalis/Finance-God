@@ -18,6 +18,9 @@ def _neutralize_ark_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "stepfun_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ark_api_key", None, raising=False)
     monkeypatch.setattr(settings, "ark_model", None, raising=False)
+    # 常驻行情轮询器依赖真实上游与数据库，测试默认关闭以保持确定性；
+    # 轮询器逻辑由 tests/market 下的定向用例直接覆盖。
+    monkeypatch.setattr(settings, "market_poll_enabled", False, raising=False)
 
 
 @pytest_asyncio.fixture

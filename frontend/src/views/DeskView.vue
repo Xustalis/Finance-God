@@ -5,7 +5,7 @@
  * 标的池优先使用画像已选投资方向（路由 query 或服务端 selected）
  */
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import DeskLayout from '@/components/desk/DeskLayout.vue'
 import MarketTable from '@/components/desk/MarketTable.vue'
 import MarketChart from '@/components/desk/MarketChart.vue'
@@ -20,7 +20,8 @@ import {
 } from '@/services/directionDesk'
 import { useMarketStore } from '@/stores/market'
 import { useAiContextStore } from '@/stores/aiContext'
-import { fetchCurrentAccount, fetchOrders, isDeskApiError, searchInstruments } from '@/api/desk'
+import { useDeskCommandsStore } from '@/stores/deskCommands'
+import { fetchCurrentAccount, fetchOrders, fetchPositions, fetchCandidates, isDeskApiError, searchInstruments } from '@/api/desk'
 import { DEFAULT_SYMBOLS, directionOf, formatPercent, formatChange, formatNumber } from '@/types/desk'
 import type { InvestmentDirection } from '@/types/api'
 import type {
@@ -32,8 +33,11 @@ import type {
 } from '@/types/desk'
 
 const route = useRoute()
+const router = useRouter()
 const market = useMarketStore()
 const ai = useAiContextStore()
+const deskCommands = useDeskCommandsStore()
+let unregisterCommands: Array<() => void> = []
 const selectedDirection = ref<InvestmentDirection | null>(null)
 const directionLoading = ref(true)
 const directionError = ref<string | null>(null)
@@ -114,14 +118,18 @@ async function runSearch(query: string) {
   }
 }
 
-function selectInstrument(instrument: InstrumentSummary) {
-  const symbol = instrument.symbol
+/** 聚焦到一个标的：入池、设为当前、拉 K 线。供搜索与右侧 agent 动作共用。 */
+function focusSymbol(symbol: string) {
   if (!watchSymbols.value.includes(symbol)) {
     watchSymbols.value = [symbol, ...watchSymbols.value]
     market.setWatchSymbols(watchSymbols.value)
   }
   activeSymbol.value = symbol
   market.loadBars(symbol)
+}
+
+function selectInstrument(instrument: InstrumentSummary) {
+  focusSymbol(instrument.symbol)
   searchQuery.value = ''
   searchResults.value = []
   searchOpen.value = false
@@ -214,6 +222,35 @@ async function loadOrders() {
   }
 }
 
+/** 加载持仓只为推导首次引导信号（无持仓=首次个性化推荐）。 */
+async function loadPositionsSignal() {
+  try {
+    const positions = await fetchPositions()
+    ai.setHasPositions(positions.length > 0)
+  } catch {
+    // 未知态：不强行引导，也不误报。
+    ai.setHasPositions(null)
+  }
+}
+
+/** 首次引导：调用候选服务，聚焦首个可交易候选（画像方向+仿真持仓）。 */
+async function recommendBuyable() {
+  try {
+    const response = await fetchCandidates()
+    const pick = response.candidates.find((c) => c.tradable && !c.ignored)
+    if (pick) {
+      focusSymbol(pick.symbol)
+      ai.setContext({
+        scope: 'symbol',
+        subject: pick.symbol,
+        label: `${pick.symbol}（推荐）`,
+      })
+    }
+  } catch {
+    // 候选不可用时静默降级；不在前端派生推荐。
+  }
+}
+
 function orderIdentity(order: StoredOrderView): string {
   return order.order_id
 }
@@ -232,11 +269,28 @@ onMounted(async () => {
   applyEntryContext()
   loadAccount()
   loadOrders()
+  loadPositionsSignal()
+  // 注册左侧动作，供右侧 agent / 快捷指令驱动（右→左）。
+  unregisterCommands = [
+    deskCommands.register('desk.selectSymbol', (payload) => {
+      const symbol = typeof payload?.symbol === 'string' ? payload.symbol : null
+      if (symbol) focusSymbol(symbol)
+    }),
+    deskCommands.register('nav.goto', (payload) => {
+      const path = typeof payload?.path === 'string' ? payload.path : null
+      if (path) void router.push(path)
+    }),
+    deskCommands.register('desk.recommend', () => {
+      void recommendBuyable()
+    }),
+  ]
 })
 
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
   market.stopPolling()
+  unregisterCommands.forEach((fn) => fn())
+  unregisterCommands = []
 })
 </script>
 

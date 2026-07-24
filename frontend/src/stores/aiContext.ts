@@ -92,6 +92,16 @@ export const useAiContextStore = defineStore('aiContext', () => {
   /** 追问文本：跨路由和折叠保持；刷新页面后清除。 */
   const followUp = ref<string>('')
 
+  /**
+   * 是否已持有仿真持仓（用于首次个性化推荐）。
+   * null=未知（尚未加载）；false=无持仓（首次引导）；true=已有持仓。
+   * 由交易/组合视图加载持仓后设置；不暴露任何用户设置作用域数据。
+   */
+  const hasPositions = ref<boolean | null>(null)
+  function setHasPositions(value: boolean | null) {
+    hasPositions.value = value
+  }
+
   const canRun = computed(() => Boolean(subject.value) && status.value !== 'running')
 
   const conclusion = computed(() => run.value?.results?.[0]?.summary ?? null)
@@ -152,6 +162,8 @@ export const useAiContextStore = defineStore('aiContext', () => {
     errorCode,
     lastRunAt,
     followUp,
+    hasPositions,
+    setHasPositions,
     canRun,
     conclusion,
     requestRun,

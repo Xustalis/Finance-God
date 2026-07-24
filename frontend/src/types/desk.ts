@@ -586,6 +586,50 @@ export interface NotificationPreference {
   updated_at: string
 }
 
+// ─── 行情异动告警（服务端轮询检测的全局事实） ───────
+// 与后端 finance_god.market_data.monitor.MarketAlert 对齐。
+// change_percent 为分数（0.061 表示 +6.1%）；provider_time 标注上游时点。
+
+export type MarketAlertKind = 'surge' | 'plunge'
+export type MarketAlertSeverity = 'info' | 'warning' | 'error'
+
+export interface MarketAlertView {
+  alert_id: string
+  symbol: string
+  name: string
+  kind: MarketAlertKind
+  severity: MarketAlertSeverity
+  change_percent: number
+  last: number
+  message: string
+  provider_time: string
+  detected_at: string
+}
+
+export interface MarketAlertsResponse {
+  provider: string
+  alerts: MarketAlertView[]
+}
+
+export interface MarketSnapshotView {
+  symbol: string
+  name: string
+  last: number
+  change_percent: number | null
+  provider_time: string
+  frequency: string
+  freshness: string
+  retrieved_at: string
+  updated_at: string
+}
+
+export interface MarketSnapshotsResponse {
+  provider: string
+  poll_interval_seconds: number
+  alert_threshold: number
+  snapshots: MarketSnapshotView[]
+}
+
 // ─── 错误 ─────────────────────────────────────────
 
 export interface BackendError {

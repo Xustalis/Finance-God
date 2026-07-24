@@ -6,11 +6,37 @@
  * 结论全部来自后端 Multi-Agent 运行时；不可用时显示显式失败，不生成默认建议。
  */
 import { computed, ref } from 'vue'
+import { MessageSquare } from 'lucide-vue-next'
 import { useAiContextStore } from '@/stores/aiContext'
+import { useDeskCommandsStore } from '@/stores/deskCommands'
+import { quickCommandsForScope, type QuickCommand } from '@/services/quickCommands'
 import EvidenceDrawer from '@/components/evidence/EvidenceDrawer.vue'
+import WorkflowProgress from '@/components/desk/WorkflowProgress.vue'
 import type { AgentClaim } from '@/types/desk'
 
 const ai = useAiContextStore()
+const deskCommands = useDeskCommandsStore()
+
+/** 随当前对象上下文变化的固定 3 条快捷指令；settings 作用域为空。
+ * 无持仓进入交易台时首条为个性化推荐。 */
+const quickCommands = computed<QuickCommand[]>(() =>
+  quickCommandsForScope(ai.scope, { noPositions: ai.hasPositions === false }),
+)
+
+function quickCommandDisabled(cmd: QuickCommand): boolean {
+  if (ai.status === 'running') return true
+  if (cmd.kind === 'action') return cmd.action ? !deskCommands.can(cmd.action.type) : true
+  return !ai.canRun
+}
+
+function onQuickCommand(cmd: QuickCommand) {
+  if (quickCommandDisabled(cmd)) return
+  if (cmd.kind === 'action' && cmd.action) {
+    deskCommands.dispatch(cmd.action)
+    return
+  }
+  void ai.requestRun(cmd.taskType ?? 'research')
+}
 
 // 过程与证据抽屉：当前 AI 运行的结论已由后端按 (agent_run, run_id) 落库，
 // 此处仅打开只读抽屉查看不可变证据，绝不在前端派生结论。
@@ -33,12 +59,6 @@ const invalidations = computed(() =>
 const evidence = computed(() =>
   (ai.run?.results ?? []).flatMap((result) => result.evidence),
 )
-const assignments = computed(() => ai.run?.plan?.assignments ?? [])
-
-const lastRunLabel = computed(() => {
-  if (!ai.lastRunAt) return null
-  return new Date(ai.lastRunAt).toLocaleString('zh-CN', { hour12: false })
-})
 
 function onRun() {
   void ai.requestRun()
@@ -77,6 +97,7 @@ function onRun() {
     aria-label="AI 研究侧栏"
     data-test="ai-sidebar"
   >
+    <div class="ai-sidebar-inner">
     <header class="ai-head">
       <div class="ai-head-titles">
         <small class="ai-kicker">CURRENT OBJECT RESEARCH</small>
@@ -114,21 +135,18 @@ function onRun() {
       {{ ai.status === 'running' ? '分析中…' : ai.run ? '重新分析当前对象' : '分析当前对象' }}
     </button>
 
-    <!-- 运行中 -->
-    <section v-if="ai.status === 'running'" class="ai-state running">
-      <span class="state-dot" />
-      <span>Multi-Agent 运行中，正在调用模型与数据源…</span>
-    </section>
+    <!-- 工作流进度（类 Codex 折叠）：运行中与完成均由此面板展示 -->
+    <WorkflowProgress />
 
     <!-- 显式失败：不生成默认建议 -->
-    <section v-else-if="ai.status === 'error'" class="ai-state error" role="alert">
+    <section v-if="ai.status === 'error'" class="ai-state error" role="alert">
       <span class="state-label">AI 不可用</span>
       <p class="state-message">{{ ai.errorMessage }}</p>
       <p v-if="ai.errorCode" class="state-code">错误码：{{ ai.errorCode }}</p>
     </section>
 
     <!-- 结论与证据 -->
-    <template v-else-if="ai.status === 'done' && primaryResult">
+    <template v-if="ai.status === 'done' && primaryResult">
       <section class="ai-block">
         <span class="block-label">结论</span>
         <p class="conclusion">{{ primaryResult.summary }}</p>
@@ -141,17 +159,6 @@ function onRun() {
         >
           查看过程 / 分析依据 →
         </button>
-      </section>
-
-      <section v-if="assignments.length" class="ai-block">
-        <span class="block-label">数据来源 / 参与 Agent</span>
-        <ul class="agent-list">
-          <li v-for="a in assignments" :key="a.agent_id">
-            <code>{{ a.agent_id }}</code>
-            <span class="agent-reason">{{ a.reason }}</span>
-          </li>
-        </ul>
-        <p v-if="lastRunLabel" class="timestamp">运行时点：{{ lastRunLabel }}</p>
       </section>
 
       <section v-if="facts.length" class="ai-block">
@@ -201,6 +208,27 @@ function onRun() {
       </p>
     </section>
 
+    <!-- 快捷指令：随当前对象上下文变化，贴在输入框上方，无边框/无卡片 -->
+    <section
+      v-if="quickCommands.length"
+      class="ai-quick-commands"
+      aria-label="快捷指令"
+      data-test="ai-quick-commands"
+    >
+      <button
+        v-for="cmd in quickCommands"
+        :key="cmd.id"
+        type="button"
+        class="quick-command"
+        :data-test="`quick-command-${cmd.id}`"
+        :disabled="quickCommandDisabled(cmd)"
+        @click="onQuickCommand(cmd)"
+      >
+        <MessageSquare class="quick-icon" :size="15" aria-hidden="true" />
+        <span class="quick-label">{{ cmd.label }}</span>
+      </button>
+    </section>
+
     <!-- 追问 -->
     <section class="ai-followup">
       <label class="block-label" for="ai-followup-input">继续追问</label>
@@ -214,6 +242,7 @@ function onRun() {
       />
     </section>
 
+    </div>
     <!-- 过程与证据只读抽屉（禁嵌套：高级分析跳转独立页） -->
     <EvidenceDrawer
       v-if="evidenceRunId"
@@ -231,13 +260,20 @@ function onRun() {
 .ai-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   height: 100%;
-  padding: 14px 14px 18px;
   overflow-y: auto;
   background: var(--paper, #f3ecda);
-  border-left: 1px solid var(--rule, #cbbfa0);
   scrollbar-width: thin;
+}
+.ai-sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 620px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 16px clamp(14px, 4%, 40px) 22px;
 }
 .ai-head {
   display: flex;
@@ -408,11 +444,35 @@ function onRun() {
 @media (prefers-reduced-motion: reduce) {
   .state-dot { animation: none; }
 }
+.ai-quick-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 6px;
+}
+.quick-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink, #241d12);
+  background: transparent;
+  border: none;
+}
+.quick-command:hover:not(:disabled) { color: var(--risk, #9a2c2c); }
+.quick-command:disabled { opacity: 0.4; cursor: not-allowed; }
+.quick-icon { flex: 0 0 auto; color: var(--muted-ink, #6b5f47); }
+.quick-label { min-width: 0; }
 .ai-followup {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  margin-top: auto;
   border-top: 1px solid var(--rule, #cbbfa0);
   padding-top: 10px;
 }

@@ -4,14 +4,19 @@
  * 左栏行情表 + 主栏图表 + 右栏摘要
  */
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import DeskLayout from '@/components/desk/DeskLayout.vue'
 import MarketTable from '@/components/desk/MarketTable.vue'
 import MarketChart from '@/components/desk/MarketChart.vue'
 import { useMarketStore } from '@/stores/market'
+import { useDeskCommandsStore } from '@/stores/deskCommands'
 import { DEFAULT_SYMBOLS, directionOf, formatPercent, formatChange, formatNumber } from '@/types/desk'
 import type { MarketQuote } from '@/types/desk'
 
 const market = useMarketStore()
+const router = useRouter()
+const deskCommands = useDeskCommandsStore()
+let unregisterCommands: Array<() => void> = []
 const activeSymbol = ref(DEFAULT_SYMBOLS[0])
 
 // 选中的行情
@@ -34,10 +39,22 @@ onMounted(() => {
   market.startPolling()
   market.checkHealth()
   if (activeSymbol.value) market.loadBars(activeSymbol.value)
+  unregisterCommands = [
+    deskCommands.register('desk.selectSymbol', (payload) => {
+      const symbol = typeof payload?.symbol === 'string' ? payload.symbol : null
+      if (symbol) onSelectSymbol(symbol)
+    }),
+    deskCommands.register('nav.goto', (payload) => {
+      const path = typeof payload?.path === 'string' ? payload.path : null
+      if (path) void router.push(path)
+    }),
+  ]
 })
 
 onUnmounted(() => {
   market.stopPolling()
+  unregisterCommands.forEach((fn) => fn())
+  unregisterCommands = []
 })
 </script>
 

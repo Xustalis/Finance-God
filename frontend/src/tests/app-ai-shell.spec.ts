@@ -43,6 +43,12 @@ async function mountApp(path: string) {
         component: { template: '<main data-test="desk-page">交易台</main>' },
         meta: { requiresAuth: true },
       },
+      {
+        path: '/app/exe',
+        name: 'onboarding',
+        component: { template: '<main data-test="onboarding-page">访谈</main>' },
+        meta: { requiresAuth: true },
+      },
     ],
   })
   await router.push(path)
@@ -68,6 +74,17 @@ describe('authenticated desktop AI shell', () => {
     await flushPromises()
     expect(wrapper.findAll('[data-test="ai-sidebar"]')).toHaveLength(1)
     expect(wrapper.find('.desktop-app-shell').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('hides the AI sidebar during profile building (onboarding)', async () => {
+    const { router, wrapper } = await mountApp('/desk')
+    expect(wrapper.findAll('[data-test="ai-sidebar"]')).toHaveLength(1)
+
+    await router.push('/app/exe')
+    await flushPromises()
+    expect(wrapper.find('[data-test="ai-sidebar"]').exists()).toBe(false)
+    expect(wrapper.find('.desktop-app-shell').exists()).toBe(false)
     wrapper.unmount()
   })
 

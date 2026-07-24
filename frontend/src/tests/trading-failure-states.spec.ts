@@ -22,6 +22,15 @@ vi.mock('@/stores/market', () => ({
   useMarketStore: () => market,
 }))
 
+vi.mock('@/stores/deskCommands', () => ({
+  useDeskCommandsStore: () => ({
+    available: [],
+    register: () => () => {},
+    can: () => false,
+    dispatch: () => false,
+  }),
+}))
+
 vi.mock('@/api/desk', () => ({
   fetchCurrentAccount: vi.fn(),
   fetchOrders: vi.fn(),

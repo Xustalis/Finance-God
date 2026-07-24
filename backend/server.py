@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC
+from decimal import Decimal
 from threading import Lock
 from uuid import uuid4
 
@@ -36,12 +37,16 @@ from finance_god.application.evidence_service import EvidenceService
 from finance_god.application.ledger_service import SimulationLedgerService
 from finance_god.application.mandate_service import MandateService
 from finance_god.application.market_overview import build_market_overview
+from finance_god.application.market_poller import MarketPoller
 from finance_god.application.portfolio_query import PortfolioQueryService
 from finance_god.application.trade_plan_service import TradePlanService
 from finance_god.domain import Notification
 from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
 from finance_god.infrastructure.mandate_provider import (
     PersistentAuthorizationProvider,
+)
+from finance_god.infrastructure.persistence.market_monitor_repository import (
+    MarketMonitorUnitOfWork,
 )
 from finance_god.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
 from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
@@ -78,6 +83,8 @@ simulation_execution = None
 simulation_accounts = None
 agent_runtime = None
 agent_runtime_reason: str | None = None
+market_poller_task: asyncio.Task[None] | None = None
+market_poller_stop: asyncio.Event | None = None
 _agent_lock = Lock()
 _service_lock = Lock()
 
@@ -173,6 +180,7 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     global workflow_runtime_readiness_reason
     global simulation_execution, simulation_accounts
     global agent_runtime, agent_runtime_reason
+    global market_poller_task, market_poller_stop
     market_data = None
     market_application = None
     workflow_commands = None
@@ -182,6 +190,8 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     simulation_accounts = None
     agent_runtime = None
     agent_runtime_reason = None
+    market_poller_task = None
+    market_poller_stop = None
     try:
         workflow_runtime = create_workflow_command_runtime_from_environment(
             database_url=settings.database_url
@@ -193,10 +203,13 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
             type(error).__name__,
         )
         workflow_runtime_readiness_reason = "DQ_WORKFLOW_RUNTIME_UNAVAILABLE"
+    market_poller_stop, market_poller_task = _start_market_poller()
     try:
         yield
     finally:
         runtime = workflow_runtime
+        stop_event = market_poller_stop
+        poller_task = market_poller_task
         workflow_commands = None
         workflow_runtime = None
         simulation_execution = None
@@ -205,6 +218,15 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         market_data = None
         agent_runtime = None
         agent_runtime_reason = None
+        market_poller_task = None
+        market_poller_stop = None
+        if stop_event is not None:
+            stop_event.set()
+        if poller_task is not None:
+            try:
+                await poller_task
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                _LOGGER.warning("market poller task did not shut down cleanly")
         if runtime is not None:
             await runtime.close()
 
@@ -461,6 +483,108 @@ async def _candidate_quotes(symbols: list[str]):
     return await application.quotes(symbols)
 
 
+def _market_monitor_uow() -> MarketMonitorUnitOfWork:
+    return MarketMonitorUnitOfWork(_workspace_session)
+
+
+def _market_poll_universe() -> list[str]:
+    """Derive the bounded poll universe (configured override or CN equities).
+
+    Only instruments the terminal can price live are polled, so a snapshot is
+    never fabricated for an instrument PandaData cannot quote.
+    """
+    configured = settings.market_poll_universe
+    if configured:
+        symbols = [item.strip().upper() for item in configured.split(",")]
+        return [symbol for symbol in symbols if symbol]
+    service, _application = _services()
+    universe: list[str] = []
+    for instrument in service.instrument_master.all():
+        if _supports_live_quote(instrument.market.value, instrument.asset_class.value):
+            universe.append(instrument.symbol)
+    return universe
+
+
+async def snapshots(_request: Request) -> JSONResponse:
+    """Return the server-cached market snapshots (with upstream time/frequency)."""
+    try:
+        async with _market_monitor_uow() as uow:
+            rows = await uow.monitor.list_snapshots()
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
+        return _internal_error()
+    return _json(
+        {
+            "provider": "PandaData",
+            "poll_interval_seconds": settings.market_poll_interval_seconds,
+            "alert_threshold": settings.market_alert_threshold,
+            "snapshots": [row.model_dump(mode="json") for row in rows],
+        }
+    )
+
+
+async def alerts(request: Request) -> JSONResponse:
+    """Return the most recent global market alerts (append-only log)."""
+    try:
+        limit = int(request.query_params.get("limit", "50"))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(limit, 200))
+    try:
+        async with _market_monitor_uow() as uow:
+            rows = await uow.monitor.list_alerts(limit=limit)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
+        return _internal_error()
+    return _json(
+        {
+            "provider": "PandaData",
+            "alerts": [row.model_dump(mode="json") for row in rows],
+        }
+    )
+
+
+def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | None]:
+    """Start the always-on market poller as a background task, if enabled.
+
+    Degrades safely: a failure to derive the universe or an empty universe
+    simply means no poller runs; the rest of the API stays available.
+    """
+    if not settings.market_poll_enabled:
+        return None, None
+    try:
+        universe = _market_poll_universe()
+    except Exception as error:  # noqa: BLE001 - startup must not fail on the poller
+        _LOGGER.error(
+            "market poll universe derivation failed: %s", type(error).__name__
+        )
+        return None, None
+    if not universe:
+        _LOGGER.info("market poller idle: no priceable instruments in universe")
+        return None, None
+    escalate = settings.market_alert_escalate_threshold
+    poller = MarketPoller(
+        quotes_provider=_candidate_quotes,
+        uow_factory=_market_monitor_uow,
+        threshold=Decimal(str(settings.market_alert_threshold)),
+        escalate_threshold=(
+            Decimal(str(escalate)) if escalate is not None else None
+        ),
+    )
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(
+        poller.run_forever(
+            symbols=universe,
+            interval_seconds=settings.market_poll_interval_seconds,
+            stop_event=stop_event,
+        )
+    )
+    _LOGGER.info(
+        "market poller started over %d instrument(s) at %.0fs interval",
+        len(universe),
+        settings.market_poll_interval_seconds,
+    )
+    return stop_event, task
+
+
 def _candidate_service() -> CandidateScoringService:
     """Build the deterministic candidate scoring service on demand."""
     portfolio = PortfolioQueryService(
@@ -640,6 +764,8 @@ finance_routes = [
     Route("/market/bars", bars),
     Route("/market/instruments", instruments),
     Route("/market/catalog", catalog),
+    Route("/market/snapshots", snapshots),
+    Route("/market/alerts", alerts),
     Mount(
         "/workspace",
         routes=create_workspace_routes(

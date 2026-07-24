@@ -24,6 +24,8 @@ import type {
   MandateImpact,
   MandateSavePayload,
   MarketQuote,
+  MarketAlertsResponse,
+  MarketSnapshotsResponse,
   MarketOverviewView,
   NotificationPreference,
   OrderDraftCreate,
@@ -359,6 +361,37 @@ export async function searchInstruments(query = ''): Promise<InstrumentSearchRes
     const params = query.trim() ? { q: query.trim() } : undefined
     const { data } = await desk.get<InstrumentSearchResponse>('/market/instruments', { params })
     return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+// ─── 行情异动（服务端轮询检测，只读） ───────────────
+
+/** 读取服务端缓存的最新行情快照（含上游时点与实际频率）。 */
+export async function fetchMarketSnapshots(): Promise<MarketSnapshotsResponse> {
+  try {
+    const { data } = await desk.get<MarketSnapshotsResponse>('/market/snapshots')
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 读取最近的全局行情异动告警（按检测时间倒序）。 */
+export async function fetchMarketAlerts(limit = 50): Promise<MarketAlertsResponse> {
+  try {
+    const { data } = await desk.get<MarketAlertsResponse>('/market/alerts', {
+      params: { limit },
+    })
+    return {
+      ...data,
+      alerts: data.alerts.map((alert) => ({
+        ...alert,
+        change_percent: decimalNumber(alert.change_percent, 'alert.change_percent'),
+        last: decimalNumber(alert.last, 'alert.last'),
+      })),
+    }
   } catch (err) {
     throw extractError(err)
   }
