@@ -1,121 +1,147 @@
 # Finance-God
 
-心智驱动的 AI 投资顾问 — 黑客松 MVP。
+Finance-God is a Chinese-first educational investment profiling application.
+The current release covers authentication, objective information collection,
+AI-assisted text/voice onboarding, a deterministic profile report, investment
+direction selection, and administrator AI settings. It does not execute trades
+or recommend specific funds.
 
-后端：FastAPI + SQLAlchemy 2 + PostgreSQL  
-前端：React 18 + TypeScript + Vite + Ant Design  
-能力：插件化数据源/LLM/Agent/风控，仿真交易闭环
+## Stack
 
-## 快速开始
+- Frontend: Vue 3, TypeScript, Vite, Pinia, Vue Router
+- Backend: FastAPI, SQLAlchemy 2, Pydantic, Alembic
+- Database: PostgreSQL 16
+- AI: DeepSeek OpenAI-compatible text adapter, development mock, and browser speech APIs
 
-### 1. 环境准备
+## Setup
 
-- Python 3.11+
-- Node.js 20+
-- Docker（用于 PostgreSQL，可选）
+Requirements: Python 3.11+, Node.js 20+, and PostgreSQL 16 (local or Docker).
 
 ```bash
-# 复制环境变量
 cp .env.example .env
 
-# 后端依赖（建议使用 venv）
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-cd ..
-
-# 前端依赖
-cd frontend && npm install && cd ..
+cd ../frontend
+npm install
 ```
 
-### 2. 启动数据库
+Start PostgreSQL and apply the existing schema:
 
 ```bash
 docker compose up -d db
-# 或 make db
+cd backend
+.venv/bin/alembic upgrade head
+make seed-dev-admin
 ```
 
-### 3. 数据库迁移
+Start the services in separate terminals:
 
 ```bash
 cd backend
-# 确保 DATABASE_URL_SYNC 指向本机 Postgres（见 .env.example）
-alembic upgrade head
-cd ..
+.venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+cd frontend
+npm run dev
 ```
 
-### 4. 启动开发服务
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:8000`
+- OpenAPI UI: `http://localhost:8000/docs`
+- OpenAPI JSON: `http://localhost:8000/openapi.json`
 
-分两个终端：
+## Existing Workspace Database
+
+On 2026-07-23, the local `finance_god` development database in this checkout
+was deliberately dropped, recreated, and migrated to the clean onboarding
+schema.
+
+Choose the migration path based on the workspace state:
+
+- A fresh database or a database already created from the current onboarding
+  migration can run `alembic upgrade head`.
+- A legacy workspace stamped with the old `20260723_0001` revision must use the
+  guarded reset below. The revision identifier was retained while its schema
+  was replaced, so `alembic upgrade head` alone reports success without
+  replacing legacy trading tables.
+
+The legacy reset destroys local data. Always run `--check` first and inspect the
+validated database name before proceeding.
+
+The reset workflow is guarded. It runs only with `APP_ENV=development`, accepts
+only a local PostgreSQL host, and accepts only the database names `finance_god`
+or `finance_god_dev`. Validate the target without changing data first:
 
 ```bash
-# 后端 http://localhost:8000
-make backend
-# API 文档: http://localhost:8000/docs
-
-# 前端 http://localhost:3000
-make frontend
+cd backend
+APP_ENV=development \
+DATABASE_URL_SYNC=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/finance_god \
+./scripts/reset_dev_db.sh --check
 ```
 
-或使用：
+To erase and rebuild that validated legacy development database:
 
 ```bash
-make install   # 安装前后端依赖
-make db        # 启动 Postgres
-make migrate   # 迁移
-make backend   # 另开终端
-make frontend  # 另开终端
+cd backend
+APP_ENV=development \
+DATABASE_URL_SYNC=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/finance_god \
+make reset-dev-db
 ```
 
-### 5. 健康检查
+The script uses the `postgres` maintenance database, recreates only the
+validated target, and runs `alembic upgrade head`. It refuses production mode,
+remote hosts, other database names, and missing URLs.
+
+## Configuration
+
+Important environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `APP_ENV` | `development` enables the mock text provider; other environments require a supported non-mock provider |
+| `DATABASE_URL` | Async application database URL |
+| `DATABASE_URL_SYNC` | Synchronous Alembic and guarded reset URL |
+| `SECRET_KEY` | JWT signing secret; the development default is rejected outside development |
+| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `DEEPSEEK_API_KEY` | Server-only DeepSeek credential; never exposed to the frontend or admin API |
+| `DEV_ADMIN_EMAIL` | Development administrator email, default `admin@finance-god.local` |
+| `DEV_ADMIN_PASSWORD` | Development-only seed password; required by `make seed-dev-admin`, minimum 12 characters |
+| `VITE_WORKBENCH_ORIGIN` | Browser build variable containing the exact target origin for the profile completion handoff |
+| `WORKBENCH_ORIGIN` | Compatible alias used by Vite when `VITE_WORKBENCH_ORIGIN` is absent |
+
+The frontend resolves `VITE_WORKBENCH_ORIGIN` first and falls back to
+`WORKBENCH_ORIGIN`. Vite embeds this value into browser code, so set it before
+starting the development server or creating a production build. Docker Compose
+passes the root `.env` file to the frontend service.
+
+API keys are read only from server environment variables referenced by admin
+configuration. They are never returned by the API or stored in audit snapshots.
+The DeepSeek origin is fixed to `https://api.deepseek.com`; administrators may
+select only `deepseek-v4-flash` or `deepseek-v4-pro`. User and administrator
+browser sessions use separate credentials, so both areas can stay signed in in
+the same browser.
+
+The development admin seed command refuses to run outside `APP_ENV=development`.
+Keep its password in the ignored local `.env`, then open `/admin/login`.
+
+## Tests
 
 ```bash
-curl http://localhost:8000/health
-# {"status":"healthy"}
+cd backend
+.venv/bin/pytest -q
+.venv/bin/alembic upgrade head --sql
 ```
 
-## 项目结构
+The PostgreSQL migration round-trip test is opt-in and destructive only to a
+database named exactly `finance_god_test`:
 
-```
-Finance-God/
-├── backend/           # FastAPI 应用
-│   ├── app/
-│   │   ├── api/v1/    # REST 路由
-│   │   ├── agents/    # Agent 插件
-│   │   ├── models/    # ORM
-│   │   ├── services/  # 业务服务
-│   │   ├── plugins/   # 数据源/LLM/费用/滑点
-│   │   ├── risk/      # 风控规则引擎
-│   │   └── evolution/ # 自进化
-│   └── alembic/       # 迁移
-├── frontend/          # React 前端
-├── docs/              # PRD / 实现计划
-├── docker-compose.yml
-└── Makefile
+```bash
+FINANCE_GOD_POSTGRES_TEST_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/finance_god_test \
+.venv/bin/pytest tests/integration/test_postgres_migrations.py -q
 ```
 
-## 配置说明
-
-关键环境变量见 `.env.example`：
-
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `DATABASE_URL` | 异步库连接 | localhost Postgres |
-| `LLM_PROVIDER` | `mock` / `deepseek` / `volcengine` | `mock` |
-| `DATA_PROVIDER` | `mock` / `pandaai` | `mock` |
-| `SECRET_KEY` | JWT 密钥 | 开发占位，生产必须更换 |
-
-开发默认使用 **mock** LLM 与数据源，无需真实 API Key 即可联调。
-
-## 当前状态（MVP）
-
-- [x] 后端骨架：认证、画像、授权、订单/仿真、Agent 插件
-- [x] 初始数据库迁移
-- [ ] 前端业务页面（目前多为占位）
-- [ ] 完整风控规则与自动化测试
-
-## 文档
-
-- [MVP PRD](docs/prd/Finance-God_MVP_PRD_v1.0.md)
-- [黑客松实现计划](docs/superpowers/plans/2026-07-23-hackathon-implementation-plan.md)
+See [backend/docs/workbench-integration.md](backend/docs/workbench-integration.md)
+for API fields, enums, error codes, idempotency behavior, and the workbench
+`postMessage` contract.

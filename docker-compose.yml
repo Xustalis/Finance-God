@@ -24,6 +24,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/finance_god
       DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@db:5432/finance_god
+      APP_ENV: ${APP_ENV:-development}
+      DEV_ADMIN_EMAIL: ${DEV_ADMIN_EMAIL:-admin@finance-god.local}
     depends_on:
       db:
         condition: service_healthy
@@ -33,6 +35,8 @@ services:
 
   frontend:
     build: ./frontend
+    env_file:
+      - .env
     ports:
       - "3000:3000"
     volumes:

@@ -3,14 +3,15 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import ApiResponse
 from app.core.security import (
     create_access_token,
-    get_current_user_id,
+    get_current_user,
     hash_password,
     verify_password,
 )
@@ -22,39 +23,99 @@ router = APIRouter()
 
 class LoginRequest(BaseModel):
     email: str
-    password: str
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized or "." not in normalized.rsplit("@", 1)[-1]:
+            raise ValueError("Invalid email address")
+        return normalized
 
 
 class RegisterRequest(BaseModel):
     email: str
-    password: str
+    password: str = Field(min_length=8, max_length=128)
     display_name: str | None = None
     base_currency: str = "CNY"
     region: str = "CN"
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return LoginRequest.validate_email(value)
 
-@router.post("/login")
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    display_name: str | None
+    base_currency: str
+    region: str
+    role: str
+    status: str
+    last_login_at: datetime | None
+    created_at: datetime
+
+
+class AuthData(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+
+@router.post("/login", response_model=ApiResponse[AuthData])
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.hashed_password):
+    user = await _authenticated_user(body, db)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误",
         )
+    return await _login_response(user, db)
+
+
+@router.post("/admin/login", response_model=ApiResponse[AuthData])
+async def admin_login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+    user = await _authenticated_user(body, db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="管理员邮箱或密码错误",
+        )
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="管理员邮箱或密码错误",
+        )
+    return await _login_response(user, db)
+
+
+async def _authenticated_user(body: LoginRequest, db: AsyncSession) -> User | None:
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+    if not user or user.status != "active" or not verify_password(body.password, user.hashed_password):
+        return None
+    return user
+
+
+async def _login_response(user: User, db: AsyncSession) -> ApiResponse:
     user.last_login_at = datetime.now(timezone.utc)
     await db.flush()
     token = create_access_token(user.id)
     return ApiResponse.ok(
         {
-            "token": token,
+            "access_token": token,
             "token_type": "bearer",
             "user": _user_to_dict(user),
         }
     )
 
 
-@router.post("/register")
+@router.post("/register", response_model=ApiResponse[AuthData], status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
@@ -70,29 +131,28 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
         region=body.region,
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该邮箱已被注册",
+        ) from exc
     token = create_access_token(user.id)
     return ApiResponse.ok(
         {
-            "token": token,
+            "access_token": token,
             "token_type": "bearer",
             "user": _user_to_dict(user),
         }
     )
 
 
-@router.get("/me")
+@router.get("/me", response_model=ApiResponse[UserResponse])
 async def me(
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在",
-        )
     return ApiResponse.ok(_user_to_dict(user))
 
 
@@ -104,6 +164,7 @@ def _user_to_dict(user: User) -> dict:
         "base_currency": user.base_currency,
         "region": user.region,
         "status": user.status,
+        "role": user.role,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
     }

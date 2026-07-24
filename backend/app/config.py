@@ -1,7 +1,8 @@
-"""Finance-God 应用配置 - Pydantic Settings"""
+"""Finance-God application settings."""
 
 from pathlib import Path
 
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 支持从 backend/ 或仓库根目录读取 .env
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     app_name: str = "Finance-God"
     app_env: str = "development"
     app_debug: bool = True
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # 数据库
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/finance_god"
@@ -33,21 +34,17 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
 
-    # LLM
-    deepseek_api_key: str = ""
-    deepseek_base_url: str = "https://api.deepseek.com/v1"
-    deepseek_model: str = "deepseek-chat"
-    volcengine_api_key: str = ""
-    volcengine_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
-    volcengine_model: str = "doubao-pro-32k"
-    llm_provider: str = "mock"
+    # 仅用于本地开发管理员初始化
+    dev_admin_email: str = "admin@finance-god.local"
+    dev_admin_password: str | None = None
 
-    # 数据源
-    pandaai_api_key: str = ""
-    data_provider: str = "mock"
+    # 服务端 AI 凭据，不得序列化到 API
+    deepseek_api_key: SecretStr | None = None
 
-    # 仿真账户
-    sim_initial_cash: float = 1000000
-
+    @model_validator(mode="after")
+    def validate_production_secret(self):
+        if self.app_env != "development" and self.secret_key == "change-me-in-production-please-use-a-long-random-string":
+            raise ValueError("SECRET_KEY must be explicitly configured outside development")
+        return self
 
 settings = Settings()
