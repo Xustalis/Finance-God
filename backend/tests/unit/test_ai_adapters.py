@@ -78,6 +78,315 @@ def deepseek_response(content: dict) -> httpx.Response:
     )
 
 
+def deepseek_raw_response(raw_content: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": raw_content}}]},
+    )
+
+
+DEEPSEEK_RESPOND_ARGS = {
+    "content": "我可以长期持有，也能接受一些波动",
+    "round_count": 0,
+    "turn_count": 1,
+    "min_rounds": 6,
+    "max_rounds": 12,
+    "completeness": 0.45,
+    "dimension_scores": {},
+    "followup_counts": {},
+    "skipped_dimensions": [],
+    "current_dimension": "risk_tolerance",
+    "objective_profile": {"investment_experience": "none"},
+}
+
+
+def deepseek_orchestrator(transport: httpx.MockTransport) -> ai.AIOrchestrator:
+    return ai.DeepSeekTextProvider(api_key="test-secret", transport=transport).create(
+        model_name="deepseek-v4-flash", system_prompt="system prompt"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deepseek_content_wrapped_in_markdown_fence_is_parsed() -> None:
+    payload = json.dumps(
+        {
+            "reply": "谢谢你的分享。",
+            "target_dimension": "risk_tolerance",
+            "profile_value": 0.5,
+            "confidence": 0.7,
+            "should_continue": True,
+            "end_reason": None,
+            "next_question": "这笔钱多久内可能需要取用？",
+            "next_question_dimension": "liquidity_need",
+        },
+        ensure_ascii=False,
+    )
+    transport = httpx.MockTransport(
+        lambda request: deepseek_raw_response(f"```json\n{payload}\n```")
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.reply == "谢谢你的分享。"
+    assert result.next_question_dimension is ai.ProfileDimension.LIQUIDITY_NEED
+
+
+@pytest.mark.asyncio
+async def test_deepseek_content_with_surrounding_prose_is_parsed() -> None:
+    payload = json.dumps(
+        {
+            "reply": "已记录你的情况。",
+            "target_dimension": "risk_tolerance",
+            "profile_value": 0.2,
+            "confidence": 0.6,
+            "should_continue": True,
+            "next_question": "你最希望这笔资金支持哪个目标？",
+            "next_question_dimension": "investment_goal",
+        },
+        ensure_ascii=False,
+    )
+    transport = httpx.MockTransport(
+        lambda request: deepseek_raw_response(f"以下是结构化结果：{payload}\n希望对你有帮助。")
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.reply == "已记录你的情况。"
+    assert result.next_question_dimension is ai.ProfileDimension.INVESTMENT_GOAL
+
+
+@pytest.mark.asyncio
+async def test_deepseek_unknown_dimensions_are_normalized() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "接下来聊聊你的财务目标。",
+                "target_dimension": "financial_goal",
+                "profile_value": 0.7,
+                "confidence": 0.8,
+                "should_continue": True,
+                "end_reason": "continue",
+                "next_question": "你的投资计划是长期还是短期？",
+                "next_question_dimension": "investment_horizon",
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    # 本轮证据归属会话当前维度，枚举外的下一问题维度置空由服务端兜底
+    assert result.target_dimension is ai.ProfileDimension.RISK_TOLERANCE
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.7}
+    assert result.next_question is None
+    assert result.next_question_dimension is None
+
+
+@pytest.mark.asyncio
+async def test_deepseek_missing_optional_fields_use_safe_defaults() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "我会换一个更容易回答的问题。",
+                "target_dimension": "risk_tolerance",
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.0}
+    assert result.confidence == 0.5
+    assert result.should_continue is True
+    assert result.next_question is None
+    assert result.next_question_dimension is None
+
+
+@pytest.mark.asyncio
+async def test_deepseek_out_of_range_scores_are_clamped() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "已记录。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 1.6,
+                "confidence": 1.4,
+                "should_continue": True,
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 1.0}
+    assert result.confidence == 1.0
+
+
+@pytest.mark.asyncio
+async def test_deepseek_string_numeric_scores_are_parsed_and_clamped() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "已记录。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": "0.7",
+                "confidence": "0.8",
+                "should_continue": True,
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.7}
+    assert result.confidence == 0.8
+
+
+@pytest.mark.asyncio
+async def test_deepseek_non_numeric_profile_value_keeps_readable_error() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "已记录。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": "not-a-number",
+                "confidence": 0.8,
+                "should_continue": True,
+            }
+        )
+    )
+
+    with pytest.raises(ai.AIProviderError, match="无法解析的结构化结果") as raised:
+        await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert raised.value.code == "DEEPSEEK_INVALID_RESPONSE"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_severely_out_of_range_scores_are_rejected() -> None:
+    # 严重越界是模型硬失败，不应被 clamp 静默截断入库
+    for overrides in ({"profile_value": 10}, {"confidence": -5}):
+        transport = httpx.MockTransport(
+            lambda request, overrides=overrides: deepseek_response(
+                {
+                    "reply": "已记录。",
+                    "target_dimension": "risk_tolerance",
+                    "profile_value": 0.5,
+                    "confidence": 0.8,
+                    "should_continue": True,
+                    **overrides,
+                }
+            )
+        )
+
+        with pytest.raises(ai.AIProviderError, match="无法解析的结构化结果") as raised:
+            await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+        assert raised.value.code == "DEEPSEEK_INVALID_RESPONSE"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_slightly_out_of_range_scores_are_clamped_to_bounds() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "已记录。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 1.05,
+                "confidence": -0.05,
+                "should_continue": True,
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 1.0}
+    assert result.confidence == 0.0
+
+
+@pytest.mark.asyncio
+async def test_deepseek_blank_next_question_is_normalized_to_none() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "已记录。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 0.5,
+                "confidence": 0.7,
+                "should_continue": True,
+                "next_question": "   \n",
+                "next_question_dimension": "liquidity_need",
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.next_question is None
+    assert result.next_question_dimension is None
+
+
+@pytest.mark.asyncio
+async def test_deepseek_blank_reply_keeps_readable_error() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "   ",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 0.5,
+                "confidence": 0.7,
+                "should_continue": True,
+            }
+        )
+    )
+
+    with pytest.raises(ai.AIProviderError, match="无法解析的结构化结果") as raised:
+        await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert raised.value.code == "DEEPSEEK_INVALID_RESPONSE"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_non_enum_end_reason_is_tolerated() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_response(
+            {
+                "reply": "已记录。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 0.5,
+                "confidence": 0.7,
+                "should_continue": True,
+                "end_reason": "continue",
+            }
+        )
+    )
+
+    result = await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert result.end_reason == "continue"
+    assert result.should_continue is True
+
+
+@pytest.mark.asyncio
+async def test_deepseek_unparseable_content_keeps_readable_error() -> None:
+    transport = httpx.MockTransport(
+        lambda request: deepseek_raw_response("抱歉，我无法提供结构化结果。")
+    )
+
+    with pytest.raises(ai.AIProviderError, match="无法解析的结构化结果") as raised:
+        await deepseek_orchestrator(transport).respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert raised.value.code == "DEEPSEEK_INVALID_RESPONSE"
+
+
+def test_extract_json_object_handles_fences_and_prefixes() -> None:
+    assert ai.extract_json_object('```json\n{"a": 1}\n```') == {"a": 1}
+    assert ai.extract_json_object('```\n{"a": 1}\n```') == {"a": 1}
+    assert ai.extract_json_object('前缀说明 {"a": {"b": 2}} 后缀说明') == {"a": {"b": 2}}
+    with pytest.raises(json.JSONDecodeError):
+        ai.extract_json_object("完全不含结构化内容")
+
+
 def test_system_prompt_requires_automatic_numeric_profile_analysis() -> None:
     assert "until the user confirms" not in ai.ONBOARDING_SYSTEM_PROMPT
     assert "neutral value 0" in ai.ONBOARDING_SYSTEM_PROMPT

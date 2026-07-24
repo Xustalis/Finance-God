@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 import json
+import re
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.config import settings
 from app.schemas.onboarding import AITurnResult, ProfileDimension
@@ -239,16 +240,68 @@ class AIProviderError(RuntimeError):
 
 
 class DeepSeekTurnPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # 真实模型输出存在漂移：宽松接收额外字段与枚举外维度，由适配器归一化
+    model_config = ConfigDict(extra="ignore")
 
     reply: str = Field(min_length=1, max_length=4000)
-    target_dimension: ProfileDimension
-    profile_value: float | None = Field(ge=-1, le=1)
-    confidence: float = Field(ge=0, le=1)
-    should_continue: bool
+    target_dimension: str
+    profile_value: float | None = None
+    confidence: float = 0.5
+    should_continue: bool = True
     end_reason: str | None = None
-    next_question: str | None = Field(default=None, min_length=1, max_length=1000)
-    next_question_dimension: ProfileDimension | None = None
+    next_question: str | None = None
+    next_question_dimension: str | None = None
+
+    @field_validator("reply")
+    @classmethod
+    def reject_blank_reply(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("reply cannot be blank")
+        return stripped
+
+    @field_validator("profile_value")
+    @classmethod
+    def clamp_profile_value(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        number = float(value)
+        # 轻微越界视为可修复漂移；严重越界是模型硬失败，不应静默截断入库
+        if number < -2.0 or number > 2.0:
+            raise ValueError("profile_value is far outside the [-1, 1] contract")
+        return max(-1.0, min(1.0, number))
+
+    @field_validator("confidence")
+    @classmethod
+    def clamp_confidence(cls, value: float) -> float:
+        number = float(value)
+        if number < -0.5 or number > 1.5:
+            raise ValueError("confidence is far outside the [0, 1] contract")
+        return max(0.0, min(1.0, number))
+
+    @field_validator("next_question")
+    @classmethod
+    def blank_question_is_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped[:1000] if stripped else None
+
+
+def extract_json_object(raw: str) -> Any:
+    """从模型输出中提取首个 JSON 对象，容忍 markdown 围栏与前后解释性文字。"""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start == -1:
+            raise
+        parsed, _ = json.JSONDecoder().raw_decode(text[start:])
+        return parsed
 
 
 class DeepSeekOrchestrator(AIOrchestrator):
@@ -302,7 +355,10 @@ class DeepSeekOrchestrator(AIOrchestrator):
                         f"{self.system_prompt}\n\n{interview_context}\n\n"
                         "Return one JSON object with reply, target_dimension, profile_value, confidence, "
                         "should_continue, end_reason, next_question, and next_question_dimension. "
-                        "profile_value must be a number from -1 to 1; use the neutral value 0 when evidence is unclear."
+                        "target_dimension must equal session_state.current_dimension. "
+                        f"next_question_dimension must be null or one of: {', '.join(PROFILE_DIMENSIONS)}. "
+                        "profile_value must be a number from -1 to 1; use the neutral value 0 when evidence is unclear. "
+                        "Output raw JSON only, without markdown code fences or extra text."
                     ),
                 },
                 {
@@ -340,11 +396,21 @@ class DeepSeekOrchestrator(AIOrchestrator):
         try:
             envelope = response.json()
             raw_content = envelope["choices"][0]["message"]["content"]
-            parsed = DeepSeekTurnPayload.model_validate(json.loads(raw_content))
+            parsed = DeepSeekTurnPayload.model_validate(extract_json_object(raw_content))
         except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as exc:
             raise AIProviderError("DEEPSEEK_INVALID_RESPONSE", "DeepSeek 返回了无法解析的结构化结果") from exc
 
-        target = parsed.target_dimension
+        # 归一化维度：真实模型可能自造枚举外维度或偏离当前维度，
+        # 本轮证据始终归属会话当前维度；非法的下一问题维度置空，由服务端兜底补问。
+        target = ProfileDimension(current_dimension)
+        next_dimension = (
+            ProfileDimension(parsed.next_question_dimension)
+            if parsed.next_question_dimension in PROFILE_DIMENSIONS
+            else None
+        )
+        next_question = parsed.next_question if next_dimension is not None else None
+        if next_question is None:
+            next_dimension = None
         return AITurnResult(
             reply=parsed.reply,
             target_dimension=target,
@@ -353,8 +419,8 @@ class DeepSeekOrchestrator(AIOrchestrator):
             confidence=parsed.confidence,
             should_continue=parsed.should_continue,
             end_reason=parsed.end_reason,
-            next_question=parsed.next_question,
-            next_question_dimension=parsed.next_question_dimension,
+            next_question=next_question,
+            next_question_dimension=next_dimension,
             retry_question=retry_question(target.value),
         )
 
