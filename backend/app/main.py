@@ -1,4 +1,4 @@
-"""FastAPI 应用入口"""
+"""Finance-God onboarding API."""
 
 import uuid
 from contextlib import asynccontextmanager
@@ -12,18 +12,13 @@ from app.core.exceptions import register_exception_handlers
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期"""
-    # 启动: 初始化插件
-    from app.plugins import init_all_plugins
-    init_all_plugins()
     yield
-    # 关闭: 清理资源
 
 
 app = FastAPI(
     title=settings.app_name,
-    description="心智驱动的 AI 投资顾问 - Hackathon MVP",
-    version="0.1.0",
+    description="Typed API for investment onboarding, educational profiling, and direction selection.",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -57,7 +52,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
-    return {"name": settings.app_name, "version": "0.1.0", "status": "running"}
+    return {"name": settings.app_name, "version": "1.0.0", "status": "running"}
 
 
 @app.get("/health")

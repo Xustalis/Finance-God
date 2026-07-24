@@ -1,32 +1,61 @@
-"""量化用户画像表"""
-
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
 
-from sqlalchemy import String, DateTime, Integer, Numeric, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
 
-class UserProfile(Base):
-    __tablename__ = "user_profiles"
-    __table_args__ = (UniqueConstraint("user_id", "version", name="uq_profile_user_version"),)
+def new_id() -> str:
+    return str(uuid.uuid4())
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False, index=True)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    goals: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    financial_constraints: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    stated_risk: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    revealed_risk: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    behavioral_prefs: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    restrictions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    completeness: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False, default=Decimal("0"))
-    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False, default=Decimal("0"))
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")  # draft/confirmed/superseded
-    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class InvestmentProfile(Base):
+    __tablename__ = "investment_profiles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "version", name="uq_investment_profiles_user_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("onboarding_sessions.id"), nullable=False, unique=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    objective_profile: Mapped[dict] = mapped_column(JSON, nullable=False)
+    dimension_scores: Mapped[dict] = mapped_column(JSON, nullable=False)
+    profile_evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    archetype_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    archetype_title: Mapped[str] = mapped_column(String(100), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False)
+    loss_tolerance_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    completeness: Mapped[float] = mapped_column(Float, nullable=False)
+    education_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    report_summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class DirectionRecommendation(Base):
+    __tablename__ = "direction_recommendations"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id", "direction", name="uq_direction_recommendations_direction"
+        ),
+        UniqueConstraint(
+            "profile_id", "rank", name="uq_direction_recommendations_rank"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("investment_profiles.id"), nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String(64), nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actionable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    selected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
