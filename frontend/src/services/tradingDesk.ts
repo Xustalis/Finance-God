@@ -44,22 +44,55 @@ export interface DeskNotification {
 
 export interface DeskFact {
   scope: string
-  source: {
+  source?: {
     endpoint: string
     data_time: string
     ingested_at: string
     evidence_ref: string
   }
-  freshness: { status: string }
+  freshness?: { status: string }
   fields: Array<{ name: string; value: string | number | boolean | null }>
+}
+
+export interface CrawlerSentiment {
+  score: number
+  level: 'extreme_fear' | 'fear' | 'neutral' | 'greed' | 'extreme_greed'
+  breadth: {
+    up_count: number
+    down_count: number
+    flat_count: number
+    limit_up: number
+    limit_down: number
+    up_ratio: number
+  }
+  north_flow: number
+  sector_flows: Array<{
+    sector_name: string
+    change_percent: number
+    net_inflow: number
+  }>
+  hot_sectors: string[]
+  risk_sectors: string[]
+  retrieved_at: string
+  data_source: string
 }
 
 export interface DeskFactBatch {
   provider: string
-  fact_kind: 'company_disclosure' | 'margin_balance'
+  fact_kind: 'company_disclosure' | 'margin_balance' | 'market_sentiment' | 'industry_news'
   symbol: string
   requested_at: string
   facts: DeskFact[]
+  sentiment?: CrawlerSentiment
+  news?: Array<{
+    title: string
+    summary: string
+    source: string
+    url: string
+    publish_time: string | null
+    sector: string
+    tags: string[]
+  }>
 }
 
 export type IdempotencyKey = string
@@ -319,18 +352,8 @@ export async function fetchMarketOverview(symbols: readonly string[]): Promise<D
 }
 
 export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
-  const now = new Date()
-  const currentYear = now.getUTCFullYear()
-  const currentQuarter = Math.floor(now.getUTCMonth() / 3) + 1
-  const previousQuarter = currentQuarter === 1 ? 4 : currentQuarter - 1
-  const previousYear = currentQuarter === 1 ? currentYear - 1 : currentYear
   return request(() => client.get('/market/information-facts', {
-    params: {
-      symbol,
-      start_quarter: `${previousYear}q${previousQuarter}`,
-      end_quarter: `${currentYear}q${currentQuarter}`,
-      limit: 4,
-    },
+    params: { symbol, limit: 10 },
   }))
 }
 

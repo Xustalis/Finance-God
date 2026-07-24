@@ -11,11 +11,12 @@ export interface OverviewQuote {
 }
 
 export interface MarketFact {
-  source: { data_time: string; evidence_ref: string }
+  source?: { data_time: string; evidence_ref: string }
   fields: Array<{ name: string; value: string | number | boolean | null }>
 }
 
 interface FactBatch {
+  provider?: string
   symbol: string
   requested_at: string
   facts: MarketFact[]
@@ -80,21 +81,33 @@ function field(value: string | number | boolean | null): string {
     </section>
 
     <section class="overview-section facts-section" aria-labelledby="sentiment-title">
-      <header><h2 id="sentiment-title">市场情绪</h2><small>融资余额原始事实，不生成情绪分数</small></header>
+      <header><h2 id="sentiment-title">市场情绪</h2><small>爬虫综合情绪（东方财富+同花顺）</small></header>
       <template v-if="sentimentFacts">
         <p class="fact-meta">{{ sentimentFacts.symbol }} · {{ sentimentFacts.requested_at }}</p>
-        <ul class="fact-list compact"><li v-for="fact in sentimentFacts.facts.slice(0, 3)" :key="fact.source.evidence_ref"><strong>{{ fact.source.data_time }}</strong><span v-for="item in fact.fields.slice(0, 2)" :key="item.name">{{ item.name }}：{{ field(item.value) }}</span></li></ul>
+        <ul class="fact-list compact"><li v-for="(fact, idx) in sentimentFacts.facts.slice(0, 3)" :key="fact.source?.evidence_ref || idx"><strong>{{ fact.source?.data_time || '实时' }}</strong><span v-for="item in fact.fields.slice(0, 4)" :key="item.name">{{ item.name }}：{{ field(item.value) }}</span></li></ul>
       </template>
       <p v-else class="empty-data">{{ sentimentError || '正在读取服务端情绪事实。' }}</p>
     </section>
 
     <section class="overview-section facts-section" aria-labelledby="information-title">
-      <header><h2 id="information-title">市场资讯</h2><small>公司披露原始事实</small></header>
+      <header><h2 id="information-title">市场资讯</h2><small>爬虫实时财经要闻与研报（东方财富）</small></header>
       <template v-if="informationFacts">
-        <p class="fact-meta">{{ informationFacts.symbol }} · {{ informationFacts.requested_at }}</p>
-        <ul class="fact-list compact"><li v-for="fact in informationFacts.facts.slice(0, 3)" :key="fact.source.evidence_ref"><strong>{{ fact.source.data_time }}</strong><span v-for="item in fact.fields.slice(0, 2)" :key="item.name">{{ item.name }}：{{ field(item.value) }}</span></li></ul>
+        <ul class="news-list">
+          <li v-for="(fact, idx) in informationFacts.facts.slice(0, 8)" :key="idx" class="news-item">
+            <a
+              :href="String(fact.fields.find(f => f.name === 'url')?.value || '#')"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="news-link"
+            >
+              <span class="news-sector">{{ fact.fields.find(f => f.name === 'sector')?.value || '综合' }}</span>
+              <span class="news-title">{{ fact.fields.find(f => f.name === 'title')?.value }}</span>
+              <small class="news-source">{{ fact.fields.find(f => f.name === 'source')?.value }}</small>
+            </a>
+          </li>
+        </ul>
       </template>
-      <p v-else class="empty-data">{{ informationError || '正在读取服务端披露事实。' }}</p>
+      <p v-else class="empty-data">{{ informationError || '正在读取市场资讯。' }}</p>
     </section>
   </section>
 </template>

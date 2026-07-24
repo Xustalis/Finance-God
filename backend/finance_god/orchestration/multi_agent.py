@@ -16,6 +16,7 @@ from research_runtime import (
 from research_runtime.config import FmpSettings, Settings
 from research_runtime.llm import OpenAICompatibleChat
 
+from .crawler_data_provider import CrawlerDataProvider
 from .market_data_provider import FinanceGodMarketDataProvider
 
 _PROJECT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -35,16 +36,29 @@ class MultiAgentRuntime:
         enable_panda_data: bool = True,
         enable_finrobot_metrics: bool = True,
     ) -> MultiAgentRuntime:
-        """Build a fully configured runtime with Finance-God owned adapters."""
+        """Build a fully configured runtime with Finance-God owned adapters.
+
+        The data provider uses CrawlerDataProvider as the primary source for
+        sentiment (MARGIN dataset), falling back to PandaData for market bars
+        and other quantitative datasets.
+        """
         load_dotenv(_PROJECT_ENV_FILE, override=False)
         settings = Settings.from_environment()
+
+        # Build PandaData provider as fallback for market bars and derivatives
+        panda_provider = (
+            FinanceGodMarketDataProvider.from_environment()
+            if enable_panda_data
+            else None
+        )
+
+        # CrawlerDataProvider handles MARGIN via crawler sentiment,
+        # delegates everything else to the PandaData fallback
+        data_provider = CrawlerDataProvider(fallback=panda_provider)
+
         runner = AgentRunner(
             chat_client=OpenAICompatibleChat(settings),
-            data_provider=(
-                FinanceGodMarketDataProvider.from_environment()
-                if enable_panda_data
-                else None
-            ),
+            data_provider=data_provider,
             fmp_settings=(
                 FmpSettings.from_environment() if enable_finrobot_metrics else None
             ),

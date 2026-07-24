@@ -100,6 +100,16 @@ market_poller_stop: asyncio.Event | None = None
 _agent_lock = Lock()
 _learning_lock = Lock()
 _service_lock = Lock()
+_crawler_service: "CrawlerService | None" = None
+
+
+def _crawler_service_instance() -> "CrawlerService":
+    """Lazily create the shared CrawlerService singleton."""
+    global _crawler_service
+    if _crawler_service is None:
+        from finance_god.crawler.service import CrawlerService
+        _crawler_service = CrawlerService()
+    return _crawler_service
 
 
 class WorkflowCommandDQAdapter:
@@ -382,57 +392,81 @@ async def bars(request: Request) -> JSONResponse:
 
 
 async def information_facts(request: Request) -> JSONResponse:
+    """Return market news/research sourced from the crawler (eastmoney).
+
+    Replaces PandaData financial-report disclosures with real-time industry
+    news and broker research reports crawled from public sources.
+    """
     symbol = request.query_params.get("symbol", "")
-    start_quarter = request.query_params.get("start_quarter")
-    end_quarter = request.query_params.get("end_quarter")
+    limit = min(int(request.query_params.get("limit", "10")), 30)
+
+    # Map stock symbol to a sector hint for the crawler
+    sector = request.query_params.get("sector", "")
+
     try:
-        limit = int(request.query_params.get("limit", "20"))
-        service, _application = _services()
-        result = await asyncio.to_thread(
-            service.read_information_facts,
-            symbol,
-            start_quarter=start_quarter or "",
-            end_quarter=end_quarter or "",
-            limit=limit,
+        news = await _crawler_service_instance().get_news(
+            sector=sector, limit=limit
         )
-    except (ValueError, ValidationError):
-        return _safe_error(
-            code="MARKET_DATA_INVALID_REQUEST",
-            message="The information-fact request is invalid.",
-            status_code=400,
-        )
-    except MarketDataError as error:
-        return _json({"error": error.public_payload()}, status_code=502)
+        facts = [
+            {
+                "scope": f"news:{item.sector or 'general'}",
+                "fields": [
+                    {"name": "title", "value": item.title},
+                    {"name": "summary", "value": item.summary},
+                    {"name": "source", "value": item.source},
+                    {"name": "url", "value": item.url},
+                    {"name": "sector", "value": item.sector},
+                ],
+            }
+            for item in news
+        ]
+        return _json({
+            "provider": "Finance-God/Crawler",
+            "fact_kind": "industry_news",
+            "symbol": symbol.upper() if symbol else "A_SHARE_MARKET",
+            "requested_at": news[0].publish_time.isoformat() if news and news[0].publish_time else None,
+            "facts": facts,
+            "news": [item.model_dump(mode="json") for item in news],
+            "trade_eligible": False,
+        })
     except Exception:  # noqa: BLE001 - public HTTP error boundary
         return _internal_error()
-    return _json(result)
 
 
 async def sentiment_facts(request: Request) -> JSONResponse:
-    symbol = request.query_params.get("symbol", "")
-    start_date = request.query_params.get("start_date")
-    end_date = request.query_params.get("end_date")
+    """Return market sentiment sourced from the crawler (eastmoney+ths).
+
+    Replaces PandaData margin-balance facts with richer multi-dimensional
+    sentiment data: score, level, breadth, north_flow, sector_flows.
+    """
+    from finance_god.crawler.service import CrawlerService
+
     try:
-        limit = int(request.query_params.get("limit", "60"))
-        service, _application = _services()
-        result = await asyncio.to_thread(
-            service.read_sentiment_facts,
-            symbol,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-        )
-    except (ValueError, ValidationError):
-        return _safe_error(
-            code="MARKET_DATA_INVALID_REQUEST",
-            message="The sentiment-fact request is invalid.",
-            status_code=400,
-        )
-    except MarketDataError as error:
-        return _json({"error": error.public_payload()}, status_code=502)
+        sentiment = await _crawler_service_instance().get_sentiment()
+        data = sentiment.model_dump(mode="json")
+        return _json({
+            "provider": "Finance-God/Crawler",
+            "fact_kind": "market_sentiment",
+            "symbol": request.query_params.get("symbol", "A_SHARE_MARKET"),
+            "requested_at": data["retrieved_at"],
+            "sentiment": data,
+            "facts": [
+                {
+                    "scope": "market_sentiment_score",
+                    "fields": [
+                        {"name": "score", "value": sentiment.score},
+                        {"name": "level", "value": sentiment.level.value},
+                        {"name": "north_flow", "value": sentiment.north_flow},
+                        {"name": "up_ratio", "value": sentiment.breadth.up_ratio},
+                        {"name": "limit_up", "value": sentiment.breadth.limit_up},
+                        {"name": "limit_down", "value": sentiment.breadth.limit_down},
+                    ],
+                },
+            ],
+            "trade_eligible": False,
+        })
     except Exception:  # noqa: BLE001 - public HTTP error boundary
         return _internal_error()
-    return _json(result)
 
 
 def _instrument_frequency(market: str, asset_class: str) -> str:
