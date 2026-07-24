@@ -9,11 +9,22 @@ import type {
   AgentResearchRequest,
   BarsResponse,
   BackendError,
+  CandidateIgnoreReason,
+  CandidateResponse,
   CatalogResponse,
   DecisionInboxView,
+  EvidenceCompareView,
+  EvidenceExportView,
+  EvidenceLineageView,
+  EvidenceTier,
+  EvidenceView,
   HealthResponse,
   InstrumentSearchResponse,
+  InvestmentMandate,
+  MandateImpact,
+  MandateSavePayload,
   MarketQuote,
+  MarketOverviewView,
   NotificationPreference,
   OrderDraftCreate,
   PortfolioView,
@@ -24,6 +35,10 @@ import type {
   StoredDraft,
   StoredOrder,
   StoredOrderView,
+  TradePlanActionRevision,
+  TradePlanPageView,
+  WatchlistGroup,
+  WatchlistInstrument,
 } from '@/types/desk'
 
 const USER_TOKEN_KEY = 'finance-god-token'
@@ -51,8 +66,19 @@ export class DeskApiError extends Error {
   }
 }
 
+/** 请求被主动取消（例如被更新的请求取代）时使用的错误码。 */
+export const REQUEST_CANCELED = 'REQUEST_CANCELED'
+
+/** 判断错误是否源于请求取消（AbortController.abort），供调用方静默忽略。 */
+export function isCanceledError(error: unknown): boolean {
+  return error instanceof DeskApiError && error.code === REQUEST_CANCELED
+}
+
 /** 从后端 {error:{code,message}} 格式提取错误消息 */
 function extractError(error: unknown): DeskApiError {
+  if (axios.isCancel(error)) {
+    return new DeskApiError('请求已取消', undefined, REQUEST_CANCELED)
+  }
   if (error instanceof AxiosError) {
     const body = error.response?.data as BackendError | undefined
     return new DeskApiError(
@@ -217,6 +243,31 @@ function normalizedPortfolio(view: PortfolioView): PortfolioView {
   }
 }
 
+function normalizedTradePlan(view: TradePlanPageView): TradePlanPageView {
+  return {
+    ...view,
+    object: {
+      ...view.object,
+      estimated_fee_rmb: decimalNumber(
+        view.object.estimated_fee_rmb,
+        'trade_plan.estimated_fee_rmb',
+      ),
+      actions: view.object.actions.map((action) => ({
+        ...action,
+        quantity: action.quantity === null
+          ? null
+          : decimalNumber(action.quantity, 'trade_plan.actions.quantity'),
+        limit_price: action.limit_price === null
+          ? null
+          : decimalNumber(action.limit_price, 'trade_plan.actions.limit_price'),
+        reference_price: action.reference_price === null
+          ? null
+          : decimalNumber(action.reference_price, 'trade_plan.actions.reference_price'),
+      })),
+    },
+  }
+}
+
 // ─── 行情数据 ──────────────────────────────────────
 
 /** 批量获取实时行情报价 */
@@ -231,11 +282,49 @@ export async function fetchQuotes(symbols: string[]): Promise<QuoteBatch> {
   }
 }
 
-/** 获取 K 线数据 */
-export async function fetchBars(symbol: string, limit = 80): Promise<BarsResponse> {
+/** 获取总览页权威市场指标；浏览器只展示，不计算交易判断。 */
+export async function fetchMarketOverview(symbols: string[]): Promise<MarketOverviewView> {
+  try {
+    const { data } = await desk.get<MarketOverviewView>('/market/overview', {
+      params: { symbols: symbols.join(',') },
+    })
+    return {
+      ...data,
+      data: {
+        ...data.data,
+        quotes: data.data.quotes.map(normalizedQuote),
+        signal: {
+          ...data.data.signal,
+          consistency_percent: data.data.signal.consistency_percent === null
+            ? null
+            : decimalNumber(
+              data.data.signal.consistency_percent,
+              'overview.signal.consistency_percent',
+            ),
+        },
+        indicators: data.data.indicators.map((indicator) => ({
+          ...indicator,
+          value: indicator.value === null
+            ? null
+            : decimalNumber(indicator.value, `overview.indicators.${indicator.code}`),
+        })),
+      },
+    }
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 获取 K 线数据；可选 signal 用于取消被更新请求取代的在途拉取。 */
+export async function fetchBars(
+  symbol: string,
+  limit = 80,
+  signal?: AbortSignal,
+): Promise<BarsResponse> {
   try {
     const { data } = await desk.get<BarsResponse>('/market/bars', {
       params: { symbol, limit },
+      signal,
     })
     return {
       ...data,
@@ -489,28 +578,208 @@ export async function fetchFills(orderId?: string): Promise<SimulationFill[]> {
 
 // ─── 工作区（自选股等） ────────────────────────────
 
-export async function fetchWatchlists() {
+export async function fetchWatchlists(): Promise<WatchlistGroup[]> {
   try {
-    const { data } = await desk.get('/workspace/watchlists')
+    const { data } = await desk.get<WatchlistGroup[]>('/workspace/watchlists')
     return data
   } catch (err) {
     throw extractError(err)
   }
 }
 
-export async function createWatchlistGroup(name: string, description?: string) {
+export async function createWatchlistGroup(
+  name: string,
+  description?: string,
+): Promise<WatchlistGroup> {
   try {
-    const { data } = await desk.post('/workspace/watchlists', { name, description: description ?? null })
+    const { data } = await desk.post<WatchlistGroup>('/workspace/watchlists', {
+      name,
+      description: description ?? null,
+    })
     return data
   } catch (err) {
     throw extractError(err)
   }
 }
 
-export async function addWatchlistInstrument(groupId: string, instrumentId: string) {
+export async function updateWatchlistGroup(
+  groupId: string,
+  name: string,
+  expectedRevision: number,
+  description?: string,
+): Promise<WatchlistGroup> {
   try {
-    const { data } = await desk.post(`/workspace/watchlists/${groupId}/instruments`, { instrument_id: instrumentId })
+    const { data } = await desk.patch<WatchlistGroup>(`/workspace/watchlists/${groupId}`, {
+      name,
+      description: description ?? null,
+      expected_revision: expectedRevision,
+    })
     return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function deleteWatchlistGroup(
+  groupId: string,
+  expectedRevision: number,
+): Promise<void> {
+  try {
+    await desk.delete(`/workspace/watchlists/${groupId}`, {
+      data: { expected_revision: expectedRevision },
+    })
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function fetchWatchlistInstruments(
+  groupId: string,
+): Promise<WatchlistInstrument[]> {
+  try {
+    const { data } = await desk.get<WatchlistInstrument[]>(
+      `/workspace/watchlists/${groupId}/instruments`,
+    )
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function addWatchlistInstrument(
+  groupId: string,
+  instrumentId: string,
+): Promise<WatchlistInstrument> {
+  try {
+    const { data } = await desk.post<WatchlistInstrument>(
+      `/workspace/watchlists/${groupId}/instruments`,
+      { instrument_id: instrumentId },
+    )
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function removeWatchlistInstrument(
+  groupId: string,
+  instrumentId: string,
+): Promise<void> {
+  try {
+    await desk.delete(`/workspace/watchlists/${groupId}/instruments/${instrumentId}`)
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+// ─── 系统候选（确定性五维评分，无综合分） ──────────
+// 后端 /workspace/candidates 基于真实持仓 + 实时行情逐维解释；
+// 行情不可用时返回 unavailable_reason，由页面显式降级呈现。
+
+export async function fetchCandidates(): Promise<CandidateResponse> {
+  try {
+    const { data } = await desk.get<CandidateResponse>('/workspace/candidates')
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+// ─── 交易计划（版本化 T04 闭环）──────────────────
+
+export async function createCandidateTradePlan(
+  instrumentId: string,
+  idempotencyKey: string,
+): Promise<TradePlanPageView> {
+  try {
+    const { data } = await desk.post<TradePlanPageView>(
+      '/trade-plans/from-candidate',
+      { instrument_id: instrumentId },
+      { headers: { 'idempotency-key': idempotencyKey } },
+    )
+    return normalizedTradePlan(data)
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function createPortfolioDeviationTradePlan(
+  idempotencyKey: string,
+): Promise<TradePlanPageView> {
+  try {
+    const { data } = await desk.post<TradePlanPageView>(
+      '/trade-plans/from-portfolio-deviation',
+      {},
+      { headers: { 'idempotency-key': idempotencyKey } },
+    )
+    return normalizedTradePlan(data)
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function fetchTradePlan(planId: string): Promise<TradePlanPageView> {
+  try {
+    const { data } = await desk.get<TradePlanPageView>(`/trade-plans/${planId}`)
+    return normalizedTradePlan(data)
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function saveTradePlanVersion(
+  planId: string,
+  expectedRevision: number,
+  actions: TradePlanActionRevision[],
+): Promise<TradePlanPageView> {
+  try {
+    const { data } = await desk.post<TradePlanPageView>(
+      `/trade-plans/${planId}/versions`,
+      { expected_revision: expectedRevision, actions },
+    )
+    return normalizedTradePlan(data)
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+export async function confirmTradePlanAndGenerateDrafts(
+  planId: string,
+  expectedRevision: number,
+  idempotencyKey: string,
+): Promise<TradePlanPageView> {
+  try {
+    const { data } = await desk.post<TradePlanPageView>(
+      `/trade-plans/${planId}/confirm-and-generate`,
+      { expected_revision: expectedRevision },
+      { headers: { 'idempotency-key': idempotencyKey } },
+    )
+    return normalizedTradePlan(data)
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 忽略某候选（持久化反馈，不删证据）。 */
+export async function ignoreCandidate(
+  instrumentId: string,
+  reason: CandidateIgnoreReason,
+  note?: string,
+): Promise<void> {
+  try {
+    await desk.post(`/workspace/candidates/${instrumentId}/ignore`, {
+      reason,
+      note: note ?? null,
+    })
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 撤销忽略某候选。 */
+export async function unignoreCandidate(instrumentId: string): Promise<void> {
+  try {
+    await desk.delete(`/workspace/candidates/${instrumentId}/ignore`)
   } catch (err) {
     throw extractError(err)
   }
@@ -604,6 +873,162 @@ export async function runAgentResearch(request: AgentResearchRequest): Promise<A
 export async function fetchAgentCatalog(): Promise<{ agents: Array<{ agent_id: string; title: string; source: string }> }> {
   try {
     const { data } = await desk.get<{ agents: Array<{ agent_id: string; title: string; source: string }> }>('/agent/catalog')
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+// ─── 交易授权（T00，仿真业务数据） ──────────────
+// 与后端 /mandate/* 对齐。授权变化均创建新版本、不覆盖历史；
+// 保存/暂停/恢复/撤销用 expected_revision 做乐观并发。
+
+/** 读取当前生效授权（不存在时后端自动创建默认 L0 后返回）。 */
+export async function fetchCurrentMandate(): Promise<InvestmentMandate> {
+  try {
+    const { data } = await desk.get<InvestmentMandate>('/mandate/current')
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 读取授权版本历史（版本号降序）。 */
+export async function fetchMandateHistory(): Promise<InvestmentMandate[]> {
+  try {
+    const { data } = await desk.get<InvestmentMandate[]>('/mandate/history')
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 保存新版本授权（校验通过后追加新版本）。 */
+export async function saveMandate(
+  payload: MandateSavePayload,
+  idempotencyKey: string,
+): Promise<InvestmentMandate> {
+  try {
+    const { data } = await desk.post<InvestmentMandate>('/mandate/versions', payload, {
+      headers: { 'idempotency-key': idempotencyKey },
+    })
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+async function changeMandateStatus(
+  action: 'pause' | 'resume' | 'revoke',
+  expectedRevision: number,
+  note?: string | null,
+): Promise<InvestmentMandate> {
+  try {
+    const { data } = await desk.post<InvestmentMandate>(`/mandate/${action}`, {
+      expected_revision: expectedRevision,
+      note: note ?? null,
+    })
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 紧急暂停当前授权（创建 paused 新版本）。 */
+export function pauseMandate(expectedRevision: number, note?: string | null) {
+  return changeMandateStatus('pause', expectedRevision, note)
+}
+
+/** 恢复授权为 active（创建新版本）。 */
+export function resumeMandate(expectedRevision: number, note?: string | null) {
+  return changeMandateStatus('resume', expectedRevision, note)
+}
+
+/** 撤销授权（创建 revoked 新版本，之后新订单意图将被拦截）。 */
+export function revokeMandate(expectedRevision: number, note?: string | null) {
+  return changeMandateStatus('revoke', expectedRevision, note)
+}
+
+/** 读取受影响面：现存订单意图中会被当前授权拦截的项与失效字段。 */
+export async function fetchMandateImpact(): Promise<MandateImpact> {
+  try {
+    const { data } = await desk.get<MandateImpact>('/mandate/impact')
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+// ─── 过程与证据（T10 只读） ────────────────────────
+// 与后端 /evidence/* 对齐。证据按 (object_type, object_id, version) 只读检索；
+// 内部错误栈永不经 HTTP 返回（internal tier 保留给进程内运维工具）。
+
+/** 读取某对象某版本的证据抽屉内容；version 省略时取最新。 */
+export async function fetchEvidence(
+  objectType: string,
+  objectId: string,
+  options: { version?: string; tier?: EvidenceTier } = {},
+): Promise<EvidenceView> {
+  try {
+    const params: Record<string, string> = {}
+    if (options.version) params.version = options.version
+    if (options.tier) params.tier = options.tier
+    const { data } = await desk.get<EvidenceView>(
+      `/evidence/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}`,
+      { params: Object.keys(params).length ? params : undefined },
+    )
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 读取某对象某版本的数据血缘（上游对象版本与来源时点）。 */
+export async function fetchEvidenceLineage(
+  objectType: string,
+  objectId: string,
+  version?: string,
+): Promise<EvidenceLineageView> {
+  try {
+    const { data } = await desk.get<EvidenceLineageView>(
+      `/evidence/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}/lineage`,
+      { params: version ? { version } : undefined },
+    )
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 比较同一对象两个不可变版本的证据差异。 */
+export async function compareEvidenceVersions(
+  objectType: string,
+  objectId: string,
+  versionA: string,
+  versionB: string,
+): Promise<EvidenceCompareView> {
+  try {
+    const { data } = await desk.get<EvidenceCompareView>(
+      `/evidence/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}/versions/compare`,
+      { params: { a: versionA, b: versionB } },
+    )
+    return data
+  } catch (err) {
+    throw extractError(err)
+  }
+}
+
+/** 导出证据包目录（含全部版本与生成时间）与指定版本的完整证据。 */
+export async function exportEvidence(
+  objectType: string,
+  objectId: string,
+  options: { version?: string; tier?: EvidenceTier } = {},
+): Promise<EvidenceExportView> {
+  try {
+    const { data } = await desk.post<EvidenceExportView>(
+      `/evidence/${encodeURIComponent(objectType)}/${encodeURIComponent(objectId)}/export`,
+      { version: options.version ?? null, tier: options.tier ?? 'normal' },
+    )
     return data
   } catch (err) {
     throw extractError(err)

@@ -3,7 +3,7 @@
  * OverviewView — 总览 · 市场头版
  * 复制 localhost:3001 的报纸式双栏布局：
  *   左栏 = 头条 + 指数条 + K线 + 成交量
- *   右栏 = 市场信号（行情派生）+ 关键驱动 + 技术指标
+ *   右栏 = 后端市场指标 DTO + 关键驱动 + 数据状态
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Masthead from '@/components/desk/Masthead.vue'
@@ -28,84 +28,22 @@ const leadQuote = computed<MarketQuote | null>(
   () => market.quotesMap.get(leadSymbol.value) ?? null,
 )
 
-/* 市场信号（从真实行情派生，非模型输出） */
-const signal = computed(() => market.marketSignal)
+const overviewData = computed(() => market.overview?.data ?? null)
+const signal = computed(() => overviewData.value?.signal ?? null)
+const marketForces = computed(() => overviewData.value?.forces ?? [])
+const marketIndicators = computed(() => overviewData.value?.indicators ?? [])
 
-/** 关键驱动：从真实行情数据提取前 4 个信号 */
-const marketForces = computed(() => {
-  const qs = market.quotes
-  if (qs.length === 0) return []
-  const sorted = [...qs].sort((a, b) => (b.change_percent ?? 0) - (a.change_percent ?? 0))
-  const top = sorted[0]
-  const bottom = sorted[sorted.length - 1]
-  const avgChg = qs.reduce((s, q) => s + (q.change_percent ?? 0), 0) / qs.length
-  const volLeader = [...qs].sort((a, b) => b.volume - a.volume)[0]
+const forceIcon: Record<string, string> = {
+  leader: '↑',
+  laggard: '↓',
+  average_change: '↗',
+  volume_leader: '▪',
+}
 
-  const forces: { label: string; icon: string }[] = []
-  if (top && (top.change_percent ?? 0) > 0)
-    forces.push({ label: `${top.symbol} 领涨 ${formatPercent(top.change_percent)}`, icon: '↑' })
-  if (bottom && (bottom.change_percent ?? 0) < 0)
-    forces.push({ label: `${bottom.symbol} 领跌 ${formatPercent(bottom.change_percent)}`, icon: '↓' })
-  forces.push({
-    label: avgChg >= 0 ? `市场均涨幅 ${formatPercent(avgChg)}` : `市场均跌幅 ${formatPercent(avgChg)}`,
-    icon: avgChg >= 0 ? '↗' : '↘',
-  })
-  if (volLeader)
-    forces.push({ label: `${volLeader.symbol} 成交活跃`, icon: '▪' })
-  return forces
-})
-
-/** 技术指标：从 K 线数据派生的指标评分（行情统计，非模型输出） */
-const technicalIndicators = computed(() => {
-  const bars = market.bars
-  const qs = market.quotes
-  if (bars.length < 2 && qs.length === 0)
-    return [
-      { name: '价格趋势', score: 0 }, { name: '波动强度', score: 0 },
-      { name: '成交量趋势', score: 0 }, { name: '数据新鲜度', score: 0 },
-    ]
-
-  let trendScore = 50
-  if (bars.length >= 5) {
-    const recent = bars.slice(-5)
-    const ups = recent.filter((b, i) => i > 0 && b.close > recent[i - 1].close).length
-    trendScore = Math.round((ups / (recent.length - 1)) * 100)
-  }
-
-  let volScore = 50
-  if (bars.length >= 3) {
-    const ranges = bars.slice(-20).map(b => b.high - b.low)
-    const avg = ranges.reduce((a, b) => a + b, 0) / ranges.length
-    const stdDev = Math.sqrt(ranges.reduce((a, b) => a + (b - avg) ** 2, 0) / ranges.length)
-    volScore = avg > 0 ? Math.min(100, Math.round((stdDev / avg) * 200)) : 50
-  }
-
-  let volumeScore = 50
-  if (bars.length >= 10) {
-    const recent = bars.slice(-5).reduce((s, b) => s + b.volume, 0) / 5
-    const earlier = bars.slice(-10, -5).reduce((s, b) => s + b.volume, 0) / 5
-    if (earlier > 0) volumeScore = Math.min(100, Math.round((recent / earlier) * 50))
-  }
-
-  let freshScore = 0
-  if (qs.length > 0) {
-    const freshCount = qs.filter(q => q.freshness === 'current').length
-    freshScore = Math.round((freshCount / qs.length) * 100)
-  }
-
-  return [
-    { name: '价格趋势', score: trendScore },
-    { name: '波动强度', score: volScore },
-    { name: '成交量趋势', score: volumeScore },
-    { name: '数据新鲜度', score: freshScore },
-  ]
-})
-
-/* ── 趋势状态 ─────────────────────────────────── */
-const trendLabel = computed(() => {
-  const t = market.marketTrend
-  return t === 'up' ? '偏多' : t === 'down' ? '偏空' : '中性'
-})
+function formatIndicator(value: number | null, unit: string): string {
+  if (value === null) return '—'
+  return `${value.toFixed(2)}${unit === 'percentage_points' ? ' 个百分点' : '%'}`
+}
 
 /* ── 标签过滤 ────────────────────────────────── */
 const TAB_SYMBOL_FILTER: Record<string, string[] | null> = {
@@ -171,7 +109,10 @@ onUnmounted(() => market.stopPolling())
               {{ leadQuote.name || leadQuote.symbol }}
               {{ formatPercent(leadQuote.change_percent) }}
               <span class="headline-sub">
-                市场信号：{{ signal.tendency }} · 方向一致性 {{ signal.consistency }}%（行情派生）
+                覆盖标的信号：{{ signal?.tendency_label ?? '不可用' }}
+                <template v-if="signal?.consistency_percent !== null && signal?.consistency_percent !== undefined">
+                  · 方向一致性 {{ signal.consistency_percent.toFixed(2) }}%
+                </template>
               </span>
             </template>
             <template v-else-if="isWatchlistTab">
@@ -251,7 +192,7 @@ onUnmounted(() => market.stopPolling())
         <!-- 趋势底栏 -->
         <div class="trend-rail">
           <span class="trend-icon">N</span>
-          <span>趋势 {{ trendLabel }}</span>
+          <span>覆盖标的方向 {{ signal?.tendency_label ?? '不可用' }}</span>
           <span v-if="market.isStale" class="stale-tag">数据延迟</span>
         </div>
       </div>
@@ -264,11 +205,13 @@ onUnmounted(() => market.stopPolling())
             <span>市场信号</span>
             <small>MARKET SIGNALS</small>
           </h2>
-          <p class="signal-note">以下为真实行情的统计派生值，非模型输出；模型分析请使用右侧 AI 侧栏。</p>
+          <p class="signal-note">
+            {{ signal?.definition ?? '后端指标暂不可用；浏览器不会补算。' }}
+          </p>
           <div class="tendency-row">
             <div class="tendency-label">
-              <span>市场倾向</span>
-              <strong>{{ signal.tendency }}</strong>
+              <span>覆盖标的倾向</span>
+              <strong>{{ signal?.tendency_label ?? '不可用' }}</strong>
             </div>
             <div class="confidence-gauge">
               <svg viewBox="0 0 100 56" class="gauge-arc">
@@ -280,10 +223,14 @@ onUnmounted(() => market.stopPolling())
                   fill="none"
                   stroke="var(--risk)"
                   stroke-width="6"
-                  :stroke-dasharray="`${signal.consistency * 1.38} 200`"
+                  :stroke-dasharray="`${(signal?.consistency_percent ?? 0) * 1.38} 200`"
                 />
               </svg>
-              <span class="gauge-value mono">{{ signal.consistency }}%</span>
+              <span class="gauge-value mono">
+                {{ signal?.consistency_percent === null || signal?.consistency_percent === undefined
+                  ? '—'
+                  : `${signal.consistency_percent.toFixed(2)}%` }}
+              </span>
               <span class="gauge-label">方向一致性</span>
             </div>
           </div>
@@ -296,28 +243,37 @@ onUnmounted(() => market.stopPolling())
             <small>MARKET FORCES</small>
           </h3>
           <ul class="forces-list">
-            <li v-for="f in marketForces" :key="f.label" class="force-item">
-              <span class="force-icon">{{ f.icon }}</span>
+            <li v-for="f in marketForces" :key="f.code" class="force-item">
+              <span class="force-icon">{{ forceIcon[f.code] }}</span>
               <span class="force-label">{{ f.label }}</span>
             </li>
           </ul>
         </section>
 
-        <!-- 技术指标 -->
+        <!-- 后端定义的行情统计 -->
         <section class="ai-section">
           <h3 class="ai-subheading">
-            <span>技术指标</span>
-            <small>TECHNICAL INDICATORS</small>
+            <span>行情统计</span>
+            <small>VERSIONED METRICS</small>
           </h3>
           <ul class="evidence-list">
-            <li v-for="e in technicalIndicators" :key="e.name" class="evidence-item">
-              <span class="evidence-name">{{ e.name }}</span>
-              <div class="evidence-bar-track">
-                <div class="evidence-bar-fill" :style="{ width: e.score + '%' }" />
-              </div>
-              <strong class="evidence-score mono">{{ e.score }}%</strong>
+            <li v-for="indicator in marketIndicators" :key="indicator.code" class="evidence-item">
+              <span class="evidence-name" :title="indicator.definition">{{ indicator.name }}</span>
+              <strong class="evidence-score mono">
+                {{ formatIndicator(indicator.value, indicator.unit) }}
+              </strong>
             </li>
           </ul>
+          <p v-if="market.overviewError" class="signal-note">
+            指标请求失败：{{ market.overviewError }}；当前不进行浏览器补算。
+          </p>
+          <p
+            v-for="warning in market.overview?.warnings ?? []"
+            :key="warning.code"
+            class="signal-note"
+          >
+            {{ warning.message }}
+          </p>
         </section>
 
         <!-- 数据状态 -->
@@ -336,9 +292,29 @@ onUnmounted(() => market.stopPolling())
           </div>
           <div class="status-row">
             <span>新鲜度</span>
-            <strong :class="{ 'down': market.isStale }">
-              {{ market.isStale ? '延迟' : '正常' }}
+            <strong :class="{ 'down': market.isStale || market.overview?.data_status.freshness === 'stale' }">
+              {{ market.overview?.data_status.freshness ?? 'unknown' }}
             </strong>
+          </div>
+          <div class="status-row">
+            <span>供应商时间</span>
+            <strong>{{ market.overview?.data_status.provider_time ?? '—' }}</strong>
+          </div>
+          <div class="status-row">
+            <span>实际频率</span>
+            <strong>{{ market.overview?.data_status.frequency ?? '—' }}</strong>
+          </div>
+          <div class="status-row">
+            <span>算法版本</span>
+            <strong>{{ market.overview?.algorithm_version ?? '—' }}</strong>
+          </div>
+          <div class="status-row">
+            <span>生成时间</span>
+            <strong>{{ market.overview?.generated_at ?? '—' }}</strong>
+          </div>
+          <div class="status-row">
+            <span>数据版本</span>
+            <strong :title="market.overview?.version">{{ market.overview?.version.slice(0, 24) ?? '—' }}</strong>
           </div>
         </section>
       </div>
@@ -730,22 +706,13 @@ onUnmounted(() => market.stopPolling())
 }
 .evidence-item {
   display: grid;
-  grid-template-columns: 1fr 80px 40px;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 10px;
 }
 .evidence-name {
   font-size: 13px;
   font-weight: 600;
-}
-.evidence-bar-track {
-  height: 4px;
-  background: var(--faint-rule);
-}
-.evidence-bar-fill {
-  height: 100%;
-  background: var(--risk);
-  transition: width 0.4s ease;
 }
 .evidence-score {
   font-size: 13px;

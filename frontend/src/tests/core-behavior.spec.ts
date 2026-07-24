@@ -181,9 +181,34 @@ describe('application contract',()=>{
 })
 
 vi.mock('@/api/desk', () => ({
-  fetchQuotes: vi.fn().mockResolvedValue({ quotes: [], errors: {} }),
+  fetchMarketOverview: vi.fn().mockResolvedValue({
+    object: { type: 'market_overview', id: 'test', symbols: [] },
+    data: {
+      quotes: [],
+      signal: {
+        tendency: 'unavailable',
+        tendency_label: '不可用',
+        consistency_percent: null,
+        definition: 'test',
+      },
+      forces: [],
+      indicators: [],
+    },
+    version: 'test',
+    algorithm_version: 'test-v1',
+    generated_at: '2026-07-24T00:00:00Z',
+    data_status: {
+      provider: 'mock',
+      provider_time: null,
+      frequency: null,
+      freshness: 'unknown',
+      last_success_at: '2026-07-24T00:00:00Z',
+    },
+    warnings: [],
+  }),
   fetchBars: vi.fn().mockResolvedValue({ symbol: '', frequency: '', bars: [] }),
   fetchHealth: vi.fn().mockResolvedValue({ market_data: 'mock', readiness: 'ready' }),
+  isCanceledError: vi.fn(() => false),
 }))
 
 describe('market polling controller', () => {
@@ -210,5 +235,35 @@ describe('market polling controller', () => {
     expect(market.isPolling).toBe(true)
     expect(market.pollIntervalMs).toBe(15000)
     market.stopPolling()
+  })
+  it('keeps polling across an overlapping navigation handoff', async () => {
+    const { useMarketStore } = await import('@/stores/market')
+    const market = useMarketStore()
+    market.startPolling()            // 页面 A onMounted
+    expect(market.isPolling).toBe(true)
+    // 路由切换：新页面 onMounted 早于旧页面 onUnmounted 触发
+    market.startPolling()            // 页面 B onMounted
+    market.stopPolling()             // 页面 A onUnmounted
+    expect(market.isPolling).toBe(true)   // 仍在轮询（引用计数未归零）
+    market.stopPolling()             // 页面 B onUnmounted
+    expect(market.isPolling).toBe(false)
+  })
+  it('discards a superseded loadBars response instead of overwriting the current symbol', async () => {
+    const desk = await import('@/api/desk')
+    const pending: Array<(symbol: string) => void> = []
+    vi.mocked(desk.fetchBars).mockImplementation((symbol: string) =>
+      new Promise((resolve) => {
+        pending.push(() => resolve({ symbol, frequency: 'day', bars: [] } as never))
+      }),
+    )
+    const { useMarketStore } = await import('@/stores/market')
+    const market = useMarketStore()
+    const first = market.loadBars('AAA.SH')   // 旧标的
+    const second = market.loadBars('BBB.SH')  // 快速切换到新标的
+    // 乱序返回：最新请求先完成，随后旧请求才返回
+    pending[1]('BBB.SH')
+    pending[0]('AAA.SH')
+    await Promise.all([first, second])
+    expect(market.barsSymbol).toBe('BBB.SH')  // 旧结果被丢弃，未覆盖当前标的
   })
 })

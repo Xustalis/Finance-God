@@ -24,6 +24,7 @@ const ROUTE_CONTEXT: Record<string, { scope: AiScope; subject: string | null; la
   markets: { scope: 'market', subject: 'A股市场', label: '行情总览' },
   desk: { scope: 'symbol', subject: null, label: null },
   portfolio: { scope: 'portfolio', subject: '仿真组合', label: '仿真组合' },
+  'trade-plan': { scope: 'portfolio', subject: '交易计划', label: '正在加载交易计划' },
   orders: { scope: 'orders', subject: '仿真订单执行', label: '订单执行' },
   reviews: { scope: 'reviews', subject: '交易复盘', label: '交易复盘' },
   data: { scope: 'data', subject: 'PandaData 数据目录', label: '数据目录' },
@@ -102,8 +103,8 @@ watch(
 .ai-dock {
   position: sticky;
   top: 0;
-  flex: 0 0 340px;
-  width: 340px;
+  flex: 0 0 296px;
+  width: 296px;
   height: 100vh;
   overflow: hidden;
 }

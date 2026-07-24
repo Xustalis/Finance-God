@@ -18,11 +18,16 @@ SSH_COMMAND=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-
 
 "${SSH_COMMAND[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "sudo mkdir -p '$DEPLOY_PATH' && sudo chown '$DEPLOY_USER:$DEPLOY_USER' '$DEPLOY_PATH'"
 
+# Remove credential caches copied by deploy script versions that lacked the exclusion.
+"${SSH_COMMAND[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+  "if [ -d '$DEPLOY_PATH/backend' ]; then sudo find '$DEPLOY_PATH/backend' -maxdepth 1 -type f -name 'user*.json' -delete; fi"
+
 rsync -az --delete \
   --exclude='.git/' \
   --exclude='.env' \
   --exclude='.deploy/private/' \
   --exclude='backend/.venv/' \
+  --exclude='backend/user*.json' \
   --exclude='frontend/node_modules/' \
   --exclude='frontend/dist/' \
   --exclude='deploy/.env.production' \

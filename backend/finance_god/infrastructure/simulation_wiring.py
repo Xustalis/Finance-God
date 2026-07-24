@@ -38,6 +38,8 @@ from finance_god.domain import (
     OrderSide,
     RiskCheckResult,
     RiskCheckStatus,
+    RiskReason,
+    RiskSeverity,
     VersionReference,
 )
 from finance_god.execution import (
@@ -52,8 +54,17 @@ from finance_god.execution import (
 from finance_god.execution.contracts import (
     SimulationBar,
 )
+from finance_god.infrastructure.mandate_provider import (
+    PersistentAuthorizationProvider,
+)
 from finance_god.infrastructure.persistence.simulation_uow import (
     SimulationUnitOfWork,
+)
+from finance_god.infrastructure.trade_plan_port import PersistentTradePlanPort
+from finance_god.trading.mandate import (
+    InvestmentMandate,
+    evaluate_order_authorization,
+    order_notional,
 )
 
 ZERO = Decimal("0")
@@ -106,15 +117,6 @@ class LedgerAccountOwnership:
                 )
 
 
-class PermissiveTradePlanPort:
-    """MANUAL drafts never call this; PLANNED drafts are not yet supported."""
-
-    async def require_executable(self, reference: VersionReference) -> None:
-        raise ValueError(
-            "trade plan service is not yet available; use MANUAL draft mode"
-        )
-
-
 class AutoPassManualReview:
     """Simulation-only: automatically pass manual review for non-planned drafts."""
 
@@ -126,35 +128,51 @@ class AutoPassManualReview:
 
 
 class SimulationRiskAdapter:
-    """Simplified risk evaluation that always passes for simulation.
+    """Risk evaluation enforcing the owner's persisted investment mandate.
 
-    Generates a valid ``RiskCheckResult`` with PASSED status and no reasons,
-    allowing the draft lifecycle to proceed through review → confirm → submit.
+    When an authorization provider is wired, the draft's owner mandate is loaded
+    and checked deterministically (status / side / order type / market / single
+    order amount); any hard denial yields a BLOCKED result so submission is
+    stopped at the risk step.  Without a provider (unit tests that only exercise
+    ``confirm_soft``) evaluation stays PASSED.
     """
 
-    def __init__(self, clock: SystemClock, ids: UuidIdGenerator) -> None:
+    def __init__(
+        self,
+        clock: SystemClock,
+        ids: UuidIdGenerator,
+        authorization: PersistentAuthorizationProvider | None = None,
+    ) -> None:
         self._clock = clock
         self._ids = ids
+        self._authorization = authorization
 
     async def evaluate(self, draft: StoredDraft) -> RiskCheckResult:
+        mandate = (
+            await self._authorization.ensure_current(draft.owner_id)
+            if self._authorization is not None
+            else None
+        )
         now = self._clock.now()
         order_version = VersionReference(
             object_type="order_draft",
             object_id=draft.draft.draft_id,
             version=str(draft.draft.revision),
         )
+        reasons = self._authorization_reasons(draft, mandate, now)
+        status = RiskCheckStatus.BLOCKED if reasons else RiskCheckStatus.PASSED
         return RiskCheckResult.model_validate(
             {
                 "risk_check_id": self._ids.new_id("risk"),
                 "revision": 1,
-                "status": RiskCheckStatus.PASSED,
+                "status": status,
                 "order_version": order_version,
                 "rule_version": VersionReference(
                     object_type="risk_rules",
                     object_id="simulation-risk-v1",
                     version="1",
                 ),
-                "reasons": (),
+                "reasons": reasons,
                 "checked_at": now,
                 "expires_at": now + timedelta(minutes=30),
                 "input_versions": (order_version,),
@@ -164,6 +182,39 @@ class SimulationRiskAdapter:
                     "recorded_at": now,
                 },
             }
+        )
+
+    @staticmethod
+    def _authorization_reasons(
+        draft: StoredDraft,
+        mandate: InvestmentMandate | None,
+        now: datetime,
+    ) -> tuple[RiskReason, ...]:
+        if mandate is None:
+            return ()
+        order = draft.draft
+        notional = order_notional(
+            order_type=order.order_type.value,
+            quantity=order.quantity,
+            amount=order.amount,
+            limit_price=order.limit_price,
+            reference_price=draft.reference_price,
+        )
+        denials = evaluate_order_authorization(
+            mandate,
+            now=now,
+            side=order.side.value,
+            order_type=order.order_type.value,
+            instrument_id=order.instrument_id,
+            notional=notional,
+        )
+        return tuple(
+            RiskReason(
+                code=denial.code,
+                severity=RiskSeverity.HARD,
+                message=denial.message,
+            )
+            for denial in denials
         )
 
     async def confirm_soft(
@@ -417,6 +468,7 @@ def build_simulation_services(
     uow_factory: UnitOfWorkFactory,
     simulation_session_factory: Callable[[], AsyncSession],
     ledger: SimulationLedgerService,
+    authorization: PersistentAuthorizationProvider | None = None,
 ) -> tuple[SimulationExecutionService, SimulationAccountApplicationImpl]:
     """Wire all port adapters and return (execution, accounts) pair."""
     clock = SystemClock()
@@ -427,9 +479,9 @@ def build_simulation_services(
             simulation_session_factory
         ),
         accounts=LedgerAccountOwnership(uow_factory),
-        plans=PermissiveTradePlanPort(),
+        plans=PersistentTradePlanPort(simulation_session_factory, clock),
         manual_review=AutoPassManualReview(),
-        risk=SimulationRiskAdapter(clock, ids),
+        risk=SimulationRiskAdapter(clock, ids, authorization),
         transport=SimulationSubmissionTransport(),
         bars=MarketDataBarProvider(),
         ledger=LedgerFillAdapter(ledger, clock, ids),

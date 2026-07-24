@@ -760,10 +760,20 @@ class AuditAndOrderInvariantTest(unittest.TestCase):
 def trade_plan() -> TradePlan:
     return TradePlan(
         plan_id="plan-1",
+        account_id="account-1",
         revision=1,
         status=TradePlanStatus.DRAFT,
         purpose="Reduce concentration risk.",
-        actions=("Sell 100 shares",),
+        actions=(
+            {
+                "action_id": "action-1",
+                "instrument_id": "600519.SSE",
+                "side": "sell",
+                "quantity": Decimal("100"),
+                "reference_price": Decimal("1500"),
+                "rationale": "Reduce concentration risk.",
+            },
+        ),
         input_versions=(V1,),
         estimated_fee_rmb=Decimal("8.50"),
         portfolio_impact="Cash increases.",

@@ -4,7 +4,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from finance_god.api.auth import AuthenticationError
+from finance_god.api.auth import AuthenticationError, OwnerResolver
+from finance_god.application.candidate_service import CandidateScoringService
 from finance_god.domain.errors import (
     ConcurrentCommandConflict,
     DomainInvariantViolation,
@@ -23,6 +24,10 @@ from finance_god.domain.models import (
     WatchlistGroup,
 )
 from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
+
+CandidateIgnoreReason = Literal[
+    "not_now", "already_covered", "disagree", "data_error"
+]
 
 
 class APIModel(BaseModel):
@@ -40,15 +45,24 @@ class WatchlistGroupUpdate(APIModel):
     expected_revision: int = Field(ge=1)
 
 
+class WatchlistGroupDelete(APIModel):
+    expected_revision: int = Field(ge=1)
+
+
 class WatchlistInstrumentCreate(APIModel):
     instrument_id: str = Field(min_length=1, max_length=160)
+
+
+class CandidateIgnoreCreate(APIModel):
+    reason: CandidateIgnoreReason
+    note: str | None = Field(default=None, max_length=500)
 
 
 class NotificationPreferenceUpdate(APIModel):
     category_preferences: dict[NotificationCategory, bool]
 
 
-OwnerResolver = Callable[[Request], str]
+CandidateServiceProvider = Callable[[], CandidateScoringService]
 Model = TypeVar("Model", bound=APIModel)
 
 
@@ -56,6 +70,7 @@ def create_workspace_routes(
     *,
     session_factory: Callable[[], AsyncSession],
     owner_resolver: OwnerResolver,
+    candidate_service_provider: CandidateServiceProvider | None = None,
 ) -> list[Route]:
     """Create routes bound to authenticated server-side identity resolution.
 
@@ -65,7 +80,7 @@ def create_workspace_routes(
 
     async def list_watchlists(request: Request) -> JSONResponse:
         async def action() -> object:
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 return await uow.watchlists.list_groups(owner_user_id)
 
@@ -74,7 +89,7 @@ def create_workspace_routes(
     async def create_watchlist_group(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, WatchlistGroupCreate)
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             now = datetime.now(UTC)
             group = WatchlistGroup(
                 group_id=str(uuid.uuid4()),
@@ -95,7 +110,7 @@ def create_workspace_routes(
     async def update_watchlist_group(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, WatchlistGroupUpdate)
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 group = await uow.watchlists.get_group(
                     owner_user_id, request.path_params["group_id"]
@@ -116,7 +131,7 @@ def create_workspace_routes(
     async def add_watchlist_instrument(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, WatchlistInstrumentCreate)
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 instrument = await uow.watchlists.add_instrument(
                     owner_user_id=owner_user_id,
@@ -129,9 +144,105 @@ def create_workspace_routes(
 
         return await _respond(action, success_status=201)
 
+    async def list_watchlist_instruments(request: Request) -> JSONResponse:
+        async def action() -> object:
+            owner_user_id = await _owner(owner_resolver, request)
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                return await uow.watchlists.list_instruments(
+                    owner_user_id, request.path_params["group_id"]
+                )
+
+        return await _respond(action)
+
+    async def delete_watchlist_group(request: Request) -> JSONResponse:
+        async def action() -> object:
+            body = await _body(request, WatchlistGroupDelete)
+            owner_user_id = await _owner(owner_resolver, request)
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                group = await uow.watchlists.get_group(
+                    owner_user_id, request.path_params["group_id"]
+                )
+                if group is None:
+                    raise LookupError("watchlist group not found")
+                await uow.watchlists.delete_group(
+                    owner_user_id,
+                    request.path_params["group_id"],
+                    expected_revision=body.expected_revision,
+                )
+                await uow.commit()
+                return {"group_id": request.path_params["group_id"], "deleted": True}
+
+        return await _respond(action)
+
+    async def remove_watchlist_instrument(request: Request) -> JSONResponse:
+        async def action() -> object:
+            owner_user_id = await _owner(owner_resolver, request)
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                await uow.watchlists.remove_instrument(
+                    owner_user_id,
+                    request.path_params["group_id"],
+                    request.path_params["instrument_id"],
+                )
+                await uow.commit()
+                return {
+                    "group_id": request.path_params["group_id"],
+                    "instrument_id": request.path_params["instrument_id"],
+                    "removed": True,
+                }
+
+        return await _respond(action)
+
+    async def list_candidates(request: Request) -> JSONResponse:
+        async def action() -> object:
+            if candidate_service_provider is None:
+                raise _Unavailable("candidate scoring is not configured")
+            owner_user_id = await _owner(owner_resolver, request)
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                ignores = await uow.candidate_ignores.list(owner_user_id)
+            ignored = {row.instrument_id: row.reason for row in ignores}
+            service = candidate_service_provider()
+            return await service.candidates(
+                owner_id=owner_user_id,
+                now=datetime.now(UTC),
+                ignored=ignored,
+            )
+
+        return await _respond(action)
+
+    async def ignore_candidate(request: Request) -> JSONResponse:
+        async def action() -> object:
+            body = await _body(request, CandidateIgnoreCreate)
+            owner_user_id = await _owner(owner_resolver, request)
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                ignored = await uow.candidate_ignores.upsert(
+                    owner_user_id=owner_user_id,
+                    instrument_id=request.path_params["instrument_id"],
+                    reason=body.reason,
+                    note=body.note,
+                )
+                await uow.commit()
+                return ignored
+
+        return await _respond(action, success_status=201)
+
+    async def unignore_candidate(request: Request) -> JSONResponse:
+        async def action() -> object:
+            owner_user_id = await _owner(owner_resolver, request)
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                await uow.candidate_ignores.remove(
+                    owner_user_id, request.path_params["instrument_id"]
+                )
+                await uow.commit()
+                return {
+                    "instrument_id": request.path_params["instrument_id"],
+                    "ignored": False,
+                }
+
+        return await _respond(action)
+
     async def list_unread_notifications(request: Request) -> JSONResponse:
         async def action() -> object:
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 return await uow.notifications.list_unread(owner_user_id)
 
@@ -139,7 +250,7 @@ def create_workspace_routes(
 
     async def mark_notification_read(request: Request) -> JSONResponse:
         async def action() -> object:
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 await uow.notifications.mark_read(
                     owner_user_id, request.path_params["notification_id"]
@@ -151,7 +262,7 @@ def create_workspace_routes(
 
     async def get_notification_preferences(request: Request) -> JSONResponse:
         async def action() -> object:
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 preference = await uow.preferences.get(owner_user_id)
                 if preference is None:
@@ -163,7 +274,7 @@ def create_workspace_routes(
     async def update_notification_preferences(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, NotificationPreferenceUpdate)
-            owner_user_id = _owner(owner_resolver, request)
+            owner_user_id = await _owner(owner_resolver, request)
             preference = NotificationPreference(
                 owner_user_id=owner_user_id,
                 category_preferences=body.category_preferences,
@@ -185,6 +296,32 @@ def create_workspace_routes(
             add_watchlist_instrument,
             methods=["POST"],
         ),
+        Route(
+            "/watchlists/{group_id:str}/instruments",
+            list_watchlist_instruments,
+            methods=["GET"],
+        ),
+        Route(
+            "/watchlists/{group_id:str}",
+            delete_watchlist_group,
+            methods=["DELETE"],
+        ),
+        Route(
+            "/watchlists/{group_id:str}/instruments/{instrument_id:str}",
+            remove_watchlist_instrument,
+            methods=["DELETE"],
+        ),
+        Route("/candidates", list_candidates, methods=["GET"]),
+        Route(
+            "/candidates/{instrument_id:str}/ignore",
+            ignore_candidate,
+            methods=["POST"],
+        ),
+        Route(
+            "/candidates/{instrument_id:str}/ignore",
+            unignore_candidate,
+            methods=["DELETE"],
+        ),
         Route("/notifications", list_unread_notifications, methods=["GET"]),
         Route(
             "/notifications/{notification_id:str}/read",
@@ -204,8 +341,12 @@ async def _body(request: Request, model: type[Model]) -> Model:
     return model.model_validate(await request.json())
 
 
-def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
-    owner_user_id = owner_resolver(request).strip()
+class _Unavailable(RuntimeError):
+    """A required dependency is not configured; surfaces as an explicit 503."""
+
+
+async def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
+    owner_user_id = (await owner_resolver(request)).strip()
     if not owner_user_id or len(owner_user_id) > 160:
         raise AuthenticationError("authenticated owner is required")
     return owner_user_id
@@ -228,6 +369,8 @@ async def _respond(
         return _error("REVISION_CONFLICT", str(error), 409)
     except DomainInvariantViolation as error:
         return _error("DOMAIN_INVARIANT_VIOLATION", str(error), 409)
+    except _Unavailable as error:
+        return _error("DEPENDENCY_UNAVAILABLE", str(error), 503)
     except (json.JSONDecodeError, ValueError) as error:
         return _error("INVALID_REQUEST", str(error), 400)
 

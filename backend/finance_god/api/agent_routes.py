@@ -20,9 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from finance_god.api.auth import AuthenticationError
-
-OwnerResolver = Callable[[Request], str]
+from finance_god.api.auth import AuthenticationError, OwnerResolver
 
 
 class AgentRuntimeUnavailable(RuntimeError):
@@ -36,6 +34,8 @@ class _AgentRuntime(Protocol):  # pragma: no cover - typing helper only
 
 
 RuntimeProvider = Callable[[], Awaitable["_AgentRuntime"]]
+# (owner_id, subject, run) -> None; best-effort persistence of run evidence.
+EvidenceRecorder = Callable[[str, str, AgentRun], Awaitable[None]]
 
 
 class _APIModel(BaseModel):
@@ -70,12 +70,13 @@ def create_agent_routes(
     *,
     runtime_provider: RuntimeProvider,
     owner_resolver: OwnerResolver,
+    evidence_recorder: EvidenceRecorder | None = None,
 ) -> list[Route]:
     """Build the ``/agent/*`` routes bound to a lazy runtime provider."""
 
     async def research(request: Request) -> JSONResponse:
         try:
-            owner_resolver(request)
+            owner_id = await owner_resolver(request)
         except AuthenticationError as error:
             return _error("UNAUTHORIZED", str(error), 401)
         try:
@@ -113,11 +114,16 @@ def create_agent_routes(
                 "The research run failed. No conclusion was produced.",
                 502,
             )
+        if evidence_recorder is not None:
+            try:
+                await evidence_recorder(owner_id, payload.subject, run)
+            except Exception:  # noqa: BLE001 - evidence capture must never break the run
+                pass
         return JSONResponse(run.model_dump(mode="json"), status_code=200)
 
     async def catalog(request: Request) -> JSONResponse:
         try:
-            owner_resolver(request)
+            await owner_resolver(request)
         except AuthenticationError as error:
             return _error("UNAUTHORIZED", str(error), 401)
         try:

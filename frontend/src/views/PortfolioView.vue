@@ -6,6 +6,7 @@
  * 缺行情的标的只标注「暂不可估值」，绝不用成交价伪造现价或盈亏。
  */
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import DeskLayout from '@/components/desk/DeskLayout.vue'
 import { useMarketStore } from '@/stores/market'
 import {
@@ -14,6 +15,7 @@ import {
   fetchOrders,
   fetchFills,
   createSimulationAccount,
+  createPortfolioDeviationTradePlan,
   resetSimulationAccount,
   isDeskApiError,
   newIdempotencyKey,
@@ -27,6 +29,7 @@ import type {
 } from '@/types/desk'
 
 const market = useMarketStore()
+const router = useRouter()
 
 /* ── 仿真账户（钱包） ─────────────────────────────── */
 const account = ref<SimulationAccount | null>(null)
@@ -41,6 +44,8 @@ const ordersError = ref<string | null>(null)
 const fills = ref<SimulationFill[]>([])
 const fillsError = ref<string | null>(null)
 const loading = ref(true)
+const planCreating = ref(false)
+const planCreationError = ref<string | null>(null)
 
 /* ── 账户初始化 ───────────────────────────────────── */
 const initialCashRmb = ref(100_000)
@@ -52,17 +57,19 @@ const accountResetting = ref(false)
 const resetConfirming = ref(false)
 const resetError = ref<string | null>(null)
 
+// 格式化器构造开销高，提升为组件级单例，避免在表格每行/每次行情轮询时重复创建。
+const RMB_FORMATTER = new Intl.NumberFormat('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+const QTY_FORMATTER = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 })
+
 function formatRmb(value: number): string {
-  return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
+  return RMB_FORMATTER.format(value)
 }
 
 function formatQty(value: number): string {
-  return Number.isInteger(value)
-    ? value.toString()
-    : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 }).format(value)
+  return Number.isInteger(value) ? value.toString() : QTY_FORMATTER.format(value)
 }
 
 function failureMessage(reason: unknown, fallback: string): string {
@@ -232,6 +239,22 @@ async function confirmResetWallet() {
   }
 }
 
+async function createDeviationPlan() {
+  if (planCreating.value || !portfolio.value || portfolio.value.positions.length === 0) return
+  planCreating.value = true
+  planCreationError.value = null
+  try {
+    const created = await createPortfolioDeviationTradePlan(
+      newIdempotencyKey('portfolio-deviation-plan'),
+    )
+    await router.push(`/trade-plans/${created.object.plan_id}`)
+  } catch (error) {
+    planCreationError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    planCreating.value = false
+  }
+}
+
 onMounted(() => {
   market.startPolling()
   market.checkHealth()
@@ -361,15 +384,28 @@ onUnmounted(() => market.stopPolling())
 
     <template #main>
       <div class="lead-header">
-        <div class="lead-kicker">
-          <span>资产</span>
-          <span>ASSETS</span>
+        <div>
+          <div class="lead-kicker">
+            <span>资产</span>
+            <span>ASSETS</span>
+          </div>
+          <h1 class="lead-title">
+            持仓与资金
+            <small>数量与成本来自仿真账户 · 市值按 PandaData 实时行情估算</small>
+          </h1>
         </div>
-        <h1 class="lead-title">
-          持仓与资金
-          <small>数量与成本来自仿真账户 · 市值按 PandaData 实时行情估算</small>
-        </h1>
+        <button
+          type="button"
+          class="primary-button compact"
+          :disabled="loading || planCreating || !portfolio?.positions.length"
+          @click="createDeviationPlan"
+        >
+          {{ planCreating ? '正在创建…' : '创建调仓计划' }}
+        </button>
       </div>
+      <p v-if="planCreationError" class="data-warning" role="alert">
+        <strong>调仓计划未创建：</strong>{{ planCreationError }}
+      </p>
 
       <div
         v-if="accountError || positionsError || ordersError || fillsError || missingQuoteSymbols.length > 0"
@@ -536,7 +572,11 @@ onUnmounted(() => market.stopPolling())
 
 .rail-action { padding: 14px 18px; }
 
-.lead-header { margin-bottom: 12px; }
+.lead-header {
+  display: flex; align-items: end; justify-content: space-between; gap: 16px;
+  margin-bottom: 12px;
+}
+.lead-header > div { min-width: 0; flex: 1; }
 .lead-kicker {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 5px; padding-bottom: 4px; border-bottom: 3px double var(--rule);

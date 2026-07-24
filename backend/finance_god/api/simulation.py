@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from finance_god.api.auth import AuthenticationError
+from finance_god.api.auth import AuthenticationError, OwnerResolver
 from finance_god.application.decision_inbox import DecisionInboxService
 from finance_god.application.portfolio_query import PortfolioQueryService
 from finance_god.domain import (
@@ -29,9 +29,6 @@ from finance_god.execution import (
 )
 
 IDEMPOTENCY_HEADER = "idempotency-key"
-OwnerResolver = Callable[[Request], str]
-
-
 class APIModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -134,7 +131,7 @@ def create_simulation_routes(
         async def action() -> object:
             body = await _body(request, SimulationAccountCreate)
             return await accounts.create(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 request=body,
                 idempotency_key=_idempotency_key(request),
                 request_hash=_request_hash(body),
@@ -146,7 +143,7 @@ def create_simulation_routes(
         async def action() -> object:
             body = await _body(request, SimulationAccountReset)
             return await accounts.reset(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 account_id=request.path_params["account_id"],
                 request=body,
                 idempotency_key=_idempotency_key(request),
@@ -157,7 +154,7 @@ def create_simulation_routes(
 
     async def current_account(request: Request) -> JSONResponse:
         async def action() -> object:
-            account = await accounts.current(owner_id=_owner(owner_resolver, request))
+            account = await accounts.current(owner_id=await _owner(owner_resolver, request))
             if account is None:
                 raise LookupError("simulation account not found")
             return account
@@ -165,15 +162,17 @@ def create_simulation_routes(
         return await _respond(action)
 
     async def current_positions(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: accounts.positions(owner_id=_owner(owner_resolver, request))
-        )
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await accounts.positions(owner_id=owner_id)
+
+        return await _respond(action)
 
     async def create_draft(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, DraftCreateRequest)
             return await execution.create_order_draft(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 mode=body.mode,
                 account_id=body.account_id,
                 instrument_id=body.instrument_id,
@@ -195,18 +194,20 @@ def create_simulation_routes(
         return await _respond(action, success_status=201)
 
     async def get_draft(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: execution.get_draft(
-                owner_id=_owner(owner_resolver, request),
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await execution.get_draft(
+                owner_id=owner_id,
                 draft_id=request.path_params["draft_id"],
             )
-        )
+
+        return await _respond(action)
 
     async def review_draft(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, ExpectedRevisionRequest)
             return await execution.review(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 draft_id=request.path_params["draft_id"],
                 expected_revision=body.expected_revision,
             )
@@ -217,7 +218,7 @@ def create_simulation_routes(
         async def action() -> object:
             body = await _body(request, SoftRiskConfirmationRequest)
             return await execution.confirm_soft_risk(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 draft_id=request.path_params["draft_id"],
                 seen_reason_hash=body.seen_reason_hash,
             )
@@ -228,7 +229,7 @@ def create_simulation_routes(
         async def action() -> object:
             body = await _body(request, DraftConfirmationRequest)
             return await execution.confirm(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 draft_id=request.path_params["draft_id"],
                 expected_revision=body.expected_revision,
                 seen_summary_hash=body.seen_summary_hash,
@@ -240,7 +241,7 @@ def create_simulation_routes(
         async def action() -> object:
             key = _idempotency_key(request)
             return await execution.submit(
-                owner_id=_owner(owner_resolver, request),
+                owner_id=await _owner(owner_resolver, request),
                 draft_id=request.path_params["draft_id"],
                 idempotency_key=key,
                 request_hash=_request_hash(
@@ -251,54 +252,65 @@ def create_simulation_routes(
         return await _respond(action, success_status=201)
 
     async def list_orders(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: execution.list_order_views(
-                owner_id=_owner(owner_resolver, request)
-            )
-        )
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await execution.list_order_views(owner_id=owner_id)
+
+        return await _respond(action)
 
     async def get_order(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: execution.get_order_view(
-                owner_id=_owner(owner_resolver, request),
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await execution.get_order_view(
+                owner_id=owner_id,
                 order_id=request.path_params["order_id"],
             )
-        )
+
+        return await _respond(action)
 
     async def portfolio_positions(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: portfolio.positions(owner_id=_owner(owner_resolver, request))
-        )
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await portfolio.positions(owner_id=owner_id)
+
+        return await _respond(action)
 
     async def decision_inbox_view(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: decision_inbox.inbox(owner_id=_owner(owner_resolver, request))
-        )
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await decision_inbox.inbox(owner_id=owner_id)
+
+        return await _respond(action)
 
     async def reconcile_order(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: execution.reconcile(
-                owner_id=_owner(owner_resolver, request),
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await execution.reconcile(
+                owner_id=owner_id,
                 order_id=request.path_params["order_id"],
             )
-        )
+
+        return await _respond(action)
 
     async def cancel_order(request: Request) -> JSONResponse:
-        return await _respond(
-            lambda: execution.cancel(
-                owner_id=_owner(owner_resolver, request),
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await execution.cancel(
+                owner_id=owner_id,
                 order_id=request.path_params["order_id"],
             )
-        )
+
+        return await _respond(action)
 
     async def list_fills(request: Request) -> JSONResponse:
-        order_id = request.query_params.get("order_id")
-        return await _respond(
-            lambda: execution.list_fills(
-                owner_id=_owner(owner_resolver, request),
-                order_id=order_id,
+        async def action() -> object:
+            owner_id = await _owner(owner_resolver, request)
+            return await execution.list_fills(
+                owner_id=owner_id,
+                order_id=request.query_params.get("order_id"),
             )
-        )
+
+        return await _respond(action)
 
     return [
         Route("/accounts", create_account, methods=["POST"]),
@@ -340,8 +352,8 @@ async def _body(request: Request, model: type[Model]) -> Model:
     return model.model_validate(await request.json())
 
 
-def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
-    owner = owner_resolver(request).strip()
+async def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
+    owner = (await owner_resolver(request)).strip()
     if not owner or len(owner) > 160:
         raise AuthenticationError("authenticated owner is required")
     return owner

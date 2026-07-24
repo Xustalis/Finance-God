@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
-from server import _authenticated_owner
+import pytest
+import server as finance_server
+from sqlalchemy import delete, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.testclient import TestClient
 
 from app.core.security import create_access_token
+from app.models.user import User
 from finance_god.api.simulation import SimulationAccountView, create_simulation_routes
 
 
@@ -25,8 +30,8 @@ class _Accounts:
         )
 
 
-def test_simulation_routes_use_jwt_subject_and_ignore_owner_header() -> None:
-    app = Starlette(
+def _app() -> Starlette:
+    return Starlette(
         routes=[
             Mount(
                 "/api/simulation",
@@ -35,15 +40,75 @@ def test_simulation_routes_use_jwt_subject_and_ignore_owner_header() -> None:
                     accounts=_Accounts(),
                     portfolio=object(),
                     decision_inbox=object(),
-                    owner_resolver=_authenticated_owner,
+                    owner_resolver=finance_server._authenticated_owner,
                 ),
             )
         ]
     )
+
+
+async def _create_user(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    user_id: str,
+    email: str,
+) -> None:
+    async with session_factory() as session:
+        session.add(
+            User(
+                id=user_id,
+                email=email,
+                hashed_password="unused-in-token-tests",
+                status="active",
+            )
+        )
+        await session.commit()
+
+
+async def _set_user_status(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_id: str,
+    status: str,
+) -> None:
+    async with session_factory() as session:
+        await session.execute(
+            update(User).where(User.id == user_id).values(status=status)
+        )
+        await session.commit()
+
+
+async def _delete_user(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_id: str,
+) -> None:
+    async with session_factory() as session:
+        await session.execute(delete(User).where(User.id == user_id))
+        await session.commit()
+
+
+def test_simulation_routes_use_active_jwt_subject_and_ignore_owner_header(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(finance_server, "create_db_session", session_factory)
+    asyncio.run(
+        _create_user(
+            session_factory,
+            user_id="user-a",
+            email="simulation-user-a@example.com",
+        )
+    )
+    asyncio.run(
+        _create_user(
+            session_factory,
+            user_id="user-b",
+            email="simulation-user-b@example.com",
+        )
+    )
     first_token = create_access_token("user-a")
     second_token = create_access_token("user-b")
 
-    with TestClient(app) as client:
+    with TestClient(_app()) as client:
         first = client.get(
             "/api/simulation/accounts/current",
             headers={
@@ -62,23 +127,13 @@ def test_simulation_routes_use_jwt_subject_and_ignore_owner_header() -> None:
     assert second.json()["owner_id"] == "user-b"
 
 
-def test_simulation_routes_reject_missing_and_invalid_tokens() -> None:
-    app = Starlette(
-        routes=[
-            Mount(
-                "/api/simulation",
-                routes=create_simulation_routes(
-                    execution=object(),
-                    accounts=_Accounts(),
-                    portfolio=object(),
-                    decision_inbox=object(),
-                    owner_resolver=_authenticated_owner,
-                ),
-            )
-        ]
-    )
+def test_simulation_routes_reject_missing_and_invalid_tokens(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(finance_server, "create_db_session", session_factory)
 
-    with TestClient(app) as client:
+    with TestClient(_app()) as client:
         missing = client.get("/api/simulation/accounts/current")
         invalid = client.get(
             "/api/simulation/accounts/current",
@@ -89,3 +144,72 @@ def test_simulation_routes_reject_missing_and_invalid_tokens() -> None:
     assert missing.json()["error"]["code"] == "UNAUTHORIZED"
     assert invalid.status_code == 401
     assert invalid.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_simulation_routes_reject_token_for_missing_user(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(finance_server, "create_db_session", session_factory)
+    token = create_access_token("deleted-before-request")
+
+    with TestClient(_app()) as client:
+        response = client.get(
+            "/api/simulation/accounts/current",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_simulation_routes_reject_existing_token_after_user_is_inactivated(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(finance_server, "create_db_session", session_factory)
+    user_id = "inactive-after-token"
+    asyncio.run(
+        _create_user(
+            session_factory,
+            user_id=user_id,
+            email="inactive-after-token@example.com",
+        )
+    )
+    token = create_access_token(user_id)
+    asyncio.run(_set_user_status(session_factory, user_id, "inactive"))
+
+    with TestClient(_app()) as client:
+        response = client.get(
+            "/api/simulation/accounts/current",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_simulation_routes_reject_existing_token_after_user_is_deleted(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(finance_server, "create_db_session", session_factory)
+    user_id = "deleted-after-token"
+    asyncio.run(
+        _create_user(
+            session_factory,
+            user_id=user_id,
+            email="deleted-after-token@example.com",
+        )
+    )
+    token = create_access_token(user_id)
+    asyncio.run(_delete_user(session_factory, user_id))
+
+    with TestClient(_app()) as client:
+        response = client.get(
+            "/api/simulation/accounts/current",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"

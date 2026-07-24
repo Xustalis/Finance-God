@@ -44,6 +44,50 @@ export interface QuoteBatch {
   quality: Record<string, QualityDecision>
 }
 
+export interface MarketOverviewView {
+  object: {
+    type: 'market_overview'
+    id: string
+    symbols: string[]
+  }
+  data: {
+    quotes: MarketQuote[]
+    signal: {
+      tendency: 'positive' | 'cautious' | 'neutral' | 'unavailable'
+      tendency_label: string
+      consistency_percent: number | null
+      definition: string
+    }
+    forces: Array<{
+      code: 'leader' | 'laggard' | 'average_change' | 'volume_leader'
+      label: string
+    }>
+    indicators: Array<{
+      code: 'advance_ratio' | 'change_dispersion' | 'average_change' | 'fresh_coverage'
+      name: string
+      value: number | null
+      unit: 'percent' | 'percentage_points'
+      definition: string
+    }>
+  }
+  version: string
+  algorithm_version: string
+  generated_at: string
+  data_status: {
+    provider: string
+    provider_time: string | null
+    frequency: string | null
+    freshness: 'fresh' | 'delayed' | 'stale' | 'unknown'
+    last_success_at: string
+  }
+  warnings: Array<{
+    code: string
+    severity: 'info' | 'warning' | 'blocking'
+    message: string
+    affected_fields: string[]
+  }>
+}
+
 export interface DataDiagnostic {
   scope: string
   code: string
@@ -143,6 +187,95 @@ export interface VersionReference {
   object_type: string
   object_id: string
   version: string
+}
+
+// ─── 交易计划（T04）──────────────────────────────
+
+export type TradePlanStatus =
+  | 'draft'
+  | 'pending_review'
+  | 'confirmed'
+  | 'executing'
+  | 'partially_completed'
+  | 'completed'
+  | 'expired'
+  | 'rejected'
+  | 'cancelled'
+
+export interface TradePlanAction {
+  action_id: string
+  instrument_id: string
+  side: 'buy' | 'sell'
+  order_type: 'market' | 'limit'
+  quantity: number | null
+  limit_price: number | null
+  reference_price: number | null
+  time_in_force: TimeInForce
+  included: boolean
+  rationale: string
+}
+
+export interface TradePlan {
+  plan_id: string
+  account_id: string
+  revision: number
+  status: TradePlanStatus
+  purpose: string
+  actions: TradePlanAction[]
+  estimated_fee_rmb: number
+  portfolio_impact: string
+  disagreements: string[]
+  workflow_dependencies: unknown[]
+  expires_at: string
+  input_versions: VersionReference[]
+  invalidated_by_versions: VersionReference[]
+  audit_reference: AuditReference
+}
+
+export interface TradePlanCapability {
+  action: 'save_version' | 'confirm_and_generate'
+  enabled: boolean
+  reason_code: string | null
+  reason: string | null
+}
+
+export interface TradePlanPageView {
+  object: TradePlan
+  source_type: 'candidate' | 'portfolio_deviation'
+  source_id: string
+  version: string
+  generated_at: string
+  data_status: {
+    provider: string
+    provider_time: string | null
+    frequency: string | null
+    freshness: 'fresh' | 'delayed' | 'stale' | 'unknown'
+    last_success_at: string | null
+  }
+  capabilities: TradePlanCapability[]
+  warnings: Array<{
+    code: string
+    severity: 'info' | 'warning' | 'blocking'
+    message: string
+    affected_fields: string[]
+  }>
+  draft_links: Array<{
+    action_id: string
+    draft_id: string
+    draft_revision: number
+  }>
+  history: Array<{
+    revision: number
+    status: TradePlanStatus
+    recorded_at: string
+    actor_id: string
+  }>
+}
+
+export interface TradePlanActionRevision {
+  action_id: string
+  quantity: number | null
+  included: boolean
 }
 
 export interface AuditReference {
@@ -521,6 +654,259 @@ export interface AgentResearchRequest {
   scope?: string
   evidence?: AgentEvidence[]
   max_agents?: number
+}
+
+// ─── 过程与证据（T10 只读抽屉 / 高级页） ──────────
+// 与后端 finance_god.application.evidence_service 对齐；证据仅镜像运行时
+// 已产出的结论内容，按 (object_type, object_id, version) 不可变存储。
+
+export type EvidenceTier = 'normal' | 'advanced' | 'internal'
+
+export interface EvidenceClaim {
+  kind: 'fact' | 'inference'
+  statement: string
+  author_agent_id: string | null
+  evidence_ids: string[]
+  unknowns: string[]
+  invalidation_conditions: string[]
+}
+
+export interface EvidenceSource {
+  identifier: string
+  source: string
+  excerpt: string | null
+}
+
+export interface EvidenceNode {
+  agent_id: string
+  reason: string | null
+}
+
+export interface EvidenceNotice {
+  agent_id: string
+  reason: string
+  missing_resources: string[]
+  missing_authorizations: string[]
+}
+
+export interface EvidenceView {
+  object_type: string
+  object_id: string
+  version: string
+  subject: string
+  conclusion: string | null
+  provider: string
+  generated_at: string
+  tier: EvidenceTier
+  facts: EvidenceClaim[]
+  inferences: EvidenceClaim[]
+  counterpoints: string[]
+  unknowns: string[]
+  invalidation_conditions: string[]
+  sources: EvidenceSource[]
+  agent_nodes: EvidenceNode[]
+  notices: EvidenceNotice[]
+  error_trace: string | null
+}
+
+export interface EvidenceLineageInput {
+  object_type: string
+  object_id: string
+  version: string
+}
+
+export interface EvidenceLineageView {
+  object_type: string
+  object_id: string
+  version: string
+  provider: string
+  generated_at: string
+  inputs: EvidenceLineageInput[]
+  sources: EvidenceSource[]
+}
+
+export interface EvidenceVersionSummary {
+  version: string
+  subject: string
+  conclusion: string | null
+  provider: string
+  generated_at: string
+}
+
+export interface EvidenceFieldDiff {
+  field: string
+  added: string[]
+  removed: string[]
+}
+
+export interface EvidenceCompareView {
+  object_type: string
+  object_id: string
+  base: EvidenceVersionSummary
+  other: EvidenceVersionSummary
+  diffs: EvidenceFieldDiff[]
+}
+
+export interface EvidenceExportView {
+  object_type: string
+  object_id: string
+  exported_at: string
+  tier: EvidenceTier
+  versions: EvidenceVersionSummary[]
+  bundle: EvidenceView
+}
+
+// ─── 工作区：自选与候选（T02） ─────────────────────
+
+export interface WatchlistGroup {
+  group_id: string
+  owner_user_id: string
+  name: string
+  description: string | null
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WatchlistInstrument {
+  instrument_id: string
+  group_id: string
+  revision: number
+  added_at: string
+  added_by: string
+}
+
+/** 五维评分的独立维度键（无综合分）。 */
+export type CandidateDimensionKey =
+  | 'portfolio_fit'
+  | 'risk'
+  | 'cost'
+  | 'liquidity'
+  | 'evidence'
+
+/** 维度评级；missing 表示数据不足，必须显式呈现而非猜测。 */
+export type CandidateRating = 'strong' | 'adequate' | 'weak' | 'missing'
+
+export interface CandidateDimension {
+  dimension: CandidateDimensionKey
+  label: string
+  rating: CandidateRating
+  detail: string
+  metrics: Record<string, string>
+  missing_fields: string[]
+}
+
+export interface CandidateExclusion {
+  reason_code: string
+  detail: string
+}
+
+export interface Candidate {
+  instrument_id: string
+  symbol: string
+  name: string | null
+  asset_type: string | null
+  market: string | null
+  currency: string | null
+  direction: string
+  direction_label: string
+  purpose: string
+  dimensions: CandidateDimension[]
+  exclusions: CandidateExclusion[]
+  tradable: boolean
+  ignored: boolean
+  ignore_reason: string | null
+  as_of: string | null
+  provider: string | null
+}
+
+export interface CandidateResponse {
+  generated_at: string
+  rule_version: string
+  purpose_summary: string
+  candidates: Candidate[]
+  /** 非 null 时表示行情等上游不可用，需显式降级呈现。 */
+  unavailable_reason: string | null
+}
+
+export type CandidateIgnoreReason =
+  | 'not_now'
+  | 'already_covered'
+  | 'disagree'
+  | 'data_error'
+
+// ─── 交易授权 / 投资授权（T00，仿真业务数据） ─────
+// 与后端 finance_god/trading/mandate.py + api/mandate_routes.py 对齐。
+// 授权为仿真业务数据（非真实经纪商），金额/比率以字符串（Decimal）传输。
+
+export type AutonomyLevel = 'L0' | 'L1' | 'L2'
+export type MandateStatus = 'active' | 'paused' | 'revoked' | 'expired'
+
+/** 授权限额（Decimal 以字符串传输，前端仅展示与回传，不自行改写精度）。 */
+export interface MandateLimits {
+  max_single_order_amount: string
+  max_daily_turnover_amount: string
+  max_single_asset_ratio: string
+  max_broad_etf_ratio: string
+  max_otc_fund_ratio: string
+  max_industry_ratio: string
+  max_gross_ratio: string
+  max_short_gross_ratio: string
+  max_single_short_ratio: string
+  max_price_deviation_ratio: string
+  max_all_in_cost_ratio: string
+  max_slippage_bps: string
+}
+
+export interface InvestmentMandate {
+  mandate_id: string
+  owner_user_id: string
+  version: number
+  status: MandateStatus
+  autonomy_level: AutonomyLevel
+  allowed_markets: string[]
+  allowed_assets: string[]
+  allowed_sides: string[]
+  allowed_order_types: string[]
+  short_markets: string[]
+  limits: MandateLimits
+  valid_from: string
+  valid_until: string
+  created_at: string
+  created_by: string
+  note: string | null
+}
+
+/** 保存新版本授权的提交体（乐观并发用 expected_revision）。 */
+export interface MandateSavePayload {
+  expected_revision: number
+  autonomy_level: AutonomyLevel
+  allowed_markets: string[]
+  allowed_assets: string[]
+  allowed_sides: string[]
+  allowed_order_types: string[]
+  short_markets: string[]
+  limits: MandateLimits
+  valid_until: string
+  note: string | null
+}
+
+export interface MandateImpactFinding {
+  code: string
+  message: string
+}
+
+export interface MandateImpactedOrder {
+  reference: string
+  instrument_id: string
+  side: string
+  order_type: string
+  findings: MandateImpactFinding[]
+}
+
+export interface MandateImpact {
+  evaluated: number
+  affected: MandateImpactedOrder[]
 }
 
 // ─── 前端辅助 ─────────────────────────────────────

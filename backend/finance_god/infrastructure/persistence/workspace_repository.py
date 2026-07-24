@@ -14,6 +14,7 @@ from finance_god.domain.errors import (
 )
 from finance_god.domain.models import (
     AuditReference,
+    CandidateIgnore,
     Notification,
     NotificationPreference,
     NotificationStatus,
@@ -22,6 +23,7 @@ from finance_god.domain.models import (
 )
 
 from .workspace_models import (
+    CandidateIgnoreRow,
     NotificationPreferenceRow,
     NotificationReceiptRow,
     NotificationRow,
@@ -107,6 +109,114 @@ class WatchlistRepository:
             .order_by(WatchlistGroupRow.created_at, WatchlistGroupRow.group_id)
         )
         return [_watchlist_group(row) for row in rows]
+
+    async def list_instruments(
+        self, owner_user_id: str, group_id: str
+    ) -> list[WatchlistInstrument]:
+        group = await self.get_group(owner_user_id, group_id)
+        if group is None:
+            raise DomainInvariantViolation("watchlist group not found")
+        rows = await self._session.scalars(
+            select(WatchlistInstrumentRow)
+            .where(WatchlistInstrumentRow.group_id == group_id)
+            .order_by(WatchlistInstrumentRow.added_at, WatchlistInstrumentRow.id)
+        )
+        return [_watchlist_instrument(row) for row in rows]
+
+    async def delete_group(
+        self, owner_user_id: str, group_id: str, *, expected_revision: int
+    ) -> None:
+        await self._session.execute(
+            WatchlistInstrumentRow.__table__.delete().where(
+                WatchlistInstrumentRow.group_id == group_id
+            )
+        )
+        result = cast(
+            CursorResult[Any],
+            await self._session.execute(
+                WatchlistGroupRow.__table__.delete().where(
+                    WatchlistGroupRow.group_id == group_id,
+                    WatchlistGroupRow.owner_user_id == owner_user_id,
+                    WatchlistGroupRow.revision == expected_revision,
+                )
+            ),
+        )
+        if result.rowcount != 1:
+            raise ConcurrentCommandConflict("watchlist group revision changed")
+
+    async def remove_instrument(
+        self, owner_user_id: str, group_id: str, instrument_id: str
+    ) -> None:
+        group = await self.get_group(owner_user_id, group_id)
+        if group is None:
+            raise DomainInvariantViolation("watchlist group not found")
+        result = cast(
+            CursorResult[Any],
+            await self._session.execute(
+                WatchlistInstrumentRow.__table__.delete().where(
+                    WatchlistInstrumentRow.group_id == group_id,
+                    WatchlistInstrumentRow.instrument_id == instrument_id,
+                )
+            ),
+        )
+        if result.rowcount == 0:
+            raise DomainInvariantViolation("watchlist instrument not found")
+
+
+class IgnoredCandidateRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list(self, owner_user_id: str) -> list[CandidateIgnore]:
+        rows = await self._session.scalars(
+            select(CandidateIgnoreRow)
+            .where(CandidateIgnoreRow.owner_user_id == owner_user_id)
+            .order_by(CandidateIgnoreRow.created_at, CandidateIgnoreRow.id)
+        )
+        return [_candidate_ignore(row) for row in rows]
+
+    async def upsert(
+        self, *, owner_user_id: str, instrument_id: str, reason: str, note: str | None
+    ) -> CandidateIgnore:
+        now = datetime.now(UTC)
+        existing = await self._session.scalar(
+            select(CandidateIgnoreRow).where(
+                CandidateIgnoreRow.owner_user_id == owner_user_id,
+                CandidateIgnoreRow.instrument_id == instrument_id,
+            )
+        )
+        if existing is None:
+            row = CandidateIgnoreRow(
+                owner_user_id=owner_user_id,
+                instrument_id=instrument_id,
+                reason=reason,
+                note=note,
+                revision=1,
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(row)
+            await self._session.flush()
+            return _candidate_ignore(row)
+        existing.reason = reason
+        existing.note = note
+        existing.revision += 1
+        existing.updated_at = now
+        await self._session.flush()
+        return _candidate_ignore(existing)
+
+    async def remove(self, owner_user_id: str, instrument_id: str) -> None:
+        result = cast(
+            CursorResult[Any],
+            await self._session.execute(
+                CandidateIgnoreRow.__table__.delete().where(
+                    CandidateIgnoreRow.owner_user_id == owner_user_id,
+                    CandidateIgnoreRow.instrument_id == instrument_id,
+                )
+            ),
+        )
+        if result.rowcount == 0:
+            raise DomainInvariantViolation("candidate ignore not found")
 
 
 class NotificationRepository:
@@ -201,6 +311,32 @@ def _watchlist_group(row: WatchlistGroupRow) -> WatchlistGroup:
             "owner_user_id": row.owner_user_id,
             "name": row.name,
             "description": row.description,
+            "revision": row.revision,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+    )
+
+
+def _watchlist_instrument(row: WatchlistInstrumentRow) -> WatchlistInstrument:
+    return WatchlistInstrument.model_validate(
+        {
+            "instrument_id": row.instrument_id,
+            "group_id": row.group_id,
+            "revision": row.revision,
+            "added_at": row.added_at,
+            "added_by": row.added_by,
+        }
+    )
+
+
+def _candidate_ignore(row: CandidateIgnoreRow) -> CandidateIgnore:
+    return CandidateIgnore.model_validate(
+        {
+            "owner_user_id": row.owner_user_id,
+            "instrument_id": row.instrument_id,
+            "reason": row.reason,
+            "note": row.note,
             "revision": row.revision,
             "created_at": row.created_at,
             "updated_at": row.updated_at,

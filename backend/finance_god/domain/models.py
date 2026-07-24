@@ -275,31 +275,92 @@ TRADE_PLAN_TRANSITIONS: Mapping[TradePlanStatus, frozenset[TradePlanStatus]] = (
 )
 
 
+class TradePlanAction(FrozenModel):
+    """One structured proposed order inside a versioned trade plan."""
+
+    action_id: str = Field(min_length=1, max_length=160)
+    instrument_id: str = Field(min_length=1, max_length=160)
+    side: str = Field(pattern=r"^(buy|sell)$")
+    order_type: str = Field(default="market", pattern=r"^(market|limit)$")
+    quantity: PositiveDecimal | None = None
+    limit_price: PositiveDecimal | None = None
+    reference_price: PositiveDecimal | None = None
+    time_in_force: str = Field(
+        default="day",
+        pattern=r"^(day|good_til_cancelled|immediate_or_cancel)$",
+    )
+    included: bool = True
+    rationale: str = Field(min_length=1, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_order_parameters(self) -> Self:
+        if self.order_type == "limit" and self.limit_price is None:
+            raise DomainInvariantViolation("a limit plan action requires limit_price")
+        if self.order_type != "limit" and self.limit_price is not None:
+            raise DomainInvariantViolation(
+                "limit_price belongs only to a limit plan action"
+            )
+        return self
+
+
 class TradePlan(InputVersionedState):
     plan_id: str = Field(min_length=1, max_length=160)
+    account_id: str = Field(min_length=1, max_length=160)
     status: TradePlanStatus
     purpose: str = Field(min_length=1, max_length=1000)
-    actions: tuple[str, ...] = Field(min_length=1)
+    actions: tuple[TradePlanAction, ...] = Field(min_length=1)
     estimated_fee_rmb: NonNegativeDecimal
     portfolio_impact: str = Field(min_length=1, max_length=2000)
     disagreements: tuple[str, ...]
-    workflow_dependencies: tuple[WorkflowDependencySnapshot, ...] = Field(min_length=1)
+    workflow_dependencies: tuple[WorkflowDependencySnapshot, ...] = ()
     expires_at: AwareDatetime
 
     TRANSITIONS = TRADE_PLAN_TRANSITIONS
 
-    @field_validator("actions", "disagreements", mode="before")
+    @field_validator("disagreements", mode="before")
     @classmethod
     def clean_text_items(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         return _clean_string_tuple(values)
 
     @model_validator(mode="after")
     def validate_initial_expiry(self) -> Self:
+        action_ids = [action.action_id for action in self.actions]
+        if len(action_ids) != len(set(action_ids)):
+            raise DomainInvariantViolation("trade plan action ids must be unique")
         if self.revision == 1 and self.expires_at <= self.audit_reference.recorded_at:
             raise DomainInvariantViolation(
                 "trade plan expiry must be later than its creation audit"
             )
         return self
+
+    def revise(
+        self,
+        *,
+        actions: tuple[TradePlanAction, ...],
+        input_versions: tuple[VersionReference, ...],
+        estimated_fee_rmb: Decimal,
+        portfolio_impact: str,
+        audit_reference: AuditReference,
+    ) -> TradePlan:
+        if self.status not in {
+            TradePlanStatus.DRAFT,
+            TradePlanStatus.PENDING_REVIEW,
+        }:
+            raise DomainInvariantViolation(
+                "only a draft or pending trade plan can be revised"
+            )
+        if audit_reference.recorded_at >= self.expires_at:
+            raise DomainInvariantViolation("an expired trade plan cannot be revised")
+        self._ensure_new_audit(audit_reference)
+        return self._replace(
+            revision=self.revision + 1,
+            status=TradePlanStatus.PENDING_REVIEW,
+            actions=actions,
+            input_versions=input_versions,
+            estimated_fee_rmb=estimated_fee_rmb,
+            portfolio_impact=portfolio_impact,
+            audit_reference=audit_reference,
+        )
 
     def transition(
         self, target: TradePlanStatus, *, audit_reference: AuditReference
@@ -1231,6 +1292,16 @@ class WatchlistInstrument(FrozenModel):
     revision: int = Field(ge=1)
     added_at: AwareDatetime = Field(...)
     added_by: str = Field(...)
+
+
+class CandidateIgnore(FrozenModel):
+    owner_user_id: str = Field(min_length=1, max_length=160)
+    instrument_id: str = Field(min_length=1, max_length=160)
+    reason: str = Field(min_length=1, max_length=64)
+    note: str | None = Field(default=None, max_length=500)
+    revision: int = Field(ge=1)
+    created_at: AwareDatetime = Field(...)
+    updated_at: AwareDatetime = Field(...)
 
 
 class Notification(FrozenModel):

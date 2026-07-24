@@ -4,7 +4,7 @@
  * 细线分隔、右对齐数字列、涨跌着色
  */
 import type { MarketQuote } from '@/types/desk'
-import { directionOf, formatPercent, formatChange, formatNumber } from '@/types/desk'
+import { directionOf, formatPercent, formatNumber } from '@/types/desk'
 
 defineProps<{
   quotes: MarketQuote[]
@@ -24,8 +24,7 @@ const emit = defineEmits<{
     <div class="table-header">
       <span class="col-name">标的</span>
       <span class="col-num">最新</span>
-      <span class="col-num">涨跌</span>
-      <span class="col-num">%</span>
+      <span class="col-num">涨跌幅</span>
     </div>
 
     <!-- 加载中 -->
@@ -53,11 +52,11 @@ const emit = defineEmits<{
       :class="{ active: quote.symbol === activeSymbol }"
       @click="emit('select', quote.symbol)"
     >
-      <strong class="col-name">{{ quote.symbol }}</strong>
+      <strong class="col-name">
+        <span>{{ quote.symbol }}</span>
+        <small>{{ quote.name && quote.name !== quote.symbol ? quote.name : quote.asset_type }}</small>
+      </strong>
       <span class="col-num">{{ formatNumber(quote.last) }}</span>
-      <span class="col-num" :class="directionOf(quote)">
-        {{ formatChange(quote.change) }}
-      </span>
       <span class="col-num" :class="directionOf(quote)">
         {{ formatPercent(quote.change_percent) }}
       </span>
@@ -77,7 +76,7 @@ const emit = defineEmits<{
 
 .table-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 72px 72px;
+  grid-template-columns: minmax(0, 1fr) 60px 64px;
   gap: 4px;
   padding: 8px 18px 6px;
   font-size: 11px;
@@ -90,10 +89,11 @@ const emit = defineEmits<{
 
 .quote-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 72px 72px;
+  grid-template-columns: minmax(0, 1fr) 60px 64px;
   gap: 4px;
   width: 100%;
-  padding: 8px 18px;
+  min-height: 38px;
+  padding: 5px 12px;
   border: 0;
   border-bottom: 1px solid var(--faint-rule);
   background: transparent;
@@ -110,14 +110,23 @@ const emit = defineEmits<{
 .quote-row.active {
   background: rgb(45 34 22 / 10%);
   border-left: 3px solid var(--risk);
-  padding-left: 15px;
+  padding-left: 9px;
 }
 .quote-row .col-name {
+  display: grid;
   font-family: var(--font-numeric), var(--font-serif);
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.quote-row .col-name small {
+  overflow: hidden;
+  color: var(--muted-ink);
+  font-family: var(--font-serif);
+  font-size: 9px;
+  font-weight: 500;
+  text-overflow: ellipsis;
 }
 .quote-row .col-num {
   text-align: right;

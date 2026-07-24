@@ -15,6 +15,7 @@ const auth = useAuthStore()
 const NAV_ITEMS = [
   { label: '总览', path: '/overview' },
   { label: '行情', path: '/markets' },
+  { label: '自选', path: '/watchlist' },
   { label: '交易台', path: '/desk' },
   { label: '资产', path: '/portfolio' },
   { label: '订单', path: '/orders' },
@@ -58,6 +59,7 @@ const refreshRate = computed<string>({
 })
 
 function isActive(path: string) {
+  if (path === '/portfolio' && route.name === 'trade-plan') return true
   return route.path.startsWith(path)
 }
 
@@ -150,7 +152,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 17px 0 0;
+  padding: 0 12px 0 0;
   border-bottom: 4px double var(--rule);
   position: relative;
 }
@@ -175,22 +177,24 @@ onBeforeUnmount(() => {
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.7rem;
   flex-shrink: 0;
   padding: 0 18px 0 20px;
 }
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 36px; height: 36px;
-  background: var(--ink);
-  color: var(--paper-light);
+  width: 30px; height: 30px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
   font-family: var(--font-numeric);
   font-size: 15px;
   font-weight: 700;
 }
 .brand-name {
-  font-size: 18px;
+  font-family: var(--font-numeric);
+  font-size: 23px;
   font-weight: 900;
   letter-spacing: 0.06em;
   white-space: nowrap;
@@ -203,9 +207,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .nav-item {
-  padding: 0 14px;
-  line-height: 60px;
-  font-size: 14px;
+  padding: 0 10px;
+  line-height: 72px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--muted-ink);
@@ -226,7 +230,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  gap: 16px;
+  gap: 9px;
 }
 
 .edition-meta {
@@ -235,7 +239,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   color: var(--muted-ink);
   font-family: var(--font-numeric);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.11em;
   line-height: 1.25;
@@ -353,5 +357,21 @@ onBeforeUnmount(() => {
 }
 .dropdown-item + .dropdown-item {
   border-top: 1px solid var(--faint-rule);
+}
+
+@media (max-width: 1279px) {
+  .brand {
+    gap: 7px;
+    padding-inline: 10px 8px;
+  }
+  .brand-mark { width: 26px; height: 26px; font-size: 12px; }
+  .brand-name { font-size: 18px; }
+  .nav-item { padding-inline: 6px; font-size: 12px; }
+  .masthead-right { gap: 4px; }
+  .edition-meta,
+  .refresh-label,
+  .user-label { display: none; }
+  .status-indicator,
+  .user-trigger { padding-inline: 6px; }
 }
 </style>

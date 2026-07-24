@@ -11,6 +11,10 @@ from finance_god.api.workspace_routes import create_workspace_routes
 from finance_god.infrastructure.persistence.models import Base
 
 
+async def _resolve_server_user(_request) -> str:
+    return "server-user"
+
+
 def test_workspace_routes_use_server_resolved_owner(tmp_path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'workspace-api.db'}"
     engine = create_async_engine(database_url)
@@ -22,7 +26,7 @@ def test_workspace_routes_use_server_resolved_owner(tmp_path) -> None:
                 "/api/v1",
                 routes=create_workspace_routes(
                     session_factory=session_factory,
-                    owner_resolver=lambda request: "server-user",
+                    owner_resolver=_resolve_server_user,
                 ),
             )
         ]

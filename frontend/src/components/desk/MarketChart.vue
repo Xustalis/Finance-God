@@ -34,8 +34,8 @@ const highs = computed(() => props.bars.map((b) => b.high))
 const lows = computed(() => props.bars.map((b) => b.low))
 const volumes = computed(() => props.bars.map((b) => b.volume))
 
-const priceMin = computed(() => Math.min(...lows.value))
-const priceMax = computed(() => Math.max(...highs.value))
+const priceMin = computed(() => lows.value.length > 0 ? Math.min(...lows.value) : 0)
+const priceMax = computed(() => highs.value.length > 0 ? Math.max(...highs.value) : 1)
 const priceRange = computed(() => priceMax.value - priceMin.value || 1)
 const volMax = computed(() => Math.max(...volumes.value) || 1)
 
@@ -59,15 +59,32 @@ function volY(v: number): number {
   return base + VOLUME_HEIGHT - (v / volMax.value) * VOLUME_HEIGHT
 }
 
-// ─── SVG 路径 ─────────────────────────────────────
-const pricePath = computed(() => {
-  if (closes.value.length === 0) return ''
-  return closes.value
-    .map((c, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(c).toFixed(1)}`)
-    .join(' ')
-})
-
 const referenceY = computed(() => yAt(referencePrice.value))
+const candleWidth = computed(() => Math.max(
+  2,
+  Math.min(8, chartWidth.value / Math.max(props.bars.length, 1) * .62),
+))
+const candles = computed(() => props.bars.map((bar, index) => {
+  const x = xAt(index)
+  const openY = yAt(bar.open)
+  const closeY = yAt(bar.close)
+  return {
+    x,
+    wickTop: yAt(bar.high),
+    wickBottom: yAt(bar.low),
+    bodyY: Math.min(openY, closeY),
+    bodyHeight: Math.max(1.5, Math.abs(closeY - openY)),
+    rising: bar.close >= bar.open,
+  }
+}))
+
+const chartSummary = computed(() => {
+  if (props.bars.length === 0) return '暂无可用 K 线数据。'
+  const first = props.bars[0]
+  const last = props.bars[props.bars.length - 1]
+  const direction = last.close >= first.close ? '上涨' : '下跌'
+  return `${props.symbol || '当前标的'} 共 ${props.bars.length} 根 K 线，区间由 ${first.close.toFixed(2)} ${direction}至 ${last.close.toFixed(2)}，区间最高 ${priceMax.value.toFixed(2)}，最低 ${priceMin.value.toFixed(2)}。`
+})
 
 // 网格线
 const gridLines = computed(() => {
@@ -102,6 +119,7 @@ const volumeBars = computed(() => {
     y: volY(b.volume),
     width: Math.max(2, chartWidth.value / (props.bars.length || 1) - 1),
     height: PADDING.top + chartHeight.value + CHART_GAP + VOLUME_HEIGHT - volY(b.volume),
+    rising: b.close >= b.open,
   }))
 })
 
@@ -216,6 +234,7 @@ onUnmounted(() => {
       @mouseleave="onMouseLeave"
       @click="onClick"
     >
+      <desc>{{ chartSummary }}</desc>
       <!-- 网格线 -->
       <line
         v-for="(g, i) in gridLines"
@@ -251,6 +270,7 @@ onUnmounted(() => {
           v-for="(v, i) in volumeBars"
           :key="'v' + i"
           class="volume-bar"
+          :class="v.rising ? 'rising' : 'falling'"
           :x="v.x"
           :y="v.y"
           :width="v.width"
@@ -267,8 +287,29 @@ onUnmounted(() => {
         :y2="PADDING.top + chartHeight + CHART_GAP / 2"
       />
 
-      <!-- 价格线 -->
-      <path class="market-line" :d="pricePath" />
+      <!-- K 线 -->
+      <g class="candles">
+        <g
+          v-for="(candle, i) in candles"
+          :key="'c' + i"
+          :class="candle.rising ? 'candle rising' : 'candle falling'"
+        >
+          <line
+            class="candle-wick"
+            :x1="candle.x"
+            :x2="candle.x"
+            :y1="candle.wickTop"
+            :y2="candle.wickBottom"
+          />
+          <rect
+            class="candle-body"
+            :x="candle.x - candleWidth / 2"
+            :y="candle.bodyY"
+            :width="candleWidth"
+            :height="candle.bodyHeight"
+          />
+        </g>
+      </g>
 
       <!-- 参考价参考线 -->
       <line
@@ -353,8 +394,8 @@ onUnmounted(() => {
 <style scoped>
 .chart-frame {
   position: relative;
-  min-height: 325px;
-  border: 3px double var(--rule);
+  min-height: 380px;
+  border-block: 1px solid var(--rule);
   contain: layout paint;
   transition: border-color 0.28s ease;
 }
@@ -382,7 +423,7 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 325px;
+  min-height: 380px;
   cursor: crosshair;
   overflow: visible;
 }
@@ -401,13 +442,20 @@ onUnmounted(() => {
   stroke-width: 1;
 }
 
-.market-line {
-  fill: none;
-  stroke: var(--ink);
-  stroke-linecap: square;
-  stroke-linejoin: miter;
-  stroke-width: 1.8;
+.candle-wick {
+  stroke-width: 1;
   vector-effect: non-scaling-stroke;
+}
+.candle-body { vector-effect: non-scaling-stroke; }
+.candle.rising .candle-wick { stroke: var(--risk); }
+.candle.rising .candle-body {
+  fill: var(--risk);
+  stroke: var(--risk);
+}
+.candle.falling .candle-wick { stroke: var(--positive); }
+.candle.falling .candle-body {
+  fill: var(--positive);
+  stroke: var(--positive);
 }
 
 .reference-line {
@@ -434,9 +482,10 @@ onUnmounted(() => {
 }
 
 .volume-bar {
-  fill: var(--ink);
-  opacity: 0.55;
+  opacity: 0.72;
 }
+.volume-bar.rising { fill: var(--risk); }
+.volume-bar.falling { fill: var(--positive); }
 .volume-bars {
   opacity: 0.78;
 }

@@ -41,12 +41,14 @@ build/
 
 # Local runtime databases
 backend/*.db
-backend/user.json
+# Local PandaData credential caches, including OS-created numbered copies.
+backend/user*.json
 backend/uv.lock
 
 # External reference repositories and generated experiment output
 /resources/
 /artifacts/
+/output/
 
 # Environment
 .env

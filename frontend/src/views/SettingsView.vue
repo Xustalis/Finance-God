@@ -15,13 +15,27 @@ import {
   addWatchlistInstrument,
   fetchNotificationPreferences,
   updateNotificationPreferences,
+  fetchCurrentMandate,
+  fetchMandateHistory,
+  saveMandate,
+  pauseMandate,
+  resumeMandate,
+  revokeMandate,
+  fetchMandateImpact,
+  newIdempotencyKey,
 } from '@/api/desk'
 import { DEFAULT_SYMBOLS } from '@/types/desk'
-import type { WatchlistGroup } from '@/types/desk'
+import type {
+  WatchlistGroup,
+  InvestmentMandate,
+  MandateImpact,
+  MandateSavePayload,
+  AutonomyLevel,
+} from '@/types/desk'
 import type { InvestmentDirection, ProfileWithRecommendations } from '@/types/api'
 import { directionScore, localizeArchetype, localizeProfileText } from '@/services/profile'
 
-type TabKey = 'account' | 'profile' | 'watchlist' | 'notifications'
+type TabKey = 'account' | 'profile' | 'watchlist' | 'notifications' | 'authorization'
 
 const market = useMarketStore()
 const auth = useAuthStore()
@@ -30,6 +44,7 @@ const activeTab = ref<TabKey>('account')
 
 const TABS: { key: TabKey; label: string; test?: string }[] = [
   { key: 'account', label: '账户资料' },
+  { key: 'authorization', label: '交易授权' },
   { key: 'profile', label: '投资画像' },
   { key: 'watchlist', label: '自选股' },
   { key: 'notifications', label: '通知偏好' },
@@ -238,6 +253,205 @@ async function saveNotifPrefs() {
   }
 }
 
+/* ── 交易授权（T00，仿真业务数据）───────────── */
+const MARKET_OPTIONS = ['CN', 'HK', 'US'] as const
+const ASSET_OPTIONS: { value: string; label: string }[] = [
+  { value: 'stock', label: '股票' },
+  { value: 'etf', label: 'ETF' },
+  { value: 'lof', label: 'LOF' },
+  { value: 'otc_fund', label: '场外基金' },
+]
+const SIDE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'buy', label: '买入' },
+  { value: 'sell', label: '卖出' },
+  { value: 'short', label: '做空' },
+  { value: 'subscribe', label: '申购' },
+  { value: 'redeem', label: '赎回' },
+  { value: 'convert', label: '转换' },
+  { value: 'recurring_invest', label: '定投' },
+]
+const ORDER_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'market', label: '市价单' },
+  { value: 'limit', label: '限价单' },
+  { value: 'fund', label: '基金单' },
+]
+const AUTONOMY_OPTIONS: { value: AutonomyLevel; label: string }[] = [
+  { value: 'L0', label: 'L0·仅手动（每笔人工确认）' },
+  { value: 'L1', label: 'L1·半自动（AI 提议、人工批准）' },
+  { value: 'L2', label: 'L2·自动（限定范围内自主执行）' },
+]
+const STATUS_LABELS: Record<string, string> = {
+  active: '生效中',
+  paused: '已暂停',
+  revoked: '已撤销',
+  expired: '已过期',
+}
+
+interface MandateForm {
+  autonomy_level: AutonomyLevel
+  allowed_markets: string[]
+  allowed_assets: string[]
+  allowed_sides: string[]
+  allowed_order_types: string[]
+  max_single_order_amount: string
+  valid_until: string
+  note: string
+}
+
+const currentMandate = ref<InvestmentMandate | null>(null)
+const mandateHistory = ref<InvestmentMandate[]>([])
+const mandateImpact = ref<MandateImpact | null>(null)
+const mandateLoading = ref(true)
+const mandateError = ref<string | null>(null)
+const mandateMessage = ref('')
+const mandateSaving = ref(false)
+const mandateStatusBusy = ref(false)
+const mandateForm = ref<MandateForm>({
+  autonomy_level: 'L0',
+  allowed_markets: [],
+  allowed_assets: [],
+  allowed_sides: [],
+  allowed_order_types: [],
+  max_single_order_amount: '',
+  valid_until: '',
+  note: '',
+})
+
+function toDateInput(iso: string): string {
+  return iso.slice(0, 10)
+}
+
+function resetMandateForm() {
+  const m = currentMandate.value
+  if (!m) return
+  mandateForm.value = {
+    autonomy_level: m.autonomy_level,
+    allowed_markets: [...m.allowed_markets],
+    allowed_assets: [...m.allowed_assets],
+    allowed_sides: [...m.allowed_sides],
+    allowed_order_types: [...m.allowed_order_types],
+    max_single_order_amount: m.limits.max_single_order_amount,
+    valid_until: toDateInput(m.valid_until),
+    note: m.note ?? '',
+  }
+}
+
+function toggleScope(list: string[], value: string): string[] {
+  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
+}
+
+const mandateFormValid = computed(() => {
+  const f = mandateForm.value
+  const amount = Number(f.max_single_order_amount)
+  return (
+    f.allowed_markets.length > 0
+    && f.allowed_assets.length > 0
+    && f.allowed_sides.length > 0
+    && f.allowed_order_types.length > 0
+    && Number.isFinite(amount)
+    && amount > 0
+    && f.valid_until.length === 10
+  )
+})
+
+function sameSet(a: string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sorted = [...b].sort()
+  return [...a].sort().every((v, i) => v === sorted[i])
+}
+
+const mandateDirty = computed(() => {
+  const m = currentMandate.value
+  if (!m) return false
+  const f = mandateForm.value
+  return (
+    f.autonomy_level !== m.autonomy_level
+    || !sameSet(f.allowed_markets, m.allowed_markets)
+    || !sameSet(f.allowed_assets, m.allowed_assets)
+    || !sameSet(f.allowed_sides, m.allowed_sides)
+    || !sameSet(f.allowed_order_types, m.allowed_order_types)
+    || f.max_single_order_amount !== m.limits.max_single_order_amount
+    || f.valid_until !== toDateInput(m.valid_until)
+    || f.note.trim() !== (m.note ?? '')
+  )
+})
+
+async function loadMandate() {
+  mandateLoading.value = true
+  mandateError.value = null
+  try {
+    currentMandate.value = await fetchCurrentMandate()
+    resetMandateForm()
+    mandateHistory.value = await fetchMandateHistory()
+    mandateImpact.value = await fetchMandateImpact()
+  } catch (e) {
+    mandateError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    mandateLoading.value = false
+  }
+}
+
+async function refreshMandateAux() {
+  try {
+    mandateHistory.value = await fetchMandateHistory()
+    mandateImpact.value = await fetchMandateImpact()
+  } catch {
+    /* 历史/影响面为辅助信息，不阻断主流程 */
+  }
+}
+
+async function saveMandateVersion() {
+  const m = currentMandate.value
+  if (!m || mandateSaving.value || !mandateDirty.value || !mandateFormValid.value) return
+  mandateSaving.value = true
+  mandateError.value = null
+  mandateMessage.value = ''
+  const f = mandateForm.value
+  const shortMarkets = m.short_markets.filter((mk) => f.allowed_markets.includes(mk))
+  const payload: MandateSavePayload = {
+    expected_revision: m.version,
+    autonomy_level: f.autonomy_level,
+    allowed_markets: [...f.allowed_markets],
+    allowed_assets: [...f.allowed_assets],
+    allowed_sides: [...f.allowed_sides],
+    allowed_order_types: [...f.allowed_order_types],
+    short_markets: shortMarkets,
+    limits: { ...m.limits, max_single_order_amount: f.max_single_order_amount.trim() },
+    valid_until: new Date(`${f.valid_until}T00:00:00Z`).toISOString(),
+    note: f.note.trim() || null,
+  }
+  try {
+    currentMandate.value = await saveMandate(payload, newIdempotencyKey('mandate-save'))
+    resetMandateForm()
+    mandateMessage.value = `已保存新版本 v${currentMandate.value.version}`
+    await refreshMandateAux()
+  } catch (e) {
+    mandateError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    mandateSaving.value = false
+  }
+}
+
+async function changeStatus(action: 'pause' | 'resume' | 'revoke') {
+  const m = currentMandate.value
+  if (!m || mandateStatusBusy.value) return
+  if (action === 'revoke' && !window.confirm('撤销后新下单意图将被拦截，确定撤销当前授权？')) return
+  mandateStatusBusy.value = true
+  mandateError.value = null
+  mandateMessage.value = ''
+  try {
+    const fn = action === 'pause' ? pauseMandate : action === 'resume' ? resumeMandate : revokeMandate
+    currentMandate.value = await fn(m.version)
+    resetMandateForm()
+    mandateMessage.value = { pause: '已暂停授权', resume: '已恢复授权', revoke: '已撤销授权' }[action]
+    await refreshMandateAux()
+  } catch (e) {
+    mandateError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    mandateStatusBusy.value = false
+  }
+}
+
 onMounted(() => {
   market.startPolling()
   market.checkHealth()
@@ -245,6 +459,7 @@ onMounted(() => {
   loadWatchlists()
   loadNotifPrefs()
   loadInvestmentProfile()
+  loadMandate()
 })
 onUnmounted(() => market.stopPolling())
 </script>
@@ -347,6 +562,184 @@ onUnmounted(() => market.stopPolling())
           <p class="scope-note">仿真钱包初始化、重置、持仓与资金流水已迁移至「资产」页统一管理。</p>
           <RouterLink to="/portfolio" class="secondary-button compact">前往资产页</RouterLink>
         </div>
+      </section>
+
+      <!-- 交易授权（T00，仿真业务数据） -->
+      <section v-if="activeTab === 'authorization'" class="settings-section">
+        <p class="scope-note sim-note">授权数据为<strong>仿真业务数据</strong>，用于约束本平台仿真下单意图；本页不存储任何经纪商账号或密码。</p>
+
+        <div v-if="mandateLoading" class="table-state" role="status">正在加载授权…</div>
+        <div v-else-if="mandateError && !currentMandate" class="account-load-error" role="alert">
+          <strong>授权加载失败</strong>
+          <span>{{ mandateError }}</span>
+          <button class="secondary-button compact" @click="loadMandate">重新加载</button>
+        </div>
+        <template v-else-if="currentMandate">
+          <!-- 授权状态摘要 -->
+          <div class="info-card mandate-summary">
+            <div class="info-row">
+              <span>当前状态</span>
+              <strong :class="currentMandate.status === 'active' ? 'ok' : 'warn'">
+                {{ STATUS_LABELS[currentMandate.status] ?? currentMandate.status }}（v{{ currentMandate.version }}）
+              </strong>
+            </div>
+            <div class="info-row">
+              <span>自主级别</span>
+              <strong>{{ currentMandate.autonomy_level }}</strong>
+            </div>
+            <div class="info-row">
+              <span>单笔上限</span>
+              <strong>{{ currentMandate.limits.max_single_order_amount }}</strong>
+            </div>
+            <div class="info-row">
+              <span>有效期至</span>
+              <strong>{{ new Date(currentMandate.valid_until).toLocaleDateString('zh-CN') }}</strong>
+            </div>
+          </div>
+
+          <!-- 紧急操作 -->
+          <div class="form-actions mandate-emergency">
+            <button
+              v-if="currentMandate.status !== 'active'"
+              class="primary-button compact"
+              :disabled="mandateStatusBusy"
+              @click="changeStatus('resume')"
+            >恢复授权</button>
+            <button
+              v-else
+              class="secondary-button compact"
+              :disabled="mandateStatusBusy"
+              @click="changeStatus('pause')"
+            >暂停授权</button>
+            <button
+              class="text-button danger"
+              :disabled="mandateStatusBusy || currentMandate.status === 'revoked'"
+              @click="changeStatus('revoke')"
+            >撤销授权</button>
+          </div>
+
+          <!-- 授权编辑器 -->
+          <form class="form-card" @submit.prevent="saveMandateVersion">
+            <h2 class="form-title">编辑授权（保存即创建新版本）</h2>
+            <label class="field">
+              <span>自主级别</span>
+              <select v-model="mandateForm.autonomy_level">
+                <option v-for="o in AUTONOMY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </label>
+
+            <div class="field">
+              <span>可交易市场</span>
+              <div class="chip-choices">
+                <label v-for="mk in MARKET_OPTIONS" :key="mk" class="choice">
+                  <input
+                    type="checkbox"
+                    :checked="mandateForm.allowed_markets.includes(mk)"
+                    @change="mandateForm.allowed_markets = toggleScope(mandateForm.allowed_markets, mk)"
+                  />
+                  {{ mk }}
+                </label>
+              </div>
+            </div>
+
+            <div class="field">
+              <span>可交易资产</span>
+              <div class="chip-choices">
+                <label v-for="o in ASSET_OPTIONS" :key="o.value" class="choice">
+                  <input
+                    type="checkbox"
+                    :checked="mandateForm.allowed_assets.includes(o.value)"
+                    @change="mandateForm.allowed_assets = toggleScope(mandateForm.allowed_assets, o.value)"
+                  />
+                  {{ o.label }}
+                </label>
+              </div>
+            </div>
+
+            <div class="field">
+              <span>可交易方向</span>
+              <div class="chip-choices">
+                <label v-for="o in SIDE_OPTIONS" :key="o.value" class="choice">
+                  <input
+                    type="checkbox"
+                    :checked="mandateForm.allowed_sides.includes(o.value)"
+                    @change="mandateForm.allowed_sides = toggleScope(mandateForm.allowed_sides, o.value)"
+                  />
+                  {{ o.label }}
+                </label>
+              </div>
+            </div>
+
+            <div class="field">
+              <span>可用订单类型</span>
+              <div class="chip-choices">
+                <label v-for="o in ORDER_TYPE_OPTIONS" :key="o.value" class="choice">
+                  <input
+                    type="checkbox"
+                    :checked="mandateForm.allowed_order_types.includes(o.value)"
+                    @change="mandateForm.allowed_order_types = toggleScope(mandateForm.allowed_order_types, o.value)"
+                  />
+                  {{ o.label }}
+                </label>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>单笔上限（金额）</span>
+              <input v-model.trim="mandateForm.max_single_order_amount" inputmode="decimal" placeholder="如 1000000" />
+            </label>
+            <label class="field">
+              <span>有效期至</span>
+              <input v-model="mandateForm.valid_until" type="date" />
+            </label>
+            <label class="field">
+              <span>备注（可选）</span>
+              <input v-model="mandateForm.note" maxlength="500" placeholder="本次授权调整说明" />
+            </label>
+
+            <p v-if="mandateError && currentMandate" class="form-error" role="alert">{{ mandateError }}</p>
+            <p v-if="mandateMessage" class="success-note" role="status">{{ mandateMessage }}</p>
+            <div class="form-actions">
+              <button class="primary-button compact" :disabled="mandateSaving || !mandateDirty || !mandateFormValid">
+                {{ mandateSaving ? '正在保存…' : '保存新版本' }}
+              </button>
+              <button
+                v-if="mandateDirty"
+                type="button"
+                class="text-button"
+                @click="resetMandateForm(); mandateMessage = ''"
+              >撤销改动</button>
+            </div>
+          </form>
+
+          <!-- 受影响面 -->
+          <h2 class="form-title user-heading">受影响的现存订单意图</h2>
+          <div v-if="!mandateImpact || mandateImpact.affected.length === 0" class="table-state">
+            当前授权下无被拦截的现存订单意图（已评估 {{ mandateImpact?.evaluated ?? 0 }} 项）。
+          </div>
+          <ul v-else class="impact-list">
+            <li v-for="item in mandateImpact.affected" :key="item.reference" class="impact-item">
+              <div class="impact-head">
+                <strong>{{ item.instrument_id }}</strong>
+                <span>{{ item.side }} · {{ item.order_type }}</span>
+              </div>
+              <ul class="impact-reasons">
+                <li v-for="f in item.findings" :key="f.code">{{ f.message }}</li>
+              </ul>
+            </li>
+          </ul>
+
+          <!-- 版本历史 -->
+          <h2 class="form-title user-heading">版本历史</h2>
+          <div v-if="mandateHistory.length === 0" class="table-state">暂无历史版本</div>
+          <ul v-else class="history-list">
+            <li v-for="h in mandateHistory" :key="h.mandate_id" class="history-item">
+              <span class="history-ver">v{{ h.version }}</span>
+              <span class="history-status">{{ STATUS_LABELS[h.status] ?? h.status }} · {{ h.autonomy_level }}</span>
+              <span class="history-time">{{ new Date(h.created_at).toLocaleString('zh-CN') }}</span>
+            </li>
+          </ul>
+        </template>
       </section>
 
       <!-- 投资画像 -->
@@ -510,6 +903,16 @@ onUnmounted(() => market.stopPolling())
           <span>快速参考</span>
           <small>REFERENCE</small>
         </h2>
+        <div class="summary-grid">
+          <div class="summary-row">
+            <span>授权状态</span>
+            <strong>{{ currentMandate ? (STATUS_LABELS[currentMandate.status] ?? currentMandate.status) : '—' }}</strong>
+          </div>
+          <div class="summary-row">
+            <span>自主级别</span>
+            <strong>{{ currentMandate ? currentMandate.autonomy_level : '—' }}</strong>
+          </div>
+        </div>
         <div class="summary-grid">
           <div class="summary-row">
             <span>画像完整度</span>
@@ -709,4 +1112,37 @@ onUnmounted(() => market.stopPolling())
   color: var(--positive); background: var(--jade-pale); padding: .65rem .8rem;
   border-left: 3px solid var(--positive); margin: 12px 0;
 }
+
+/* 交易授权 */
+.sim-note { margin-bottom: 12px; }
+.sim-note strong { color: var(--risk); }
+.mandate-summary { margin-bottom: 12px; }
+.info-row strong.ok { color: var(--positive); }
+.info-row strong.warn { color: var(--risk); }
+.mandate-emergency { padding-top: 0; padding-bottom: 16px; border-bottom: 1px solid var(--rule); margin-bottom: 16px; }
+.field select { min-height: 36px; font-size: 13px; }
+.chip-choices { display: flex; flex-wrap: wrap; gap: 12px; }
+.chip-choices .choice {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.chip-choices .choice input { min-height: auto; }
+.text-button.danger { color: var(--risk); }
+.text-button.danger:disabled { color: var(--muted-ink); cursor: not-allowed; }
+
+.impact-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; }
+.impact-item { border: 1px solid var(--risk); padding: 10px 12px; background: rgb(143 48 39 / 4%); }
+.impact-head { display: flex; align-items: baseline; gap: 10px; }
+.impact-head span { color: var(--muted-ink); font-size: 12px; }
+.impact-reasons { margin: 6px 0 0; padding-left: 18px; color: var(--risk); font-size: 12px; }
+
+.history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.history-item {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 8px 0; border-bottom: 1px solid var(--faint-rule); font-size: 13px;
+}
+.history-item:last-child { border-bottom: 0; }
+.history-ver { font-family: var(--font-numeric); font-weight: 900; color: var(--risk); }
+.history-status { font-weight: 600; }
+.history-time { margin-left: auto; color: var(--muted-ink); font-size: 12px; font-family: var(--font-numeric); }
 </style>

@@ -60,24 +60,30 @@ def test_market_api_returns_stable_safe_errors_without_raw_exception_text(
     monkeypatch.setattr(server, "market_data", StubService())
     monkeypatch.setattr(server, "market_application", FailingApplication())
     quotes = asyncio.run(server.quotes(_request(b"symbols=000001.SZ")))
+    overview = asyncio.run(
+        server.market_overview(_request(b"symbols=000001.SZ"))
+    )
     bars = asyncio.run(server.bars(_request(b"symbol=000001.SZ")))
     invalid = asyncio.run(server.bars(_request(b"symbol=000001.SZ&limit=bad")))
     live = asyncio.run(server.live(_request(b"")))
     ready = asyncio.run(server.ready(_request(b"")))
     health = asyncio.run(server.health(_request(b"")))
     quote_payload = _payload(quotes)
+    overview_payload = _payload(overview)
     bars_payload = _payload(bars)
     invalid_payload = _payload(invalid)
     live_payload = _payload(live)
     ready_payload = _payload(ready)
     health_payload = _payload(health)
     rendered = json.dumps(
-        [quote_payload, bars_payload, invalid_payload],
+        [quote_payload, overview_payload, bars_payload, invalid_payload],
         ensure_ascii=False,
     )
 
     assert quotes.status_code == 502
     assert quote_payload["error"]["code"] == "MARKET_DATA_PERMISSION_DENIED"
+    assert overview.status_code == 502
+    assert overview_payload["error"]["code"] == "MARKET_DATA_PERMISSION_DENIED"
     assert bars.status_code == 500
     assert bars_payload["error"]["code"] == "MARKET_DATA_INTERNAL_ERROR"
     assert invalid.status_code == 400
@@ -95,7 +101,12 @@ def test_market_api_returns_stable_safe_errors_without_raw_exception_text(
     assert "should-never-reach-browser" not in rendered
     assert all(
         len(payload["error"]["trace_id"]) == 32
-        for payload in (quote_payload, bars_payload, invalid_payload)
+        for payload in (
+            quote_payload,
+            overview_payload,
+            bars_payload,
+            invalid_payload,
+        )
     )
 
 

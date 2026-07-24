@@ -62,16 +62,18 @@ function tifLabel(tif: string | null): string {
   return tif ? (TIF_LABELS[tif] ?? tif) : '—'
 }
 
+// 格式化器构造开销高，提升为组件级单例，避免在订单表格每行渲染时重复创建。
+const RMB_FORMATTER = new Intl.NumberFormat('zh-CN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+const QTY_FORMATTER = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 })
+
 function formatRmb(value: number): string {
-  return new Intl.NumberFormat('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
+  return RMB_FORMATTER.format(value)
 }
 function formatQty(value: number): string {
-  return Number.isInteger(value)
-    ? value.toString()
-    : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 }).format(value)
+  return Number.isInteger(value) ? value.toString() : QTY_FORMATTER.format(value)
 }
 function formatTime(value: string | null): string {
   return value ? new Date(value).toLocaleString('zh-CN') : '—'

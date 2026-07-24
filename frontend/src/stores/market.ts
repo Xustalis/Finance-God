@@ -5,13 +5,13 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { fetchQuotes, fetchBars, fetchHealth } from '@/api/desk'
+import { fetchMarketOverview, fetchBars, fetchHealth, isCanceledError } from '@/api/desk'
 import type {
   MarketQuote,
   MarketBar,
-  QuoteBatch,
   HealthResponse,
   BarsResponse,
+  MarketOverviewView,
 } from '@/types/desk'
 import { DEFAULT_SYMBOLS } from '@/types/desk'
 
@@ -46,6 +46,10 @@ export const useMarketStore = defineStore('market', () => {
   let visibilityHandler: (() => void) | null = null
   let activeSymbols: string[] = DEFAULT_SYMBOLS
   let quotesInFlight = false
+  /** 当前在途 K 线请求的取消控制器：切换标的时用于取消上一笔并识别过期响应。 */
+  let barsAbort: AbortController | null = null
+  /** 订阅计数：多个页面/组件可并发订阅，仅当归零时才真正停止轮询。 */
+  let subscribers = 0
   const isPolling = ref(false)
   /** 当前轮询间隔（毫秒），用户可通过 setPollInterval 调整 */
   const pollIntervalMs = ref<number>(DEFAULT_POLL_INTERVAL)
@@ -53,6 +57,8 @@ export const useMarketStore = defineStore('market', () => {
   const isPaused = ref(false)
   /** 最近一次拉取失败的时间戳（0 表示无失败或已恢复） */
   const quotesFailedAt = ref<number>(0)
+  const overview = ref<MarketOverviewView | null>(null)
+  const overviewError = ref<string | null>(null)
 
   // ─── 计算属性 ───────────────────────────────────
 
@@ -70,67 +76,6 @@ export const useMarketStore = defineStore('market', () => {
 
   const provider = computed(() => health.value?.market_data ?? '—')
 
-  // ─── 派生指标（从真实行情数据计算） ───────────────
-
-  /** 市场趋势：多数标的涨跌方向 */
-  const marketTrend = computed<'up' | 'down' | 'neutral'>(() => {
-    const qs = quotes.value
-    if (qs.length === 0) return 'neutral'
-    const ups = qs.filter(q => (q.change ?? 0) > 0).length
-    const downs = qs.filter(q => (q.change ?? 0) < 0).length
-    if (ups > downs && ups >= qs.length / 2) return 'up'
-    if (downs > ups && downs >= qs.length / 2) return 'down'
-    return 'neutral'
-  })
-
-  /** 波动率：涨跌幅标准差（百分比） */
-  const marketVolatility = computed(() => {
-    const pcts = quotes.value.map(q => Math.abs(q.change_percent ?? 0) * 100)
-    if (pcts.length === 0) return 0
-    const mean = pcts.reduce((a, b) => a + b, 0) / pcts.length
-    const variance = pcts.reduce((a, b) => a + (b - mean) ** 2, 0) / pcts.length
-    return Math.sqrt(variance)
-  })
-
-  /** 市场宽度：上涨占比（0-1） */
-  const marketBreadth = computed(() => {
-    const qs = quotes.value
-    if (qs.length === 0) return 0
-    const advancing = qs.filter(q => (q.change ?? 0) > 0).length
-    return advancing / qs.length
-  })
-
-  /** 上涨/下跌/持平计数 */
-  const advanceDecline = computed(() => {
-    const qs = quotes.value
-    const advancing = qs.filter(q => (q.change ?? 0) > 0).length
-    const declining = qs.filter(q => (q.change ?? 0) < 0).length
-    const unchanged = qs.length - advancing - declining
-    return { advancing, declining, unchanged }
-  })
-
-  /** 市场信号：从真实行情派生的方向倾向与方向一致性（统计派生，非模型/AI 输出） */
-  const marketSignal = computed(() => {
-    const trend = marketTrend.value
-    const vol = marketVolatility.value
-    const breadth = marketBreadth.value
-
-    // 倾向
-    let tendency: string
-    if (trend === 'up' && breadth > 0.6) tendency = '积极'
-    else if (trend === 'down' && breadth < 0.4) tendency = '谨慎'
-    else tendency = '中性'
-
-    // 方向一致性：涨跌方向越集中 → 一致性越高
-    const agreement = Math.abs(breadth - 0.5) * 2  // 0-1
-    const consistency = Math.round(50 + agreement * 40 + (vol > 1 ? -5 : 5))
-
-    return {
-      tendency,
-      consistency: Math.max(40, Math.min(95, consistency)),
-    }
-  })
-
   // ─── 行情拉取 ───────────────────────────────────
 
   async function loadQuotes(symbols: string[] = DEFAULT_SYMBOLS) {
@@ -139,15 +84,18 @@ export const useMarketStore = defineStore('market', () => {
     quotesInFlight = true
     quotesLoading.value = true
     quotesError.value = null
+    overviewError.value = null
     try {
-      const batch: QuoteBatch = await fetchQuotes(symbols)
-      quotes.value = [...batch.quotes]
-      quoteErrors.value = { ...batch.errors }
+      const result = await fetchMarketOverview(symbols)
+      overview.value = result
+      quotes.value = [...result.data.quotes]
+      quoteErrors.value = {}
       quotesUpdatedAt.value = Date.now()
       quotesFailedAt.value = 0
     } catch (err) {
       // 失败时保留最后一次成功值，仅记录错误与失败时间
       quotesError.value = err instanceof Error ? err.message : String(err)
+      overviewError.value = quotesError.value
       quotesFailedAt.value = Date.now()
     } finally {
       quotesLoading.value = false
@@ -166,18 +114,30 @@ export const useMarketStore = defineStore('market', () => {
 
   async function loadBars(symbol: string, limit = 80) {
     contextSymbol.value = symbol
+    // 取消上一笔未完成的 K 线请求，避免竞态覆盖与无谓网络开销。
+    if (barsAbort) barsAbort.abort()
+    const controller = new AbortController()
+    barsAbort = controller
     barsLoading.value = true
     barsError.value = null
     try {
-      const result: BarsResponse = await fetchBars(symbol, limit)
+      const result: BarsResponse = await fetchBars(symbol, limit, controller.signal)
+      // 已被更新的请求取代（或乱序返回）则丢弃旧结果，不覆盖当前标的的数据。
+      if (barsAbort !== controller) return
       bars.value = [...result.bars]
       barsSymbol.value = result.symbol
       barsFrequency.value = result.frequency
     } catch (err) {
+      // 取消或已被取代的请求静默忽略；仅当前有效请求的真实失败才置错误态。
+      if (isCanceledError(err) || barsAbort !== controller) return
       barsError.value = err instanceof Error ? err.message : String(err)
       bars.value = []
     } finally {
-      barsLoading.value = false
+      // 仅当自身仍是最新请求时才复位加载态，避免复位更新请求的进行中标记。
+      if (barsAbort === controller) {
+        barsLoading.value = false
+        barsAbort = null
+      }
     }
   }
 
@@ -194,6 +154,34 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   // ─── 轮询控制 ───────────────────────────────────
+  // 采用引用计数：路由切换时新页面 onMounted 与旧页面 onUnmounted 的时序可能交错，
+  // 若用单一“启动/停止”开关会被误停；改为订阅数增减，仅归零时才真正停止。
+
+  /** 启动定时器与可见性监听并立即拉取一次；仅在“未暂停且当前未激活”时调用。 */
+  function activate() {
+    isPolling.value = true
+    loadQuotes(activeSymbols)
+    scheduleTimer()
+    if (!visibilityHandler) {
+      visibilityHandler = () => {
+        if (!document.hidden && isPolling.value) loadQuotes(activeSymbols)
+      }
+      document.addEventListener('visibilitychange', visibilityHandler)
+    }
+  }
+
+  /** 清除定时器与可见性监听；不改变订阅计数与暂停标记。 */
+  function deactivate() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+    if (visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler)
+      visibilityHandler = null
+    }
+    isPolling.value = false
+  }
 
   /** 更新当前观察标的池；若已在轮询则立即用新列表刷新。 */
   function setWatchSymbols(symbols: string[]) {
@@ -201,24 +189,16 @@ export const useMarketStore = defineStore('market', () => {
     if (isPolling.value && !isPaused.value) loadQuotes(activeSymbols)
   }
 
+  /** 订阅轮询（页面 onMounted 调用）：订阅数 +1，首个订阅者启动轮询。 */
   function startPolling(symbols: string[] = DEFAULT_SYMBOLS) {
     activeSymbols = symbols.length > 0 ? [...symbols] : [...DEFAULT_SYMBOLS]
+    subscribers += 1
+    if (isPaused.value) return
     if (isPolling.value) {
-      if (!isPaused.value) loadQuotes(activeSymbols)
+      loadQuotes(activeSymbols)
       return
     }
-    isPolling.value = true
-    isPaused.value = false
-
-    // 立即拉取一次
-    loadQuotes(activeSymbols)
-    scheduleTimer()
-
-    // 标签页隐藏暂停，恢复可见时立即拉取
-    visibilityHandler = () => {
-      if (!document.hidden && isPolling.value) loadQuotes(activeSymbols)
-    }
-    document.addEventListener('visibilitychange', visibilityHandler)
+    activate()
   }
 
   /** 按当前 pollIntervalMs 重建定时器 */
@@ -234,7 +214,7 @@ export const useMarketStore = defineStore('market', () => {
 
   /**
    * 设置轮询频率。传入 POLL_INTERVAL_OPTIONS 中的毫秒值切换频率；
-   * 传入 0（或非正值）表示“暂停”，停止轮询但保留已有数据。
+   * 传入 0（或非正值）表示“暂停”，停止定时器但保留订阅计数与已拉取数据。
    */
   function setPollInterval(ms: number) {
     if (ms > 0) {
@@ -243,29 +223,20 @@ export const useMarketStore = defineStore('market', () => {
       if (isPolling.value) {
         scheduleTimer()
       } else {
-        startPolling(activeSymbols)
+        activate()
       }
       return
     }
-    // 暂停：清除定时器但保留可见性监听与已拉取数据
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
-    isPolling.value = false
+    // 暂停：停止定时器与监听但保留订阅计数与已拉取数据
+    deactivate()
     isPaused.value = true
   }
 
+  /** 取消订阅（页面 onUnmounted 调用）：订阅数 -1，归零时停止轮询并清除暂停。 */
   function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer)
-      pollTimer = null
-    }
-    if (visibilityHandler) {
-      document.removeEventListener('visibilitychange', visibilityHandler)
-      visibilityHandler = null
-    }
-    isPolling.value = false
+    if (subscribers > 0) subscribers -= 1
+    if (subscribers > 0) return
+    deactivate()
     isPaused.value = false
   }
 
@@ -288,15 +259,12 @@ export const useMarketStore = defineStore('market', () => {
     isPaused,
     pollIntervalMs,
     quotesFailedAt,
+    overview,
+    overviewError,
     isStale,
     // 计算
     quotesMap,
     provider,
-    marketTrend,
-    marketVolatility,
-    marketBreadth,
-    advanceDecline,
-    marketSignal,
     // 方法
     loadQuotes,
     loadBars,

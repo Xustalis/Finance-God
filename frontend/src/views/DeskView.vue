@@ -19,6 +19,7 @@ import {
   symbolsForDirection,
 } from '@/services/directionDesk'
 import { useMarketStore } from '@/stores/market'
+import { useAiContextStore } from '@/stores/aiContext'
 import { fetchCurrentAccount, fetchOrders, isDeskApiError, searchInstruments } from '@/api/desk'
 import { DEFAULT_SYMBOLS, directionOf, formatPercent, formatChange, formatNumber } from '@/types/desk'
 import type { InvestmentDirection } from '@/types/api'
@@ -32,6 +33,7 @@ import type {
 
 const route = useRoute()
 const market = useMarketStore()
+const ai = useAiContextStore()
 const selectedDirection = ref<InvestmentDirection | null>(null)
 const directionLoading = ref(true)
 const directionError = ref<string | null>(null)
@@ -65,6 +67,19 @@ const directionTitle = computed(() => (
 const directionKind = computed(() => (
   selectedDirection.value ? directionKindLabel(selectedDirection.value) : null
 ))
+
+const quoteTime = computed(() => {
+  const value = activeQuote.value?.provider_time
+  if (!value) return '等待上游时点'
+  return new Date(value).toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+})
 
 watch(activeSymbol, (sym) => {
   if (sym) market.loadBars(sym)
@@ -141,6 +156,35 @@ async function resolveDirection() {
   }
 }
 
+/**
+ * 入口上下文：从自选/候选/搜索进入时携带 symbol/source（可选 reason/group）。
+ * 在方向解析完成后调用，以便选中具体标的并落到常驻 AI 上下文。
+ */
+function sourceLabel(source: string): string {
+  if (source === 'candidate') return '系统候选'
+  if (source === 'watchlist') return '我的自选'
+  if (source === 'search') return '搜索'
+  return source
+}
+
+function applyEntryContext() {
+  const symbol = typeof route.query.symbol === 'string' ? route.query.symbol : null
+  const source = typeof route.query.source === 'string' ? route.query.source : null
+  if (!symbol) return
+  if (!watchSymbols.value.includes(symbol)) {
+    watchSymbols.value = [symbol, ...watchSymbols.value]
+    market.setWatchSymbols(watchSymbols.value)
+  }
+  activeSymbol.value = symbol
+  market.startPolling(watchSymbols.value)
+  market.loadBars(symbol)
+  ai.setContext({
+    scope: 'symbol',
+    subject: symbol,
+    label: source ? `${symbol}（来自${sourceLabel(source)}）` : symbol,
+  })
+}
+
 async function loadAccount() {
   accountLoading.value = true
   accountMissing.value = false
@@ -182,9 +226,10 @@ function handleSubmitted(_order: StoredOrder) {
   void loadOrders()
 }
 
-onMounted(() => {
+onMounted(async () => {
   market.checkHealth()
-  void resolveDirection()
+  await resolveDirection()
+  applyEntryContext()
   loadAccount()
   loadOrders()
 })
@@ -256,38 +301,77 @@ onUnmounted(() => {
     <!-- 主栏：图表 + 行情详情 -->
     <template #main>
       <div class="lead-header">
-        <div class="lead-kicker">
-          <span>交易台</span>
-          <span>{{ directionKind || 'TRADING DESK' }}</span>
-        </div>
-        <h1 class="lead-title">
-          {{ activeQuote ? activeQuote.symbol : '选择标的' }}
+        <div class="lead-identity">
+          <div class="lead-kicker">
+            <span>当前标的</span>
+            <span>{{ directionKind || 'TRADING DESK' }}</span>
+          </div>
+          <h1 class="lead-title">
+            <span class="lead-symbol">{{ activeQuote ? activeQuote.symbol : '选择标的' }}</span>
+            <span
+              v-if="activeQuote?.name && activeQuote.name !== activeQuote.symbol"
+              class="lead-name"
+            >
+              {{ activeQuote.name }}
+            </span>
+            <small v-if="activeQuote" class="instrument-tags">
+              <span>{{ activeQuote.market }}</span>
+              <span>{{ activeQuote.asset_type }}</span>
+              <span>仿真交易</span>
+            </small>
+          </h1>
           <small v-if="directionTitle" class="direction-badge" data-test="desk-direction">
-            {{ directionTitle }} · {{ directionKind }}
+            当前方向：{{ directionTitle }} · {{ directionKind }}
           </small>
-          <small v-if="activeQuote" :class="directionOf(activeQuote)">
-            {{ formatNumber(activeQuote.last) }}
-            {{ formatChange(activeQuote.change) }}
-            ({{ formatPercent(activeQuote.change_percent) }})
-          </small>
-        </h1>
+        </div>
+        <div v-if="activeQuote" class="quote-lead" :class="directionOf(activeQuote)">
+          <strong>{{ formatNumber(activeQuote.last) }}</strong>
+          <span>{{ formatChange(activeQuote.change) }}　{{ formatPercent(activeQuote.change_percent) }}</span>
+        </div>
+        <dl v-if="activeQuote" class="quote-facts">
+          <div><dt>今开</dt><dd>{{ formatNumber(activeQuote.open) }}</dd></div>
+          <div><dt>最高</dt><dd>{{ formatNumber(activeQuote.high) }}</dd></div>
+          <div><dt>昨收</dt><dd>{{ formatNumber(activeQuote.previous_close) }}</dd></div>
+          <div><dt>最低</dt><dd>{{ formatNumber(activeQuote.low) }}</dd></div>
+          <div><dt>成交量</dt><dd>{{ formatNumber(activeQuote.volume, 0) }}</dd></div>
+          <div><dt>成交额</dt><dd>{{ formatNumber(activeQuote.amount, 0) }}</dd></div>
+        </dl>
+        <div class="data-byline">
+          <span>PandaData</span>
+          <span>{{ quoteTime }}</span>
+          <span>{{ activeQuote?.frequency || '频率未知' }}</span>
+          <strong :class="activeQuote?.freshness === 'current' ? 'up' : 'down'">
+            {{ activeQuote?.freshness || '等待行情' }}
+          </strong>
+        </div>
         <p v-if="directionError" class="direction-note" role="status">
           画像方向读取失败，已使用默认标的池。{{ directionError }}
         </p>
       </div>
 
-      <!-- 行情条 -->
-      <div class="ticker-strip" v-if="market.quotes.length > 0">
-        <div
+      <div class="chart-toolbar">
+        <div class="chart-mode" aria-label="当前图表周期">
+          <strong>{{ market.barsFrequency || 'K 线' }}</strong>
+          <span>{{ market.bars.length }} 根</span>
+        </div>
+        <div class="chart-indicators" aria-label="图表指标">
+          <span>价格</span>
+          <span>成交量</span>
+        </div>
+      </div>
+
+      <div class="ticker-strip" v-if="market.quotes.length > 0" aria-label="观察标的快捷切换">
+        <button
           v-for="q in market.quotes.slice(0, 6)"
           :key="q.symbol"
+          type="button"
           class="ticker"
           :class="{ active: q.symbol === activeSymbol }"
           @click="activeSymbol = q.symbol"
         >
           <span>{{ q.symbol }}</span>
           <strong :class="directionOf(q)">{{ formatPercent(q.change_percent) }}</strong>
-        </div>
+        </button>
       </div>
 
       <!-- K线图 -->
@@ -323,6 +407,18 @@ onUnmounted(() => {
         <div class="detail-item">
           <span>新鲜度</span>
           <strong>{{ activeQuote.freshness }}</strong>
+        </div>
+        <div class="detail-item">
+          <span>实际频率</span>
+          <strong>{{ activeQuote.frequency }}</strong>
+        </div>
+        <div class="detail-item">
+          <span>市场状态</span>
+          <strong>{{ activeQuote.market_status }}</strong>
+        </div>
+        <div class="detail-item">
+          <span>数据源</span>
+          <strong>{{ activeQuote.provider }}</strong>
         </div>
       </div>
     </template>
@@ -492,17 +588,25 @@ onUnmounted(() => {
   border: 0;
 }
 
-.lead-header { margin-bottom: 12px; }
+.lead-header {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto minmax(220px, .72fr);
+  gap: 8px 22px;
+  align-items: end;
+  margin-bottom: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+.lead-identity { min-width: 0; }
 .direction-badge {
   display: block;
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: 0.42em;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  margin-top: 6px;
+  margin-top: 4px;
+  color: var(--muted-ink);
+  font-size: 11px;
+  font-weight: 600;
 }
 .direction-note {
+  grid-column: 1 / -1;
   margin: 8px 0 0;
   color: var(--muted-ink);
   font-size: 12px;
@@ -511,9 +615,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 5px;
-  padding-bottom: 4px;
-  border-bottom: 3px double var(--rule);
+  margin-bottom: 4px;
   color: var(--muted-ink);
   font-size: 9px;
   font-weight: 700;
@@ -521,27 +623,104 @@ onUnmounted(() => {
 }
 .lead-kicker span:first-child { color: var(--risk); font-size: 10px; font-weight: 900; }
 .lead-title {
-  font-size: clamp(1.8rem, 3vw, 2.8rem);
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 12px;
   margin: 0;
+  font-size: clamp(1.55rem, 2.4vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.015em;
 }
-.lead-title small {
-  display: block;
-  font-size: 0.5em;
+.lead-symbol { font-family: var(--font-numeric); }
+.lead-name { font-size: .72em; letter-spacing: .03em; }
+.instrument-tags {
+  display: inline-flex;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.instrument-tags span {
+  padding: 1px 5px;
+  border: 1px solid var(--rule);
+}
+.quote-lead {
+  display: grid;
+  align-content: end;
+  min-width: 110px;
+  font-family: var(--font-numeric);
+}
+.quote-lead strong {
+  font-size: clamp(2rem, 3.4vw, 3rem);
+  line-height: .9;
+}
+.quote-lead span {
+  margin-top: 6px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.quote-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 2px 18px;
+  margin: 0;
+  font-size: 11px;
+}
+.quote-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.quote-facts dt { color: var(--muted-ink); }
+.quote-facts dd {
+  margin: 0;
   font-family: var(--font-numeric);
   font-weight: 700;
-  margin-top: 4px;
+  text-align: right;
+}
+.data-byline {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--muted-ink);
+  font-size: 10px;
+}
+.data-byline span + span::before,
+.data-byline strong::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--rule);
+}
+
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+}
+.chart-mode,
+.chart-indicators { display: flex; align-items: center; gap: 2px; }
+.chart-mode span,
+.chart-mode strong,
+.chart-indicators span {
+  padding: 6px 9px 5px;
+  white-space: nowrap;
+}
+.chart-mode strong {
+  border: 1px solid var(--rule);
+  background: var(--paper-light);
 }
 
 .ticker-strip {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--rule);
+  gap: 0;
+  margin: 0;
+  min-height: 30px;
   overflow-x: auto;
   scrollbar-width: none;
   white-space: nowrap;
@@ -550,43 +729,46 @@ onUnmounted(() => {
 .ticker {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink);
   font-family: var(--font-numeric);
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  padding: 4px 0;
-  border-bottom: 2px solid transparent;
   transition: border-color 0.18s;
 }
 .ticker:hover { border-bottom-color: var(--faint-rule); }
 .ticker.active { border-bottom-color: var(--risk); }
-.ticker strong { font-size: 15px; }
+.ticker strong { font-size: 11px; }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: 0;
-  margin-top: 18px;
+  margin-top: 6px;
   border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .detail-item {
-  padding: 12px 0;
+  min-width: 0;
+  padding: 7px 8px;
   display: grid;
   gap: 2px;
-  border-bottom: 1px solid var(--faint-rule);
-}
-.detail-item:nth-child(3n+1),
-.detail-item:nth-child(3n+2) {
   border-right: 1px solid var(--faint-rule);
-  padding-right: 12px;
 }
-.detail-item:nth-child(3n+2),
-.detail-item:nth-child(3n+3) {
-  padding-left: 12px;
-}
+.detail-item:last-child { border-right: 0; }
 .detail-item span { color: var(--muted-ink); font-size: 11px; }
-.detail-item strong { font-family: var(--font-numeric); font-size: 14px; }
+.detail-item strong {
+  overflow: hidden;
+  font-family: var(--font-numeric);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .summary-grid, .data-meta { padding: 14px 18px; }
 .summary-grid + .data-meta { border-top: 1px solid var(--rule); }
@@ -627,4 +809,13 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .order-row span { text-align: right; }
+
+@media (max-width: 1279px) {
+  .lead-header {
+    grid-template-columns: minmax(220px, 1fr) auto;
+  }
+  .quote-facts { display: none; }
+  .detail-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .detail-item:nth-child(n + 7) { display: none; }
+}
 </style>

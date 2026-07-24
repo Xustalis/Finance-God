@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import App from '@/App.vue'
 import DeskLayout from '@/components/desk/DeskLayout.vue'
+import MarketChart from '@/components/desk/MarketChart.vue'
 import { DESK_LAYOUT_STORAGE_KEY } from '@/composables/useDeskLayoutPreference'
 
 function setViewportWidth(width: number) {
@@ -104,5 +105,20 @@ describe('desk workspace preferences', () => {
 
     expect(wrapper.get('[role="alert"]').text()).toContain('已恢复默认布局')
     expect(wrapper.get('.desk-right').isVisible()).toBe(true)
+  })
+})
+
+describe('market chart failure rendering', () => {
+  it('keeps hidden SVG coordinates finite when no bars are available', () => {
+    const wrapper = mount(MarketChart, {
+      props: {
+        bars: [],
+        symbol: '000001.SZ',
+        error: '上游请求失败',
+      },
+    })
+
+    expect(wrapper.text()).toContain('K 线加载失败')
+    expect(wrapper.html()).not.toContain('NaN')
   })
 })

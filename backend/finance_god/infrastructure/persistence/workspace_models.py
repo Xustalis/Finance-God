@@ -54,6 +54,28 @@ class WatchlistInstrumentRow(Base):
     added_by: Mapped[str] = mapped_column(String(160), nullable=False)
 
 
+class CandidateIgnoreRow(Base):
+    __tablename__ = "candidate_ignores"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_user_id",
+            "instrument_id",
+            name="uq_candidate_ignore_owner_instrument",
+        ),
+        CheckConstraint("revision >= 1", name="ck_candidate_ignore_revision_positive"),
+        Index("ix_candidate_ignores_owner_id", "owner_user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    instrument_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 class NotificationRow(Base):
     __tablename__ = "notifications"
     __table_args__ = (

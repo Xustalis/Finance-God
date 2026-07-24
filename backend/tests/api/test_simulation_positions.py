@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from server import _authenticated_owner
 from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.testclient import TestClient
 
-from app.core.security import create_access_token
+from finance_god.api.auth import AuthenticationError
 from finance_god.api.simulation import (
     SimulationPositionView,
     create_simulation_routes,
@@ -36,7 +35,12 @@ class _Accounts:
         )
 
 
-def _app() -> Starlette:
+def _app(owner_id: str | None) -> Starlette:
+    async def resolve_owner(_request) -> str:
+        if owner_id is None:
+            raise AuthenticationError("valid Bearer authentication is required")
+        return owner_id
+
     return Starlette(
         routes=[
             Mount(
@@ -46,7 +50,7 @@ def _app() -> Starlette:
                     accounts=_Accounts(),
                     portfolio=object(),
                     decision_inbox=object(),
-                    owner_resolver=_authenticated_owner,
+                    owner_resolver=resolve_owner,
                 ),
             )
         ]
@@ -54,13 +58,8 @@ def _app() -> Starlette:
 
 
 def test_positions_endpoint_returns_projections_for_owner_with_account() -> None:
-    token = create_access_token("user-with-account")
-
-    with TestClient(_app()) as client:
-        response = client.get(
-            "/api/simulation/accounts/current/positions",
-            headers={"Authorization": f"Bearer {token}"},
-        )
+    with TestClient(_app("user-with-account")) as client:
+        response = client.get("/api/simulation/accounts/current/positions")
 
     assert response.status_code == 200
     body = response.json()
@@ -73,20 +72,15 @@ def test_positions_endpoint_returns_projections_for_owner_with_account() -> None
 
 
 def test_positions_endpoint_returns_empty_list_without_account() -> None:
-    token = create_access_token("user-without-account")
-
-    with TestClient(_app()) as client:
-        response = client.get(
-            "/api/simulation/accounts/current/positions",
-            headers={"Authorization": f"Bearer {token}"},
-        )
+    with TestClient(_app("user-without-account")) as client:
+        response = client.get("/api/simulation/accounts/current/positions")
 
     assert response.status_code == 200
     assert response.json() == []
 
 
 def test_positions_endpoint_rejects_unauthenticated_requests() -> None:
-    with TestClient(_app()) as client:
+    with TestClient(_app(None)) as client:
         response = client.get("/api/simulation/accounts/current/positions")
 
     assert response.status_code == 401

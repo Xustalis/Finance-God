@@ -10,11 +10,14 @@ const AUTHENTICATED_DESKTOP_PATHS = [
   '/app/profile-report',
   '/overview',
   '/markets',
+  '/watchlist',
   '/desk',
   '/portfolio',
+  '/trade-plans/:planId',
   '/orders',
   '/reviews',
   '/data',
+  '/data/evidence/:id',
   '/settings',
 ]
 

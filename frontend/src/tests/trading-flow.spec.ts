@@ -13,9 +13,9 @@ import {
   fetchBars,
   fetchCurrentAccount,
   fetchHealth,
+  fetchMarketOverview,
   fetchNotificationPreferences,
   fetchOrders,
-  fetchQuotes,
   fetchWatchlists,
   isDeskApiError,
   newIdempotencyKey,
@@ -125,7 +125,7 @@ const reviewed: StoredDraft = {
 }
 
 vi.mock('@/api/desk', () => ({
-  fetchQuotes: vi.fn(),
+  fetchMarketOverview: vi.fn(),
   fetchBars: vi.fn(),
   fetchHealth: vi.fn(),
   fetchCurrentAccount: vi.fn(),
@@ -139,6 +139,7 @@ vi.mock('@/api/desk', () => ({
   confirmSoftRisk: vi.fn(),
   confirmOrderDraft: vi.fn(),
   submitOrderDraft: vi.fn(),
+  isCanceledError: vi.fn(() => false),
   isDeskApiError: vi.fn((error: unknown, status?: number) => (
     error instanceof Error
     && 'status' in error
@@ -161,6 +162,34 @@ vi.mock('@/api', () => ({
 
 const layoutStub = {
   template: '<div><slot name="left" /><slot name="main" /><slot name="right" /></div>',
+}
+
+function marketOverview(quotes: (typeof quote)[]) {
+  return {
+    object: { type: 'market_overview', id: 'test', symbols: quotes.map(item => item.symbol) },
+    data: {
+      quotes,
+      signal: {
+        tendency: 'neutral',
+        tendency_label: '中性',
+        consistency_percent: 100,
+        definition: 'test',
+      },
+      forces: [],
+      indicators: [],
+    },
+    version: 'market-overview:test',
+    algorithm_version: 'market-overview-v1',
+    generated_at: '2026-07-24T08:00:00Z',
+    data_status: {
+      provider: 'PandaData',
+      provider_time: '2026-07-24T08:00:00Z',
+      frequency: '1min',
+      freshness: 'fresh',
+      last_success_at: '2026-07-24T08:00:00Z',
+    },
+    warnings: [],
+  } as const
 }
 
 async function mountView(component: object, path = '/desk') {
@@ -189,7 +218,7 @@ async function mountView(component: object, path = '/desk') {
 }
 
 function prepareCommonMocks() {
-  vi.mocked(fetchQuotes).mockResolvedValue({ quotes: [quote], errors: {} } as never)
+  vi.mocked(fetchMarketOverview).mockResolvedValue(marketOverview([quote]) as never)
   vi.mocked(fetchBars).mockResolvedValue({ symbol: quote.symbol, frequency: 'day', bars: [] } as never)
   vi.mocked(fetchHealth).mockResolvedValue({ market_data: 'PandaData', readiness: 'ready' } as never)
   vi.mocked(fetchOrders).mockResolvedValue([])
@@ -272,15 +301,15 @@ describe('draft review confirmation and submission', () => {
 
   it('applies the selected investment direction from the route query to the desk universe', async () => {
     const fundQuote = { ...quote, symbol: '600519.SH', name: '贵州茅台', asset_type: 'equity' }
-    vi.mocked(fetchQuotes).mockResolvedValue({ quotes: [fundQuote], errors: {} } as never)
+    vi.mocked(fetchMarketOverview).mockResolvedValue(marketOverview([fundQuote]) as never)
     vi.mocked(fetchBars).mockResolvedValue({ symbol: '600519.SH', frequency: 'day', bars: [] } as never)
     const wrapper = await mountView(DeskView, '/desk?direction=public_funds')
     await flushPromises()
 
     expect(wrapper.get('[data-test="desk-direction"]').text()).toContain('百川谱')
     expect(wrapper.get('[data-test="direction-scope"]').text()).toContain('公募基金')
-    expect(fetchQuotes).toHaveBeenCalledWith(symbolsForDirection('public_funds'))
-    expect(fetchBars).toHaveBeenCalledWith('600519.SH', expect.anything())
+    expect(fetchMarketOverview).toHaveBeenCalledWith(symbolsForDirection('public_funds'))
+    expect(fetchBars).toHaveBeenCalledWith('600519.SH', expect.anything(), expect.anything())
     wrapper.unmount()
   })
 

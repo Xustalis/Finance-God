@@ -7,6 +7,7 @@ from typing import Self
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .workspace_repository import (
+    IgnoredCandidateRepository,
     NotificationPreferenceRepository,
     NotificationRepository,
     WatchlistRepository,
@@ -26,6 +27,7 @@ class WorkspaceUnitOfWork:
         self._session = self._session_factory()
         self._transaction = await self._session.begin()
         self.watchlists = WatchlistRepository(self._session)
+        self.candidate_ignores = IgnoredCandidateRepository(self._session)
         self.notifications = NotificationRepository(self._session)
         self.preferences = NotificationPreferenceRepository(self._session)
         return self

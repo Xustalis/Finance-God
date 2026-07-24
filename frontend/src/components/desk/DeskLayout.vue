@@ -71,21 +71,21 @@ function toggleLabel(panel: DeskPanel) {
 
 <style scoped>
 .desk-page {
-  --desk-left-width: 282px;
-  --desk-right-width: 290px;
-  --desk-bottom-height: 150px;
+  --desk-left-width: 248px;
+  --desk-right-width: 244px;
+  --desk-bottom-height: 136px;
 
   display: grid;
   width: 100%;
   min-height: 100vh;
   overflow: hidden;
   grid-template:
-    "masthead masthead masthead" 64px
-    "toolbar  toolbar  toolbar"  38px
-    "left     main     right"    minmax(482px, calc(100vh - 252px))
+    "masthead masthead masthead" 76px
+    "toolbar  toolbar  toolbar"  34px
+    "left     main     right"    minmax(510px, calc(100vh - 246px))
     "bottom   bottom   bottom"   var(--desk-bottom-height)
     / var(--desk-left-width) minmax(0, 1fr) var(--desk-right-width);
-  border-top: 10px solid var(--ink);
+  border-top: 6px solid var(--ink);
   background-color: var(--paper);
   background-image:
     radial-gradient(circle at 52% 38%, rgb(255 249 232 / 38%), transparent 58%),
@@ -107,7 +107,7 @@ function toggleLabel(panel: DeskPanel) {
   min-width: 0;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 3px 10px;
   overflow-x: auto;
   border-bottom: 1px solid var(--rule);
   background: var(--paper-light);
@@ -165,7 +165,7 @@ function toggleLabel(panel: DeskPanel) {
 .desk-main {
   grid-area: main;
   min-width: 0;
-  padding: 22px 20px 32px;
+  padding: 10px 12px 18px;
   overflow-y: auto;
 }
 
@@ -181,8 +181,8 @@ function toggleLabel(panel: DeskPanel) {
 
 @media (max-width: 1279px) {
   .desk-page {
-    --desk-left-width: 220px;
-    --desk-right-width: 260px;
+    --desk-left-width: 208px;
+    --desk-right-width: 232px;
   }
 
   .desk-page.left-hidden {
@@ -194,7 +194,7 @@ function toggleLabel(panel: DeskPanel) {
   }
 
   .desk-main {
-    padding-inline: 14px;
+    padding-inline: 10px;
   }
 }
 </style>

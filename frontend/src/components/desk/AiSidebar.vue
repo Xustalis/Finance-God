@@ -5,11 +5,20 @@
  * 展示：当前对象、数据来源与时点、结论、证据/反方证据、未知项、追问输入。
  * 结论全部来自后端 Multi-Agent 运行时；不可用时显示显式失败，不生成默认建议。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAiContextStore } from '@/stores/aiContext'
+import EvidenceDrawer from '@/components/evidence/EvidenceDrawer.vue'
 import type { AgentClaim } from '@/types/desk'
 
 const ai = useAiContextStore()
+
+// 过程与证据抽屉：当前 AI 运行的结论已由后端按 (agent_run, run_id) 落库，
+// 此处仅打开只读抽屉查看不可变证据，绝不在前端派生结论。
+const evidenceOpen = ref(false)
+const evidenceRunId = computed(() => ai.run?.run_id ?? null)
+function openEvidence() {
+  if (evidenceRunId.value) evidenceOpen.value = true
+}
 
 const primaryResult = computed(() => ai.run?.results?.[0] ?? null)
 const allClaims = computed<AgentClaim[]>(() =>
@@ -70,8 +79,8 @@ function onRun() {
   >
     <header class="ai-head">
       <div class="ai-head-titles">
-        <small class="ai-kicker">AI RESEARCH · 编辑注释</small>
-        <h2 class="ai-title">AI 侧栏</h2>
+        <small class="ai-kicker">CURRENT OBJECT RESEARCH</small>
+        <h2 class="ai-title">AI 研究</h2>
       </div>
       <button
         class="head-toggle"
@@ -123,6 +132,15 @@ function onRun() {
       <section class="ai-block">
         <span class="block-label">结论</span>
         <p class="conclusion">{{ primaryResult.summary }}</p>
+        <button
+          v-if="evidenceRunId"
+          class="evidence-entry"
+          type="button"
+          data-test="ai-evidence-entry"
+          @click="openEvidence"
+        >
+          查看过程 / 分析依据 →
+        </button>
       </section>
 
       <section v-if="assignments.length" class="ai-block">
@@ -195,6 +213,17 @@ function onRun() {
         placeholder="补充你想让 AI 重点分析的问题或证据…"
       />
     </section>
+
+    <!-- 过程与证据只读抽屉（禁嵌套：高级分析跳转独立页） -->
+    <EvidenceDrawer
+      v-if="evidenceRunId"
+      :open="evidenceOpen"
+      object-type="agent_run"
+      :object-id="evidenceRunId"
+      version="1"
+      tier="normal"
+      @close="evidenceOpen = false"
+    />
   </aside>
 </template>
 
@@ -202,9 +231,9 @@ function onRun() {
 .ai-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   height: 100%;
-  padding: 16px 14px 22px;
+  padding: 14px 14px 18px;
   overflow-y: auto;
   background: var(--paper, #f3ecda);
   border-left: 1px solid var(--rule, #cbbfa0);
@@ -214,19 +243,20 @@ function onRun() {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  border-bottom: 2px solid var(--ink, #241d12);
-  padding-bottom: 8px;
+  border-bottom: 3px double var(--ink, #241d12);
+  padding-bottom: 7px;
 }
 .ai-kicker {
-  color: var(--risk, #9a2c2c);
-  font-size: 0.66rem;
+  color: var(--muted-ink, #6b5f47);
+  font-size: 0.58rem;
   font-weight: 900;
   letter-spacing: 0.12em;
 }
 .ai-title {
-  margin: 2px 0 0;
-  font-size: 1.15rem;
-  font-weight: 700;
+  margin: 1px 0 0;
+  font-family: var(--font-serif);
+  font-size: 1.55rem;
+  font-weight: 800;
   color: var(--ink, #241d12);
 }
 .head-toggle,
@@ -237,7 +267,7 @@ function onRun() {
   color: var(--ink, #241d12);
   border: 1px solid var(--ink, #241d12);
   padding: 4px 10px;
-  border-radius: 2px;
+  border-radius: 0;
 }
 .head-toggle {
   font-size: 0.75rem;
@@ -245,7 +275,7 @@ function onRun() {
 }
 .run-button {
   width: 100%;
-  padding: 9px;
+  padding: 8px;
   font-weight: 700;
   background: var(--ink, #241d12);
   color: var(--paper, #f3ecda);
@@ -263,8 +293,9 @@ function onRun() {
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--muted-ink, #6b5f47);
+  border-bottom: 1px solid var(--faint-rule);
+  padding-bottom: 3px;
 }
 .object-line {
   margin: 0;
@@ -282,10 +313,24 @@ function onRun() {
 }
 .conclusion {
   margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-size: 0.86rem;
+  line-height: 1.62;
   color: var(--ink, #241d12);
 }
+.evidence-entry {
+  align-self: flex-start;
+  margin-top: 2px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink, #241d12);
+  border: none;
+  border-bottom: 1px solid var(--ink, #241d12);
+  padding: 0 0 1px;
+}
+.evidence-entry:hover { color: var(--risk, #9a2c2c); border-color: var(--risk, #9a2c2c); }
 .claim-list,
 .agent-list,
 .evidence-list {

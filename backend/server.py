@@ -18,20 +18,31 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from app.config import settings
-from app.core.security import decode_access_token
+from app.core.security import resolve_active_user
 from app.db.session import create_db_session
 from finance_god.api.agent_routes import (
     AgentRuntimeUnavailable,
     create_agent_routes,
 )
 from finance_god.api.auth import AuthenticationError
+from finance_god.api.evidence_routes import create_evidence_routes
+from finance_god.api.mandate_routes import create_mandate_routes
 from finance_god.api.simulation import create_simulation_routes
+from finance_god.api.trade_plan_routes import create_trade_plan_routes
 from finance_god.api.workspace_routes import create_workspace_routes
+from finance_god.application.candidate_service import CandidateScoringService
 from finance_god.application.decision_inbox import DecisionInboxService
+from finance_god.application.evidence_service import EvidenceService
 from finance_god.application.ledger_service import SimulationLedgerService
+from finance_god.application.mandate_service import MandateService
+from finance_god.application.market_overview import build_market_overview
 from finance_god.application.portfolio_query import PortfolioQueryService
+from finance_god.application.trade_plan_service import TradePlanService
 from finance_god.domain import Notification
 from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
+from finance_god.infrastructure.mandate_provider import (
+    PersistentAuthorizationProvider,
+)
 from finance_god.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
 from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
 from finance_god.infrastructure.simulation_wiring import (
@@ -134,16 +145,25 @@ def _workspace_session() -> AsyncSession:
     return create_db_session()
 
 
-def _authenticated_owner(request: Request) -> str:
-    """Resolve the owner exclusively from the signed Bearer token subject."""
+def _mandate_service() -> MandateService:
+    """Build the mandate application service over the workspace session."""
+    return MandateService(
+        session_factory=_workspace_session,
+        clock=SystemClock(),
+        ids=UuidIdGenerator(),
+    )
+
+
+async def _authenticated_owner(request: Request) -> str:
+    """Resolve the owner from a signed token and current active user record."""
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    owner_id = decode_access_token(token) if scheme.lower() == "bearer" and token else None
-    if not isinstance(owner_id, str):
+    if scheme.lower() != "bearer" or not token:
         raise AuthenticationError("valid Bearer authentication is required")
-    owner_id = owner_id.strip()
-    if not owner_id or len(owner_id) > 160:
+    async with create_db_session() as session:
+        user = await resolve_active_user(token, session)
+    if user is None:
         raise AuthenticationError("valid Bearer authentication is required")
-    return owner_id
+    return user.id
 
 
 @asynccontextmanager
@@ -266,6 +286,31 @@ async def quotes(request: Request) -> JSONResponse:
         return _internal_error()
     status_code = 200 if result.quotes else 502
     return _json(result, status_code=status_code)
+
+
+async def market_overview(request: Request) -> JSONResponse:
+    symbols = request.query_params.get("symbols", "").split(",")
+    try:
+        _, application = _services()
+        batch = await application.quotes(symbols)
+        if not batch.quotes:
+            return _safe_error(
+                code="MARKET_DATA_EMPTY_RESPONSE",
+                message="No market data is available for the overview.",
+                status_code=502,
+            )
+        result = build_market_overview(batch)
+    except (ValueError, ValidationError):
+        return _safe_error(
+            code="MARKET_DATA_INVALID_REQUEST",
+            message="The market overview request is invalid.",
+            status_code=400,
+        )
+    except MarketDataError as error:
+        return _json({"error": error.public_payload()}, status_code=502)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
+        return _internal_error()
+    return _json(result)
 
 
 async def bars(request: Request) -> JSONResponse:
@@ -411,6 +456,69 @@ def _simulation_uow_factory() -> SqlAlchemyUnitOfWork:
     return SqlAlchemyUnitOfWork(_workspace_session)
 
 
+async def _candidate_quotes(symbols: list[str]):
+    _, application = _services()
+    return await application.quotes(symbols)
+
+
+def _candidate_service() -> CandidateScoringService:
+    """Build the deterministic candidate scoring service on demand."""
+    portfolio = PortfolioQueryService(
+        uow_factory=_simulation_uow_factory,
+        clock=SystemClock(),
+        rule_version=SIMULATION_RULE_VERSION,
+    )
+    return CandidateScoringService(
+        portfolio=portfolio,
+        quotes_provider=_candidate_quotes,
+        rule_version=SIMULATION_RULE_VERSION,
+    )
+
+
+def _trade_plan_service() -> TradePlanService:
+    if simulation_execution is None:
+        _simulation_routes()
+    if simulation_execution is None:
+        raise RuntimeError("simulation execution service is unavailable")
+    clock = SystemClock()
+    portfolio = PortfolioQueryService(
+        uow_factory=_simulation_uow_factory,
+        clock=clock,
+        rule_version=SIMULATION_RULE_VERSION,
+    )
+    return TradePlanService(
+        session_factory=_workspace_session,
+        clock=clock,
+        ids=UuidIdGenerator(),
+        candidates=CandidateScoringService(
+            portfolio=portfolio,
+            quotes_provider=_candidate_quotes,
+            rule_version=SIMULATION_RULE_VERSION,
+        ),
+        portfolio=portfolio,
+        quotes_provider=_candidate_quotes,
+        drafts=simulation_execution,
+    )
+
+
+def _evidence_service() -> EvidenceService:
+    """Build the append-only evidence service on demand."""
+    return EvidenceService(
+        session_factory=_workspace_session,
+        clock=SystemClock(),
+        ids=UuidIdGenerator(),
+    )
+
+
+async def _record_agent_evidence(owner_id: str, subject: str, run) -> None:
+    """Persist evidence for a completed agent run (best-effort, non-blocking)."""
+    await _evidence_service().record_agent_run(
+        owner_id=owner_id,
+        run=run,
+        subject=subject,
+    )
+
+
 class _WorkspaceNotificationSource:
     """Read unread notifications through the workspace unit of work."""
 
@@ -462,6 +570,7 @@ def _simulation_routes() -> list:
             uow_factory=_simulation_uow_factory,
             simulation_session_factory=_workspace_session,
             ledger=ledger,
+            authorization=PersistentAuthorizationProvider(_mandate_service()),
         )
         _LOGGER.info("simulation services initialized successfully")
     except Exception as error:  # noqa: BLE001
@@ -527,6 +636,7 @@ finance_routes = [
     Route("/ready", ready),
     Route("/health", health),
     Route("/market/quotes", quotes),
+    Route("/market/overview", market_overview),
     Route("/market/bars", bars),
     Route("/market/instruments", instruments),
     Route("/market/catalog", catalog),
@@ -535,6 +645,7 @@ finance_routes = [
         routes=create_workspace_routes(
             session_factory=_workspace_session,
             owner_resolver=_authenticated_owner,
+            candidate_service_provider=_candidate_service,
         ),
         name="workspace",
     ),
@@ -544,10 +655,38 @@ finance_routes = [
         name="simulation",
     ),
     Mount(
+        "/trade-plans",
+        routes=create_trade_plan_routes(
+            service_provider=_trade_plan_service,
+            owner_resolver=_authenticated_owner,
+        ),
+        name="trade-plans",
+    ),
+    Mount(
+        "/mandate",
+        routes=create_mandate_routes(
+            session_factory=_workspace_session,
+            owner_resolver=_authenticated_owner,
+            clock=SystemClock(),
+            ids=UuidIdGenerator(),
+            orders_provider=lambda: simulation_execution,
+        ),
+        name="mandate",
+    ),
+    Mount(
+        "/evidence",
+        routes=create_evidence_routes(
+            service_provider=_evidence_service,
+            owner_resolver=_authenticated_owner,
+        ),
+        name="evidence",
+    ),
+    Mount(
         "/agent",
         routes=create_agent_routes(
             runtime_provider=_agent_runtime_provider,
             owner_resolver=_authenticated_owner,
+            evidence_recorder=_record_agent_evidence,
         ),
         name="agent",
     ),
