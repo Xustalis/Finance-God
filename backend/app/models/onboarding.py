@@ -41,6 +41,7 @@ class OnboardingSession(Base):
     profile_evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     skipped_dimensions: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     followup_counts: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    question_history: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     current_dimension: Mapped[str | None] = mapped_column(String(64))
     current_question: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)

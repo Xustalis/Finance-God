@@ -13,10 +13,12 @@ export default defineConfig(({mode})=>{const env={...loadEnv(mode,rootDir,''),..
   resolve: { alias: { '@': path.resolve(rootDir, 'src') } },
   server: {
     port: 3000,
+    host: true,
     proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
   },
   test: {
     environment: 'happy-dom',
+    globals: true,
     setupFiles: ['./src/tests/setup.ts'],
     restoreMocks: true,
   },

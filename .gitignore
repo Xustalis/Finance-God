@@ -47,3 +47,5 @@ pgdata/
 # Misc
 111111.txt
 .superpowers/
+.superpowers_tmp_diff.patch
+.playwright-cli/

@@ -18,11 +18,22 @@ from app.models.ai_config import AIModelConfig, PromptVersion
 from app.models.profile import DirectionRecommendation, InvestmentProfile
 from app.models.user import User
 from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
-from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question
+from app.services.ai_orchestrator import AIAdapterRegistry, AIProviderError, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry
+from app.services import emotion_lexicon
 from app.services.profile_rules import assess_profile, rank_directions
+from app.services.question_bank import select_question
 
 router = APIRouter()
 MESSAGE_CLAIM_LEASE = timedelta(minutes=2)
+
+
+def asked_question_texts(session: OnboardingSession) -> list[str]:
+    """从 question_history 提取已问问题文本（容错非 dict 项）。"""
+    return [
+        item.get("question")
+        for item in session.question_history
+        if isinstance(item, dict) and item.get("question")
+    ]
 
 
 def unresolved_dimensions(session: OnboardingSession) -> list[str]:
@@ -308,6 +319,9 @@ async def update_objective_profile(
     session.step = "conversation"
     session.current_dimension = PROFILE_DIMENSIONS[0]
     session.current_question = INITIAL_RISK_QUESTION
+    session.question_history = [
+        {"round": 0, "dimension": PROFILE_DIMENSIONS[0], "question": INITIAL_RISK_QUESTION}
+    ]
     session.completeness = 0.4
     await db.flush()
     return ApiResponse.ok(serialize_session(session))
@@ -361,6 +375,21 @@ async def add_message(
     dimension_scores_snapshot = dict(session.dimension_scores)
     followup_counts_snapshot = dict(session.followup_counts)
     skipped_dimensions_snapshot = list(session.skipped_dimensions)
+    asked_questions = asked_question_texts(session)
+    # 在写入本轮用户消息前采集历史，保证 history 只含“此前”的 user/assistant 消息
+    history_rows = (
+        await db.scalars(
+            select(ProfileMessage)
+            .where(
+                ProfileMessage.session_id == session.id,
+                ProfileMessage.role.in_(("user", "assistant")),
+            )
+            .order_by(ProfileMessage.created_at.desc(), ProfileMessage.id.desc())
+            .limit(10)
+        )
+    ).all()
+    history = [{"role": row.role, "content": row.content} for row in reversed(history_rows)]
+    emotion = emotion_lexicon.analyze(body.content)
     request_id = request_id or str(uuid.uuid4())
     user_message = ProfileMessage(
         session_id=session.id,
@@ -405,6 +434,9 @@ async def add_message(
             skipped_dimensions=skipped_dimensions_snapshot,
             current_dimension=target_snapshot,
             objective_profile=dict(session.objective_profile),
+            history=history,
+            asked_questions=asked_questions,
+            emotion=emotion,
         )
     except TimeoutError as exc:
         await release_message_claim(db, session_id, user_message.id)
@@ -491,7 +523,12 @@ async def add_message(
             update={
                 "should_continue": True,
                 "end_reason": None,
-                "next_question": server_question(projected_dimension, body.content),
+                "next_question": select_question(
+                    projected_dimension,
+                    followup_count=int(followup_counts_snapshot.get(projected_dimension, 0)),
+                    asked_questions=asked_questions,
+                    user_excerpt=body.content,
+                ),
                 "next_question_dimension": ProfileDimension(projected_dimension),
             }
         )
@@ -515,6 +552,16 @@ async def add_message(
         session.current_question = None
     else:
         session.current_question = turn.next_question
+        # JSON 字段需整体重新赋值以触发变更检测（参照 counts/scores 的拷贝模式）
+        question_entries = list(session.question_history)
+        question_entries.append(
+            {
+                "round": session.round_count,
+                "dimension": turn.next_question_dimension.value,
+                "question": turn.next_question,
+            }
+        )
+        session.question_history = question_entries
 
     user_message.target_dimension = target
     user_message.sensitive = turn.sensitive
@@ -539,6 +586,7 @@ async def add_message(
         user_message.extracted_data = {
             "profile_delta": turn.model_dump(mode="json")["profile_delta"],
             "response": response,
+            "emotion": emotion,
         }
         assistant_message.extracted_data = {"turn": turn.model_dump(mode="json"), "response": response}
         await db.flush()
@@ -579,7 +627,20 @@ async def skip_dimension(
         session.current_dimension = None
         session.current_question = None
     else:
-        session.current_question = server_question(session.current_dimension)
+        next_question = select_question(
+            session.current_dimension,
+            followup_count=int(session.followup_counts.get(session.current_dimension, 0)),
+            asked_questions=asked_question_texts(session),
+        )
+        session.current_question = next_question
+        session.question_history = [
+            *session.question_history,
+            {
+                "round": session.round_count,
+                "dimension": session.current_dimension,
+                "question": next_question,
+            },
+        ]
     db.add(
         ProfileMessage(
             session_id=session.id,
