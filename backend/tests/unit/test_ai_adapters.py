@@ -1,5 +1,7 @@
 import inspect
+import json
 
+import httpx
 import pytest
 
 import app.services.ai_orchestrator as ai
@@ -57,3 +59,101 @@ async def test_mock_questions_are_chinese_and_change_with_user_content() -> None
     assert "收益" not in salary.next_question
     assert "收益" not in salary.retry_question
     assert "？" not in salary.reply
+
+
+def deepseek_response(content: dict) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": json.dumps(content)}}]},
+    )
+
+
+@pytest.mark.asyncio
+async def test_deepseek_provider_uses_fixed_openai_contract_and_parses_json() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("Authorization")
+        captured["body"] = json.loads(request.content)
+        return deepseek_response(
+            {
+                "reply": "谢谢你用生活中的例子说明。",
+                "target_dimension": "risk_tolerance",
+                "profile_value": 0.8,
+                "confidence": 0.82,
+                "should_continue": True,
+                "end_reason": None,
+                "next_question": "这笔钱最早可能在什么时候需要使用？",
+                "next_question_dimension": "liquidity_need",
+            }
+        )
+
+    provider = ai.DeepSeekTextProvider(
+        api_key="test-secret",
+        transport=httpx.MockTransport(handler),
+    )
+    orchestrator = provider.create(
+        model_name="deepseek-v4-flash",
+        system_prompt="system prompt",
+    )
+    result = await orchestrator.respond(
+        content="我可以长期持有，也能接受一些波动",
+        round_count=0,
+        turn_count=1,
+        min_rounds=6,
+        max_rounds=12,
+        completeness=0.45,
+        dimension_scores={},
+        followup_counts={},
+        skipped_dimensions=[],
+        current_dimension="risk_tolerance",
+        objective_profile={"investment_experience": "none"},
+    )
+
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["authorization"] == "Bearer test-secret"
+    assert captured["body"]["model"] == "deepseek-v4-flash"
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+    assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.8}
+    assert result.next_question_dimension is ai.ProfileDimension.LIQUIDITY_NEED
+
+
+@pytest.mark.asyncio
+async def test_deepseek_provider_classifies_rate_limit_without_leaking_body() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(429, text="provider-secret-body", request=request)
+    )
+    provider = ai.DeepSeekTextProvider(api_key="test-secret", transport=transport)
+    orchestrator = provider.create(
+        model_name="deepseek-v4-flash",
+        system_prompt="system prompt",
+    )
+
+    with pytest.raises(ai.AIProviderError, match="请求过于频繁") as raised:
+        await orchestrator.respond(
+            content="生活化回答",
+            round_count=0,
+            turn_count=1,
+            min_rounds=6,
+            max_rounds=12,
+            completeness=0.45,
+            dimension_scores={},
+            followup_counts={},
+            skipped_dimensions=[],
+            current_dimension="risk_tolerance",
+            objective_profile={"investment_experience": "none"},
+        )
+
+    assert raised.value.code == "DEEPSEEK_RATE_LIMITED"
+    assert "provider-secret-body" not in str(raised.value)
+
+
+def test_novice_prompt_uses_life_scenarios_without_scoring_lack_of_knowledge() -> None:
+    prompt = ai.build_interview_context(
+        {"investment_experience": "none", "age_range": "26-35"}
+    )
+
+    assert "生活化场景" in prompt
+    assert "一次只问一个概念" in prompt
+    assert "不把“不懂”视为低风险" in prompt

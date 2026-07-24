@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 支持从 backend/ 或仓库根目录读取 .env
@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # 仅用于本地开发管理员初始化
     dev_admin_email: str = "admin@finance-god.local"
     dev_admin_password: str | None = None
+
+    # 服务端 AI 凭据，不得序列化到 API
+    deepseek_api_key: SecretStr | None = None
 
     @model_validator(mode="after")
     def validate_production_secret(self):

@@ -107,7 +107,7 @@ Expected: all focused tests pass.
 - Modify: `backend/tests/integration/test_admin_api.py`
 - Modify: `backend/tests/integration/test_runtime_ai_config.py`
 
-- [ ] **Step 1: Write failing schema and safe-config tests**
+- [x] **Step 1: Write failing schema and safe-config tests**
 
 Assert that text accepts only `mock`/`deepseek`, DeepSeek accepts only the two approved model names, non-development mock is rejected, the response contains `base_url`, and `api_key_configured` uses `settings.deepseek_api_key` rather than `os.getenv`.
 
@@ -116,13 +116,13 @@ with pytest.raises(ValidationError):
     AISettingsUpdate(capability="text", provider="deepseek", model_name="arbitrary")
 ```
 
-- [ ] **Step 2: Run schema/admin tests and verify red**
+- [x] **Step 2: Run schema/admin tests and verify red**
 
 Run: `cd backend && .venv/bin/pytest tests/integration/test_admin_api.py tests/unit/test_config_validation.py -q`
 
 Expected: failures for unrestricted provider/model values and missing `base_url`.
 
-- [ ] **Step 3: Implement controlled configuration contracts**
+- [x] **Step 3: Implement controlled configuration contracts**
 
 Add `deepseek_api_key: SecretStr | None` to `Settings`, fixed constants:
 
@@ -133,7 +133,7 @@ DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
 
 Validate capability/provider/model combinations in `AISettingsUpdate` and `AIConnectionTest`. Return the fixed base URL for text settings and never serialize the secret.
 
-- [ ] **Step 4: Write failing DeepSeek adapter tests with `httpx.MockTransport`**
+- [x] **Step 4: Write failing DeepSeek adapter tests with `httpx.MockTransport`**
 
 Cover Authorization header presence without logging it, `/chat/completions`, selected model, JSON response parsing, 401, 429, 5xx, timeout, invalid JSON, unknown dimension, and out-of-range confidence.
 
@@ -144,19 +144,19 @@ result = await provider.create(model_name="deepseek-v4-flash", system_prompt="pr
 assert result.target_dimension is ProfileDimension.RISK_TOLERANCE
 ```
 
-- [ ] **Step 5: Implement DeepSeek provider and structured response parsing**
+- [x] **Step 5: Implement DeepSeek provider and structured response parsing**
 
 Create a Pydantic wire model for the provider JSON, an error type with stable codes, and an async orchestrator that calls the fixed HTTPS origin with explicit timeouts and `response_format={"type":"json_object"}`. Convert only validated output into `AITurnResult`.
 
-- [ ] **Step 6: Register DeepSeek and implement real probe**
+- [x] **Step 6: Register DeepSeek and implement real probe**
 
 Build the registry from current settings so `deepseek` is registered only when a key is configured. `probe()` must execute a minimal real completion and report `credential_status="configured"`; do not fall back to mock.
 
-- [ ] **Step 7: Add novice prompt context tests and implementation**
+- [x] **Step 7: Add novice prompt context tests and implementation**
 
 Assert `investment_experience="none"` produces a prompt instruction containing “生活化场景”“一次只问一个概念”“不把不懂视为低风险”, while advanced experience permits detail without requiring jargon. Pass objective profile context from onboarding to `respond()`.
 
-- [ ] **Step 8: Run adapter and admin suites**
+- [x] **Step 8: Run adapter and admin suites**
 
 Run: `cd backend && .venv/bin/pytest tests/unit/test_ai_adapters.py tests/integration/test_admin_api.py tests/integration/test_runtime_ai_config.py -q`
 

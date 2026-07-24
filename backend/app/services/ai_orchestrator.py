@@ -1,10 +1,18 @@
 from abc import ABC, abstractmethod
+import json
+from typing import Any
 
+import httpx
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from app.config import settings
 from app.schemas.onboarding import AITurnResult, ProfileDimension
 
 
 PROFILE_DIMENSIONS = tuple(item.value for item in ProfileDimension)
 SENSITIVE_DIMENSIONS = {ProfileDimension.INCOME_STABILITY.value}
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
 INITIAL_RISK_QUESTION = "如果这笔资金出现约15%的阶段性亏损，你更可能继续持有、减少投入，还是全部卖出？"
 
 QUESTION_STEMS = {
@@ -91,6 +99,20 @@ recommendation.
 """.strip()
 
 
+def build_interview_context(objective_profile: dict[str, Any] | None) -> str:
+    profile = objective_profile or {}
+    experience = profile.get("investment_experience", "none")
+    if experience in {"none", "beginner"}:
+        return (
+            "用户可能是金融小白。请使用生活化场景，一次只问一个概念，"
+            "给出容易理解的情境或选择；不把“不懂”视为低风险，也不要考察金融术语。"
+        )
+    return (
+        "用户有一定投资经验，但仍应一次只问一个问题；可以询问真实行为和具体经历，"
+        "不要要求术语定义或进行知识考试。"
+    )
+
+
 class AIOrchestrator(ABC):
     @abstractmethod
     async def respond(
@@ -106,6 +128,7 @@ class AIOrchestrator(ABC):
         followup_counts: dict[str, int],
         skipped_dimensions: list[str],
         current_dimension: str,
+        objective_profile: dict[str, Any] | None = None,
     ) -> AITurnResult:
         raise NotImplementedError
 
@@ -134,7 +157,9 @@ class DeterministicMockOrchestrator(AIOrchestrator):
         followup_counts: dict[str, int],
         skipped_dimensions: list[str],
         current_dimension: str,
+        objective_profile: dict[str, Any] | None = None,
     ) -> AITurnResult:
+        del objective_profile
         target = ProfileDimension(current_dimension)
         confidence = 0.72 if len(content.strip()) >= 12 else 0.45
         lowered = content.lower()
@@ -206,9 +231,166 @@ class MockTextProvider(TextProvider):
         return DeterministicMockOrchestrator(model_name=model_name, system_prompt=system_prompt)
 
 
+class AIProviderError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class DeepSeekTurnPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reply: str = Field(min_length=1, max_length=4000)
+    target_dimension: ProfileDimension
+    profile_value: float = Field(ge=-1, le=1)
+    confidence: float = Field(ge=0, le=1)
+    should_continue: bool
+    end_reason: str | None = None
+    next_question: str | None = Field(default=None, min_length=1, max_length=1000)
+    next_question_dimension: ProfileDimension | None = None
+
+
+class DeepSeekOrchestrator(AIOrchestrator):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_name: str,
+        system_prompt: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model_name = model_name
+        self.system_prompt = system_prompt
+        self.transport = transport
+
+    async def respond(
+        self,
+        *,
+        content: str,
+        round_count: int,
+        turn_count: int,
+        min_rounds: int,
+        max_rounds: int,
+        completeness: float,
+        dimension_scores: dict[str, float],
+        followup_counts: dict[str, int],
+        skipped_dimensions: list[str],
+        current_dimension: str,
+        objective_profile: dict[str, Any] | None = None,
+    ) -> AITurnResult:
+        interview_context = build_interview_context(objective_profile)
+        state = {
+            "current_dimension": current_dimension,
+            "round_count": round_count,
+            "turn_count": turn_count,
+            "min_rounds": min_rounds,
+            "max_rounds": max_rounds,
+            "completeness": completeness,
+            "dimension_scores": dimension_scores,
+            "followup_counts": followup_counts,
+            "skipped_dimensions": skipped_dimensions,
+        }
+        body = {
+            "model": self.model_name,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{self.system_prompt}\n\n{interview_context}\n\n"
+                        "Return one JSON object with reply, target_dimension, profile_value, confidence, "
+                        "should_continue, end_reason, next_question, and next_question_dimension."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"answer": content, "session_state": state},
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+        timeout = httpx.Timeout(30.0, connect=5.0)
+        try:
+            async with httpx.AsyncClient(
+                base_url=DEEPSEEK_BASE_URL,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=timeout,
+                transport=self.transport,
+            ) as client:
+                response = await client.post("/chat/completions", json=body)
+        except httpx.TimeoutException as exc:
+            raise AIProviderError("DEEPSEEK_TIMEOUT", "AI 服务响应超时，请稍后重试") from exc
+        except httpx.RequestError as exc:
+            raise AIProviderError("DEEPSEEK_UNAVAILABLE", "AI 服务暂时无法连接，请稍后重试") from exc
+
+        if response.status_code in {401, 403}:
+            raise AIProviderError("DEEPSEEK_AUTH_FAILED", "DeepSeek API 凭据无效")
+        if response.status_code == 429:
+            raise AIProviderError("DEEPSEEK_RATE_LIMITED", "DeepSeek 请求过于频繁，请稍后重试")
+        if response.status_code >= 500:
+            raise AIProviderError("DEEPSEEK_UPSTREAM_ERROR", "DeepSeek 服务暂时不可用")
+        if response.is_error:
+            raise AIProviderError("DEEPSEEK_REQUEST_REJECTED", "DeepSeek 拒绝了当前请求")
+
+        try:
+            envelope = response.json()
+            raw_content = envelope["choices"][0]["message"]["content"]
+            parsed = DeepSeekTurnPayload.model_validate(json.loads(raw_content))
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as exc:
+            raise AIProviderError("DEEPSEEK_INVALID_RESPONSE", "DeepSeek 返回了无法解析的结构化结果") from exc
+
+        target = parsed.target_dimension
+        return AITurnResult(
+            reply=parsed.reply,
+            target_dimension=target,
+            sensitive=target.value in SENSITIVE_DIMENSIONS,
+            profile_delta={target: parsed.profile_value},
+            confidence=parsed.confidence,
+            should_continue=parsed.should_continue,
+            end_reason=parsed.end_reason,
+            next_question=parsed.next_question,
+            next_question_dimension=parsed.next_question_dimension,
+            retry_question=retry_question(target.value),
+        )
+
+
+class DeepSeekTextProvider(TextProvider):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.transport = transport
+
+    def create(self, *, model_name: str, system_prompt: str) -> AIOrchestrator:
+        if model_name not in DEEPSEEK_MODELS:
+            raise LookupError("No configured DeepSeek model")
+        return DeepSeekOrchestrator(
+            api_key=self.api_key,
+            model_name=model_name,
+            system_prompt=system_prompt,
+            transport=self.transport,
+        )
+
+
 class AIAdapterRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        deepseek_api_key: str | None = None,
+        deepseek_transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.text_providers: dict[str, TextProvider] = {"mock": MockTextProvider()}
+        if deepseek_api_key:
+            self.text_providers["deepseek"] = DeepSeekTextProvider(
+                api_key=deepseek_api_key,
+                transport=deepseek_transport,
+            )
         self.stt_adapters: dict[str, SpeechToTextAdapter] = {"browser": BrowserSpeechToTextAdapter()}
         self.tts_adapters: dict[str, TextToSpeechAdapter] = {"browser": BrowserTextToSpeechAdapter()}
 
@@ -236,6 +418,7 @@ class AIAdapterRegistry:
                 followup_counts={},
                 skipped_dimensions=[],
                 current_dimension=ProfileDimension.RISK_TOLERANCE.value,
+                objective_profile={"investment_experience": "none"},
             )
             return {"ok": bool(result.reply), "adapter": type(orchestrator).__name__}
         adapters = self.stt_adapters if capability == "stt" else self.tts_adapters
@@ -244,8 +427,10 @@ class AIAdapterRegistry:
         raise LookupError("No configured adapter for provider")
 
 
-_default_registry = AIAdapterRegistry()
-
-
 def get_ai_adapter_registry() -> AIAdapterRegistry:
-    return _default_registry
+    key = (
+        settings.deepseek_api_key.get_secret_value()
+        if settings.deepseek_api_key is not None
+        else None
+    )
+    return AIAdapterRegistry(deepseek_api_key=key)

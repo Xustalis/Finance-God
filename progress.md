@@ -47,3 +47,4 @@
 - 2026-07-24：用户逐段批准管理鉴权、真实 DeepSeek 接入和新手友好逐问画像设计；准备确认异常处理、迁移与测试部分，尚未修改业务代码。
 - 2026-07-24：用户批准异常处理、迁移和验收设计；完整规格已写入 `docs/superpowers/specs/2026-07-24-admin-deepseek-auto-profile-design.md`，并通过占位符、敏感信息、矛盾、歧义和范围自检。
 - 2026-07-24：提交当前 Vue/FastAPI 重构基线 `a5e9643`；基线后端 57 passed/1 skipped，前端 36 passed。按 TDD 完成管理员专用登录和 development-only 管理员初始化脚本，聚焦测试 10 passed。
+- 2026-07-24：按 TDD 完成固定 DeepSeek origin、Flash/Pro 白名单、SecretStr 凭据、OpenAI-compatible 结构化适配器、错误分类和新手 prompt；适配器/配置/管理运行时测试 17 passed。

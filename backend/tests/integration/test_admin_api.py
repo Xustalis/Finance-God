@@ -1,10 +1,12 @@
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.ai_config import AIModelConfig, AdminAuditRecord, PromptVersion
 from app.models.user import User
+from app.config import settings
 
 
 def register(client: TestClient, email: str) -> tuple[str, str]:
@@ -20,13 +22,12 @@ def headers(token: str) -> dict[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_api_key_reference_distinguishes_omitted_null_and_replacement(
+async def test_deepseek_key_reference_is_fixed_and_secret_is_redacted(
     client: TestClient,
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FINANCE_GOD_OLD_KEY", "old-secret-value")
-    monkeypatch.setenv("FINANCE_GOD_NEW_KEY", "new-secret-value")
+    monkeypatch.setattr(settings, "deepseek_api_key", SecretStr("deepseek-secret-value"))
     admin_token, admin_id = register(client, "key-semantics-admin@example.com")
     async with session_factory() as session:
         admin = await session.get(User, admin_id)
@@ -35,8 +36,8 @@ async def test_api_key_reference_distinguishes_omitted_null_and_replacement(
     auth = headers(admin_token)
     base = {
         "capability": "text",
-        "provider": "mock",
-        "model_name": "key-semantics-model",
+        "provider": "deepseek",
+        "model_name": "deepseek-v4-flash",
         "prompt_version": "v1",
         "min_rounds": 6,
         "max_rounds": 12,
@@ -46,12 +47,12 @@ async def test_api_key_reference_distinguishes_omitted_null_and_replacement(
     created = client.put(
         "/api/v1/admin/ai-settings",
         headers=auth,
-        json=base | {"api_key_ref": "FINANCE_GOD_OLD_KEY"},
+        json=base,
     )
     preserved = client.put(
         "/api/v1/admin/ai-settings",
         headers=auth,
-        json=base | {"model_name": "key-semantics-model-v2"},
+        json=base | {"model_name": "deepseek-v4-pro"},
     )
     async with session_factory() as session:
         text_config = await session.scalar(
@@ -59,22 +60,6 @@ async def test_api_key_reference_distinguishes_omitted_null_and_replacement(
         )
         preserved_ref = text_config.api_key_ref
 
-    cleared = client.put(
-        "/api/v1/admin/ai-settings",
-        headers=auth,
-        json=base | {"api_key_ref": None},
-    )
-    async with session_factory() as session:
-        text_config = await session.scalar(
-            select(AIModelConfig).where(AIModelConfig.capability == "text")
-        )
-        cleared_ref = text_config.api_key_ref
-
-    replaced = client.put(
-        "/api/v1/admin/ai-settings",
-        headers=auth,
-        json=base | {"api_key_ref": "FINANCE_GOD_NEW_KEY"},
-    )
     omitted_on_create = client.put(
         "/api/v1/admin/ai-settings",
         headers=auth,
@@ -85,31 +70,21 @@ async def test_api_key_reference_distinguishes_omitted_null_and_replacement(
         },
     )
     async with session_factory() as session:
-        text_config = await session.scalar(
-            select(AIModelConfig).where(AIModelConfig.capability == "text")
-        )
         stt_config = await session.scalar(
             select(AIModelConfig).where(AIModelConfig.capability == "stt")
         )
-        replaced_ref = text_config.api_key_ref
         new_omitted_ref = stt_config.api_key_ref
 
     assert created.json()["data"]["api_key_configured"] is True
     assert preserved.json()["data"]["api_key_configured"] is True
-    assert preserved_ref == "FINANCE_GOD_OLD_KEY"
-    assert cleared.json()["data"]["api_key_configured"] is False
-    assert cleared_ref is None
-    assert replaced.json()["data"]["api_key_configured"] is True
-    assert replaced_ref == "FINANCE_GOD_NEW_KEY"
+    assert preserved_ref == "DEEPSEEK_API_KEY"
     assert omitted_on_create.status_code == 200
     assert new_omitted_ref is None
-    for response in (created, preserved, cleared, replaced, omitted_on_create):
+    for response in (created, preserved, omitted_on_create):
         payload = response.text
         assert "api_key_ref" not in payload
-        assert "FINANCE_GOD_OLD_KEY" not in payload
-        assert "FINANCE_GOD_NEW_KEY" not in payload
-        assert "old-secret-value" not in payload
-        assert "new-secret-value" not in payload
+        assert "DEEPSEEK_API_KEY" not in payload
+        assert "deepseek-secret-value" not in payload
 
 
 @pytest.mark.asyncio
@@ -129,6 +104,8 @@ async def test_admin_settings_require_admin_and_redact_keys(
     initial = client.get("/api/v1/admin/ai-settings", headers=headers(admin_token))
     assert initial.status_code == 200
     assert {item["capability"] for item in initial.json()["data"]} == {"text", "stt", "tts"}
+    text_setting = next(item for item in initial.json()["data"] if item["capability"] == "text")
+    assert text_setting["base_url"] == "https://api.deepseek.com"
 
     plaintext_key = client.put(
         "/api/v1/admin/ai-settings",

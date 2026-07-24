@@ -1,5 +1,3 @@
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +8,13 @@ from app.db.session import get_db
 from app.models.ai_config import AIModelConfig, AdminAuditRecord, PromptVersion
 from app.models.user import User
 from app.schemas.admin import AICapability, AIConnectionTest, AIConnectionTestResponse, AISettingsResponse, AISettingsUpdate
-from app.services.ai_orchestrator import AIAdapterRegistry, ONBOARDING_SYSTEM_PROMPT, get_ai_adapter_registry
+from app.services.ai_orchestrator import (
+    AIAdapterRegistry,
+    AIProviderError,
+    DEEPSEEK_BASE_URL,
+    ONBOARDING_SYSTEM_PROMPT,
+    get_ai_adapter_registry,
+)
 from app.config import settings
 
 router = APIRouter()
@@ -25,12 +29,16 @@ DEFAULT_CONFIGS = {
 
 def safe_config(config: AIModelConfig | None, capability: str) -> dict:
     defaults = DEFAULT_CONFIGS[capability]
+    provider = config.provider if config else defaults["provider"]
     return {
         "id": config.id if config else None,
         "capability": capability,
-        "provider": config.provider if config else defaults["provider"],
+        "provider": provider,
         "model_name": config.model_name if config else defaults["model_name"],
-        "api_key_configured": bool(config and config.api_key_ref and os.getenv(config.api_key_ref)),
+        "base_url": DEEPSEEK_BASE_URL if capability == "text" else None,
+        "api_key_configured": bool(
+            provider == "deepseek" and settings.deepseek_api_key is not None
+        ),
         "prompt_version": config.prompt_version if config else "v1",
         "min_rounds": config.min_rounds if config else 6,
         "max_rounds": config.max_rounds if config else 12,
@@ -60,8 +68,6 @@ async def update_ai_settings(
 ) -> ApiResponse:
     capability = body.capability.value
     if body.enabled and capability == "text":
-        if body.provider not in registry.text_providers:
-            raise HTTPException(status_code=422, detail="Unsupported text provider")
         if body.provider == "mock" and settings.app_env != "development":
             raise HTTPException(status_code=422, detail="Mock text provider is development-only")
     prompt = None
@@ -96,7 +102,7 @@ async def update_ai_settings(
             capability=capability,
             provider=body.provider,
             model_name=body.model_name,
-            api_key_ref=body.api_key_ref,
+            api_key_ref=("DEEPSEEK_API_KEY" if body.provider == "deepseek" else body.api_key_ref),
             prompt_version=body.prompt_version,
             min_rounds=body.min_rounds,
             max_rounds=body.max_rounds,
@@ -108,7 +114,9 @@ async def update_ai_settings(
     else:
         config.provider = body.provider
         config.model_name = body.model_name
-        if "api_key_ref" in body.model_fields_set:
+        if body.provider == "deepseek":
+            config.api_key_ref = "DEEPSEEK_API_KEY"
+        elif "api_key_ref" in body.model_fields_set:
             config.api_key_ref = body.api_key_ref
         config.prompt_version = body.prompt_version
         config.min_rounds = body.min_rounds
@@ -164,10 +172,10 @@ async def test_ai_settings(
             provider=body.provider,
             model_name=body.model_name,
         )
-    except LookupError as exc:
+    except (LookupError, AIProviderError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Provider connection could not be verified without a configured adapter",
+            detail=str(exc) or "Provider connection could not be verified without a configured adapter",
         ) from exc
     return ApiResponse.ok(
         {
@@ -176,6 +184,8 @@ async def test_ai_settings(
             "provider": body.provider,
             "model_name": body.model_name,
             "adapter": probe["adapter"],
-            "credential_status": "not_required",
+            "credential_status": (
+                "configured" if body.provider == "deepseek" else "not_required"
+            ),
         }
     )
