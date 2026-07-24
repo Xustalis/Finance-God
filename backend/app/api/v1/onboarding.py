@@ -17,7 +17,7 @@ from app.models.onboarding import OnboardingSession, ProfileMessage
 from app.models.ai_config import AIModelConfig, PromptVersion
 from app.models.profile import DirectionRecommendation, InvestmentProfile
 from app.models.user import User
-from app.schemas.onboarding import AITurnResult, EvidenceConfirmationResponse, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
+from app.schemas.onboarding import AITurnResult, MessageInput, MessageTurnResponse, ObjectiveProfileInput, ProfileDimension, ProfileWithRecommendationsResponse, SessionResponse, SkipInput
 from app.services.ai_orchestrator import AIAdapterRegistry, INITIAL_RISK_QUESTION, ONBOARDING_SYSTEM_PROMPT, PROFILE_DIMENSIONS, SENSITIVE_DIMENSIONS, get_ai_adapter_registry, server_question
 from app.services.profile_rules import assess_profile, rank_directions
 
@@ -315,7 +315,7 @@ async def update_objective_profile(
 
 @router.post(
     "/sessions/{session_id}/messages",
-    response_model=ApiResponse[MessageTurnResponse | EvidenceConfirmationResponse],
+    response_model=ApiResponse[MessageTurnResponse],
 )
 async def add_message(
     session_id: str,
@@ -331,94 +331,6 @@ async def add_message(
         if previous_request is not None:
             return ApiResponse.ok(await replay_message_response(db, previous_request))
 
-    pending = dict(session.pending_profile_evidence)
-    if pending and body.confirm_pending is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Pending profile evidence must be confirmed or rejected before continuing",
-        )
-    if not pending and body.confirm_pending is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending profile evidence")
-    if pending and body.confirm_pending is not None:
-        accepted = body.confirm_pending
-        pending_dimension = pending["dimension"]
-        pending_value = pending.get("value")
-        confirmed = dict(session.profile_evidence)
-        if accepted and pending_value is not None:
-            confirmed[pending_dimension] = pending_value
-        session.profile_evidence = confirmed
-        session.pending_profile_evidence = {}
-        if accepted:
-            counts = dict(session.followup_counts)
-            counts[pending_dimension] = pending["proposed_followup_count"]
-            scores = dict(session.dimension_scores)
-            scores[pending_dimension] = max(
-                float(scores.get(pending_dimension, 0.0)),
-                float(pending["confidence"]),
-            )
-            session.followup_counts = counts
-            session.dimension_scores = scores
-            session.round_count = pending["proposed_round_count"]
-        confirmed_evidence = (
-            {pending_dimension: pending_value}
-            if accepted and pending_value is not None
-            else {}
-        )
-        confirmation_message = ProfileMessage(
-            session_id=session.id,
-            request_id=request_id,
-            role="user",
-            content="Confirmed extracted evidence" if accepted else "Rejected extracted evidence",
-            input_mode="text",
-            target_dimension=pending_dimension,
-            sensitive=pending_dimension in SENSITIVE_DIMENSIONS,
-            refused=not accepted,
-            extracted_data=confirmed_evidence,
-        )
-        db.add(confirmation_message)
-        remaining_after_confirmation = refresh_progress(session)
-        reached_call_limit = session.turn_count >= session.max_rounds
-        accepted_terminal = accepted and (
-            not remaining_after_confirmation
-            or session.completeness >= 0.8
-            or not pending["should_continue"]
-        )
-        if not remaining_after_confirmation or (
-            session.turn_count >= session.min_rounds
-            and (reached_call_limit or accepted_terminal)
-        ):
-            session.status = "ready"
-            session.step = "ready"
-            session.current_dimension = None
-            session.current_question = None
-        elif accepted:
-            session.current_question = pending["next_question"]
-        else:
-            session.current_question = pending["retry_question"]
-        try:
-            await db.flush()
-            response = {
-                "session": serialize_session(session),
-                "accepted": accepted,
-                "confirmed_evidence": confirmed_evidence,
-            }
-            confirmation_message.extracted_data = {
-                "confirmed_evidence": confirmed_evidence,
-                "response": response,
-            }
-            await db.flush()
-        except (IntegrityError, StaleDataError) as exc:
-            await db.rollback()
-            previous_request = await message_request(db, session_id, request_id)
-            if previous_request is not None:
-                return ApiResponse.ok(
-                    await replay_message_response(db, previous_request)
-                )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Confirmation conflicts with another session update",
-            ) from exc
-        return ApiResponse.ok(response)
     if session.status != "active" or session.step != "conversation":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is not accepting messages")
     if session.turn_count >= session.max_rounds:
@@ -492,6 +404,7 @@ async def add_message(
             followup_counts=followup_counts_snapshot,
             skipped_dimensions=skipped_dimensions_snapshot,
             current_dimension=target_snapshot,
+            objective_profile=dict(session.objective_profile),
         )
     except TimeoutError as exc:
         await release_message_claim(db, session_id, user_message.id)
@@ -565,9 +478,29 @@ async def add_message(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="AI provider returned an invalid next profile question",
         )
+    evidence_value = turn.profile_delta.get(turn.target_dimension)
+    confirmed = dict(session.profile_evidence)
+    if evidence_value is not None:
+        confirmed[target] = evidence_value
+    session.profile_evidence = confirmed
+    counts = dict(session.followup_counts)
+    counts[target] = proposed_followup_count
+    session.followup_counts = counts
+    scores = dict(session.dimension_scores)
+    scores[target] = max(float(scores.get(target, 0.0)), float(turn.confidence))
+    session.dimension_scores = scores
+    session.round_count = round_count_snapshot + 1
+    remaining = refresh_progress(session)
+    if projected_ready or not remaining:
+        session.status = "ready"
+        session.step = "ready"
+        session.current_dimension = None
+        session.current_question = None
+    else:
+        session.current_question = turn.next_question
+
     user_message.target_dimension = target
     user_message.sensitive = turn.sensitive
-    user_message.extracted_data = turn.model_dump(mode="json")["profile_delta"]
     assistant_message = ProfileMessage(
         session_id=session.id,
         parent_message_id=user_message.id,
@@ -577,18 +510,6 @@ async def add_message(
         target_dimension=target,
         sensitive=turn.sensitive,
     )
-    session.pending_profile_evidence = {
-        "dimension": target,
-        "value": turn.profile_delta.get(turn.target_dimension),
-        "confidence": turn.confidence,
-        "proposed_followup_count": proposed_followup_count,
-        "proposed_round_count": round_count_snapshot + 1,
-        "should_continue": turn.should_continue and not reached_call_limit,
-        "end_reason": "max_turns" if reached_call_limit else turn.end_reason,
-        "next_question": turn.next_question,
-        "next_question_dimension": returned_next_dimension,
-        "retry_question": turn.retry_question,
-    }
     db.add(assistant_message)
     try:
         await db.flush()
@@ -597,6 +518,10 @@ async def add_message(
             "user_message": {"id": user_message.id, "content": user_message.content, "input_mode": user_message.input_mode},
             "assistant_message": {"id": assistant_message.id, "content": assistant_message.content},
             "turn": turn.model_dump(mode="json"),
+        }
+        user_message.extracted_data = {
+            "profile_delta": turn.model_dump(mode="json")["profile_delta"],
+            "response": response,
         }
         assistant_message.extracted_data = {"turn": turn.model_dump(mode="json"), "response": response}
         await db.flush()
@@ -619,11 +544,6 @@ async def skip_dimension(
 ) -> ApiResponse:
     session = await owned_session(db, session_id, user.id)
     dimension = body.dimension.value
-    if session.pending_profile_evidence:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Pending profile evidence must be confirmed or rejected before skipping",
-        )
     if session.status != "active" or session.step != "conversation":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session is not accepting skips")
     if dimension not in SENSITIVE_DIMENSIONS:
@@ -665,11 +585,6 @@ async def complete_session(
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
     session = await owned_session(db, session_id, user.id)
-    if session.pending_profile_evidence:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Pending profile evidence must be confirmed or rejected before completion",
-        )
     minimum_not_reached = session.status not in {"ready", "completed"} and (
         session.round_count < session.min_rounds
         and session.turn_count < session.max_rounds

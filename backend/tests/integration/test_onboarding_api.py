@@ -54,23 +54,6 @@ async def configure_text_rounds(
         await db.commit()
 
 
-def confirm_pending(
-    client: TestClient,
-    session_id: str,
-    headers: dict[str, str],
-    sequence: int,
-    accepted: bool = True,
-):
-    return client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json={
-            "request_id": f"10000000-0000-4000-8000-{sequence:012d}",
-            "confirm_pending": accepted,
-        },
-    )
-
-
 def test_session_is_resumable_and_objective_profile_advances_step(client: TestClient) -> None:
     token, _ = register(client, "resume@example.com")
     headers = authorization(token)
@@ -134,9 +117,6 @@ def test_sensitive_skip_is_neutral_and_followups_are_bounded(client: TestClient)
     )
     targets = []
     for number in range(5):
-        if number:
-            confirmed = confirm_pending(client, session["id"], headers, number)
-            assert confirmed.status_code == 200
         turn = client.post(
             f"/api/v1/onboarding/sessions/{session['id']}/messages",
             headers=headers,
@@ -158,8 +138,6 @@ def test_sensitive_skip_is_neutral_and_followups_are_bounded(client: TestClient)
         }
         targets.append(turn_data["turn"]["target_dimension"])
 
-    confirmed = confirm_pending(client, session["id"], headers, 5)
-    assert confirmed.status_code == 200
     before = client.get("/api/v1/onboarding/sessions/current", headers=headers).json()["data"]
     assert before["current_dimension"] == "income_stability"
     assert before["current_question"]
@@ -197,10 +175,8 @@ async def test_minimum_eight_rounds_adds_bounded_followups_after_six_dimensions(
     )
 
     targets = []
+    turn = None
     for number in range(8):
-        if number:
-            confirmed = confirm_pending(client, session["id"], headers, 810 + number)
-            assert confirmed.status_code == 200
         turn = client.post(
             f"/api/v1/onboarding/sessions/{session['id']}/messages",
             headers=headers,
@@ -209,9 +185,8 @@ async def test_minimum_eight_rounds_adds_bounded_followups_after_six_dimensions(
         assert turn.status_code == 200
         targets.append(turn.json()["data"]["turn"]["target_dimension"])
 
-    final = confirm_pending(client, session["id"], headers, 819)
-    assert final.status_code == 200
-    state = final.json()["data"]["session"]
+    assert turn is not None
+    state = turn.json()["data"]["session"]
     assert state["status"] == "ready"
     assert state["round_count"] == 8
     assert state["current_question"] is None
@@ -241,19 +216,16 @@ async def test_minimum_eight_rounds_skip_last_sensitive_dimension_uses_followup(
         headers=headers,
         json=adult_profile(),
     )
+    turn = None
     for number in range(5):
-        if number:
-            confirmed = confirm_pending(client, session["id"], headers, 820 + number)
-            assert confirmed.status_code == 200
         turn = client.post(
             f"/api/v1/onboarding/sessions/{session['id']}/messages",
             headers=headers,
             json={"content": f"I can accept long term volatility, answer {number}"},
         )
         assert turn.status_code == 200
-    confirmed = confirm_pending(client, session["id"], headers, 829)
-    assert confirmed.status_code == 200
-    assert confirmed.json()["data"]["session"]["current_dimension"] == "income_stability"
+    assert turn is not None
+    assert turn.json()["data"]["session"]["current_dimension"] == "income_stability"
 
     skipped = client.post(
         f"/api/v1/onboarding/sessions/{session['id']}/skip",
@@ -277,9 +249,6 @@ def _finish_profile(client: TestClient, token: str, objective: dict) -> dict:
         json=objective,
     )
     for number in range(6):
-        if number:
-            confirmed = confirm_pending(client, session["id"], headers, number)
-            assert confirmed.status_code == 200
         response = client.post(
             f"/api/v1/onboarding/sessions/{session['id']}/messages",
             headers=headers,
@@ -289,8 +258,6 @@ def _finish_profile(client: TestClient, token: str, objective: dict) -> dict:
             },
         )
         assert response.status_code == 200
-    confirmed = confirm_pending(client, session["id"], headers, 6)
-    assert confirmed.status_code == 200
     completed = client.post(
         f"/api/v1/onboarding/sessions/{session['id']}/complete", headers=headers
     )
@@ -366,9 +333,6 @@ def test_server_terminates_adaptively_after_six_complete_dimensions(client: Test
 
     latest = None
     for number in range(6):
-        if number:
-            confirmation = confirm_pending(client, session["id"], headers, number)
-            assert confirmation.status_code == 200
         latest = client.post(
             f"/api/v1/onboarding/sessions/{session['id']}/messages",
             headers=headers,
@@ -379,8 +343,7 @@ def test_server_terminates_adaptively_after_six_complete_dimensions(client: Test
         )
         assert latest.status_code == 200
 
-    latest = confirm_pending(client, session["id"], headers, 6)
-
+    assert latest is not None
     assert latest.json()["data"]["session"]["status"] == "ready"
     rejected = client.post(
         f"/api/v1/onboarding/sessions/{session['id']}/messages",

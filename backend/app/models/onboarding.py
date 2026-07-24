@@ -39,7 +39,6 @@ class OnboardingSession(Base):
     objective_profile: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     dimension_scores: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     profile_evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    pending_profile_evidence: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     skipped_dimensions: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     followup_counts: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     current_dimension: Mapped[str | None] = mapped_column(String(64))

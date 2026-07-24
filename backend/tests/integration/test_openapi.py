@@ -31,14 +31,13 @@ def test_openapi_exposes_new_contract_and_hides_retired_routes(client: TestClien
     assert session_schema["properties"]["dimension_scores"]["$ref"].endswith("ConversationDimensionScores")
     assert session_schema["properties"]["profile_evidence"]["$ref"].endswith("ProfileEvidence")
     assert "current_question" in session_schema["properties"]
+    assert "pending_profile_evidence" not in session_schema["properties"]
+    assert "confirm_pending" not in schemas["MessageInput"]["properties"]
     ai_turn = schemas["AITurnResult"]
     assert {"next_question", "next_question_dimension", "retry_question"}.issubset(
         ai_turn["properties"]
     )
-    pending = schemas["PendingProfileEvidence"]
-    assert {"next_question", "next_question_dimension", "retry_question"}.issubset(
-        pending["properties"]
-    )
+    assert "PendingProfileEvidence" not in schemas
     assert profile_schema["properties"]["dimension_scores"]["$ref"].endswith("ProfileDimensionScores")
     assert profile_schema["properties"]["report_summary"]["$ref"].endswith("ProfileReportSummary")
     error_code = schemas["ErrorCode"]

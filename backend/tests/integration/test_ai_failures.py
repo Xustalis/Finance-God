@@ -197,10 +197,10 @@ def test_unexpected_provider_exception_releases_claim(client: TestClient) -> Non
     assert retried.json()["data"]["session"]["turn_count"] == 1
 
 
-def test_confirmation_is_standalone_idempotent_before_provider_failure(
+def test_successful_evidence_remains_stored_after_next_provider_failure(
     client: TestClient,
 ) -> None:
-    headers, session_id = ready_session(client, "standalone-confirmation@example.com")
+    headers, session_id = ready_session(client, "automatic-evidence-failure@example.com")
     app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
         RepeatingLowConfidenceOrchestrator()
     )
@@ -210,36 +210,11 @@ def test_confirmation_is_standalone_idempotent_before_provider_failure(
         json={"content": "Evidence awaiting confirmation"},
     )
     assert first.status_code == 200
+    stored = first.json()["data"]["session"]
+    stored_question = stored["current_question"]
 
     crashing = CrashingOrchestrator()
     app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(crashing)
-    compound = client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json={
-            "request_id": "79265667-7cc8-4ff8-b69c-a5cd070a41ef",
-            "confirm_pending": True,
-            "content": "Do not send this to the provider",
-        },
-    )
-    still_pending = client.get(
-        "/api/v1/onboarding/sessions/current", headers=headers
-    ).json()["data"]
-
-    confirmation_payload = {
-        "request_id": "4bc499b7-cd41-4c4f-8954-60dcdde74641",
-        "confirm_pending": True,
-    }
-    confirmed = client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json=confirmation_payload,
-    )
-    replayed = client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json=confirmation_payload,
-    )
     failed_next = client.post(
         f"/api/v1/onboarding/sessions/{session_id}/messages",
         headers=headers,
@@ -249,19 +224,15 @@ def test_confirmation_is_standalone_idempotent_before_provider_failure(
         "/api/v1/onboarding/sessions/current", headers=headers
     ).json()["data"]
 
-    assert compound.status_code == 422
     assert crashing.calls == 1
-    assert still_pending["pending_profile_evidence"] is not None
-    assert still_pending["profile_evidence"] == {}
-    assert confirmed.status_code == 200
-    assert replayed.status_code == 200
-    assert replayed.json()["data"] == confirmed.json()["data"]
     assert failed_next.status_code == 502
     assert after_failure["profile_evidence"] == {"risk_tolerance": 0.25}
-    assert after_failure["pending_profile_evidence"] is None
+    assert after_failure["round_count"] == 1
+    assert after_failure["current_question"] == stored_question
+    assert "pending_profile_evidence" not in after_failure
 
 
-def test_confirmation_requires_request_id(client: TestClient) -> None:
+def test_retired_confirmation_command_is_rejected(client: TestClient) -> None:
     headers, session_id = ready_session(client, "confirmation-request-id@example.com")
     app.dependency_overrides[get_ai_adapter_registry] = lambda: FixedRegistry(
         RepeatingLowConfidenceOrchestrator()
@@ -325,7 +296,7 @@ def test_mismatched_next_question_dimension_returns_bad_gateway(client: TestClie
     assert response.status_code == 502
     resumed = client.get("/api/v1/onboarding/sessions/current", headers=headers).json()["data"]
     assert resumed["turn_count"] == 0
-    assert resumed["pending_profile_evidence"] is None
+    assert resumed["profile_evidence"] == {}
 
 
 def test_provider_cannot_exceed_two_followups_or_overwrite_next_dimension(client: TestClient) -> None:
@@ -334,17 +305,7 @@ def test_provider_cannot_exceed_two_followups_or_overwrite_next_dimension(client
         RepeatingLowConfidenceOrchestrator()
     )
 
-    for number in range(2):
-        if number:
-            confirmation = client.post(
-                f"/api/v1/onboarding/sessions/{session_id}/messages",
-                headers=headers,
-                json={
-                    "request_id": "30000000-0000-4000-8000-000000000001",
-                    "confirm_pending": True,
-                },
-            )
-            assert confirmation.status_code == 200
+    for _ in range(2):
         accepted = client.post(
             f"/api/v1/onboarding/sessions/{session_id}/messages",
             headers=headers,
@@ -356,20 +317,10 @@ def test_provider_cannot_exceed_two_followups_or_overwrite_next_dimension(client
         assert accepted.status_code == 200
 
     resumed = client.get("/api/v1/onboarding/sessions/current", headers=headers).json()["data"]
-    assert resumed["followup_counts"]["risk_tolerance"] == 1
+    assert resumed["followup_counts"]["risk_tolerance"] == 2
     assert resumed["profile_evidence"]["risk_tolerance"] == 0.25
-    assert resumed["current_dimension"] == "risk_tolerance"
-    assert resumed["pending_profile_evidence"]["proposed_followup_count"] == 2
+    assert resumed["current_dimension"] == "liquidity_need"
 
-    confirmation = client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json={
-            "request_id": "30000000-0000-4000-8000-000000000002",
-            "confirm_pending": True,
-        },
-    )
-    assert confirmation.status_code == 200
     rejected = client.post(
         f"/api/v1/onboarding/sessions/{session_id}/messages",
         headers=headers,
@@ -382,7 +333,7 @@ def test_provider_cannot_exceed_two_followups_or_overwrite_next_dimension(client
 
 
 @pytest.mark.asyncio
-async def test_twelfth_provider_call_terminates_even_when_evidence_is_rejected(
+async def test_twelfth_provider_call_terminates_and_can_be_completed(
     client: TestClient,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -397,20 +348,11 @@ async def test_twelfth_provider_call_terminates_even_when_evidence_is_rejected(
         headers=headers,
         json={"content": "A final answer at the provider limit", "input_mode": "text"},
     )
-    rejected = client.post(
-        f"/api/v1/onboarding/sessions/{session_id}/messages",
-        headers=headers,
-        json={
-            "request_id": "30000000-0000-4000-8000-000000000003",
-            "confirm_pending": False,
-        },
-    )
     completed = client.post(
         f"/api/v1/onboarding/sessions/{session_id}/complete", headers=headers
     )
 
     assert final_turn.status_code == 200
     assert final_turn.json()["data"]["session"]["turn_count"] == 12
-    assert rejected.status_code == 200
-    assert rejected.json()["data"]["session"]["status"] == "ready"
+    assert final_turn.json()["data"]["session"]["status"] == "ready"
     assert completed.status_code == 200

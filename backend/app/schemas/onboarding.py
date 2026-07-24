@@ -134,30 +134,19 @@ class ObjectiveProfileInput(BaseModel):
 
 
 class MessageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     request_id: UUID | None = None
-    content: str | None = Field(default=None, min_length=1, max_length=4000)
+    content: str = Field(min_length=1, max_length=4000)
     input_mode: InputMode = InputMode.TEXT
-    confirm_pending: bool | None = None
 
     @field_validator("content")
     @classmethod
-    def reject_blank_content(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
+    def reject_blank_content(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
             raise ValueError("content cannot be blank")
         return stripped
-
-    @model_validator(mode="after")
-    def validate_message_command(self):
-        if self.content is None and self.confirm_pending is None:
-            raise ValueError("content or confirm_pending is required")
-        if self.content is not None and self.confirm_pending is not None:
-            raise ValueError("confirmation and content must be separate requests")
-        if self.confirm_pending is not None and self.request_id is None:
-            raise ValueError("request_id is required for confirmation")
-        return self
 
 
 class SkipInput(BaseModel):
@@ -229,7 +218,6 @@ class SessionResponse(BaseModel):
     objective_profile: ObjectiveProfileInput | None
     dimension_scores: "ConversationDimensionScores"
     profile_evidence: "ProfileEvidence"
-    pending_profile_evidence: "PendingProfileEvidence | None"
     skipped_dimensions: list[ProfileDimension]
     followup_counts: "FollowupCounts"
     current_dimension: ProfileDimension | None
@@ -239,12 +227,6 @@ class SessionResponse(BaseModel):
     @classmethod
     def empty_objective_is_none(cls, value):
         return value or None
-
-    @field_validator("pending_profile_evidence", mode="before")
-    @classmethod
-    def empty_pending_is_none(cls, value):
-        return value or None
-
 
 class MessageReference(BaseModel):
     id: str
@@ -267,27 +249,8 @@ class ProfileEvidence(RootModel[dict[ProfileDimension, Annotated[float, Field(ge
     pass
 
 
-class PendingProfileEvidence(BaseModel):
-    dimension: ProfileDimension
-    value: float | None = Field(default=None, ge=-1, le=1)
-    confidence: float = Field(ge=0, le=1)
-    proposed_followup_count: int = Field(ge=1, le=2)
-    proposed_round_count: int = Field(ge=1, le=12)
-    should_continue: bool
-    end_reason: str | None = None
-    next_question: str | None = None
-    next_question_dimension: ProfileDimension | None = None
-    retry_question: str
-
-
 class FollowupCounts(RootModel[dict[ProfileDimension, Annotated[int, Field(ge=0, le=2)]]]):
     pass
-
-
-class EvidenceConfirmationResponse(BaseModel):
-    session: SessionResponse
-    accepted: bool
-    confirmed_evidence: ProfileEvidence
 
 
 class RiskLevel(StrEnum):

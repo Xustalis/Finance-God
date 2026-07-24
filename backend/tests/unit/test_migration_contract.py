@@ -30,3 +30,13 @@ def test_current_question_uses_independent_followup_migration() -> None:
     assert 'op.add_column("onboarding_sessions"' in followup
     assert 'sa.Column("current_question", sa.Text(), nullable=True)' in followup
     assert 'op.drop_column("onboarding_sessions", "current_question")' in followup
+
+
+def test_auto_profile_migration_removes_pending_evidence() -> None:
+    versions = Path(__file__).resolve().parents[2] / "alembic" / "versions"
+    migration = (versions / "20260724_0003_auto_profile.py").read_text()
+
+    assert 'revision: str = "20260724_0003"' in migration
+    assert 'down_revision: str | None = "20260724_0002"' in migration
+    assert 'op.drop_column("onboarding_sessions", "pending_profile_evidence")' in migration
+    assert 'op.add_column("onboarding_sessions"' in migration
