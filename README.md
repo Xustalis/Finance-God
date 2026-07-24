@@ -11,7 +11,7 @@ or recommend specific funds.
 - Frontend: Vue 3, TypeScript, Vite, Pinia, Vue Router
 - Backend: FastAPI, SQLAlchemy 2, Pydantic, Alembic
 - Database: PostgreSQL 16
-- Development AI: deterministic mock text adapter and browser speech APIs
+- AI: DeepSeek OpenAI-compatible text adapter, development mock, and browser speech APIs
 
 ## Setup
 
@@ -34,6 +34,7 @@ Start PostgreSQL and apply the existing schema:
 docker compose up -d db
 cd backend
 .venv/bin/alembic upgrade head
+make seed-dev-admin
 ```
 
 Start the services in separate terminals:
@@ -104,6 +105,9 @@ Important environment variables:
 | `DATABASE_URL_SYNC` | Synchronous Alembic and guarded reset URL |
 | `SECRET_KEY` | JWT signing secret; the development default is rejected outside development |
 | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `DEEPSEEK_API_KEY` | Server-only DeepSeek credential; never exposed to the frontend or admin API |
+| `DEV_ADMIN_EMAIL` | Development administrator email, default `admin@finance-god.local` |
+| `DEV_ADMIN_PASSWORD` | Development-only seed password; required by `make seed-dev-admin`, minimum 12 characters |
 | `VITE_WORKBENCH_ORIGIN` | Browser build variable containing the exact target origin for the profile completion handoff |
 | `WORKBENCH_ORIGIN` | Compatible alias used by Vite when `VITE_WORKBENCH_ORIGIN` is absent |
 
@@ -114,6 +118,13 @@ passes the root `.env` file to the frontend service.
 
 API keys are read only from server environment variables referenced by admin
 configuration. They are never returned by the API or stored in audit snapshots.
+The DeepSeek origin is fixed to `https://api.deepseek.com`; administrators may
+select only `deepseek-v4-flash` or `deepseek-v4-pro`. User and administrator
+browser sessions use separate credentials, so both areas can stay signed in in
+the same browser.
+
+The development admin seed command refuses to run outside `APP_ENV=development`.
+Keep its password in the ignored local `.env`, then open `/admin/login`.
 
 ## Tests
 
