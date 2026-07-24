@@ -41,7 +41,7 @@
 - Modify: `backend/tests/integration/test_auth_api.py`
 - Create: `backend/tests/unit/test_seed_dev_admin.py`
 
-- [ ] **Step 1: Write failing admin login tests**
+- [x] **Step 1: Write failing admin login tests**
 
 Add tests proving an active admin receives a token, a normal user gets a non-enumerating 403, and inactive/wrong credentials fail without revealing account state:
 
@@ -61,13 +61,13 @@ assert denied.status_code == 403
 assert denied.json()["error"]["message"] == "管理员邮箱或密码错误"
 ```
 
-- [ ] **Step 2: Verify the new endpoint test is red**
+- [x] **Step 2: Verify the new endpoint test is red**
 
 Run: `cd backend && .venv/bin/pytest tests/integration/test_auth_api.py -q`
 
 Expected: admin login tests fail with HTTP 404 because `/auth/admin/login` does not exist.
 
-- [ ] **Step 3: Implement shared login verification and admin endpoint**
+- [x] **Step 3: Implement shared login verification and admin endpoint**
 
 Extract credential lookup into a private helper and add:
 
@@ -82,15 +82,15 @@ async def admin_login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 Keep ordinary login behavior unchanged and update `last_login_at` only after the role check succeeds.
 
-- [ ] **Step 4: Write red tests for the seed command guard and idempotency**
+- [x] **Step 4: Write red tests for the seed command guard and idempotency**
 
 Test that production is rejected, missing/weak passwords are rejected, and two development runs leave one active admin with a newly verified password.
 
-- [ ] **Step 5: Implement the seed command**
+- [x] **Step 5: Implement the seed command**
 
 Implement `main()` around an async `seed_dev_admin(session, email, password)` function. Read `APP_ENV`, `DEV_ADMIN_EMAIL`, and `DEV_ADMIN_PASSWORD`; require development and a password of at least 12 characters; create or update `role="admin"`, `status="active"`, and `hashed_password=hash_password(password)`.
 
-- [ ] **Step 6: Run focused auth and seed tests**
+- [x] **Step 6: Run focused auth and seed tests**
 
 Run: `cd backend && .venv/bin/pytest tests/integration/test_auth_api.py tests/unit/test_seed_dev_admin.py -q`
 

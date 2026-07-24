@@ -69,13 +69,40 @@ class AuthData(BaseModel):
 
 @router.post("/login", response_model=ApiResponse[AuthData])
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
-    if not user or user.status != "active" or not verify_password(body.password, user.hashed_password):
+    user = await _authenticated_user(body, db)
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误",
         )
+    return await _login_response(user, db)
+
+
+@router.post("/admin/login", response_model=ApiResponse[AuthData])
+async def admin_login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+    user = await _authenticated_user(body, db)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="管理员邮箱或密码错误",
+        )
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="管理员邮箱或密码错误",
+        )
+    return await _login_response(user, db)
+
+
+async def _authenticated_user(body: LoginRequest, db: AsyncSession) -> User | None:
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+    if not user or user.status != "active" or not verify_password(body.password, user.hashed_password):
+        return None
+    return user
+
+
+async def _login_response(user: User, db: AsyncSession) -> ApiResponse:
     user.last_login_at = datetime.now(timezone.utc)
     await db.flush()
     token = create_access_token(user.id)

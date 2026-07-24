@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
 
+    # 仅用于本地开发管理员初始化
+    dev_admin_email: str = "admin@finance-god.local"
+    dev_admin_password: str | None = None
+
     @model_validator(mode="after")
     def validate_production_secret(self):
         if self.app_env != "development" and self.secret_key == "change-me-in-production-please-use-a-long-random-string":

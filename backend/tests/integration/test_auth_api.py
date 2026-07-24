@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token, hash_password
 from app.models.user import User
 
 
@@ -38,6 +38,45 @@ def test_me_rejects_token_for_missing_user(client: TestClient) -> None:
     response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_login_accepts_only_active_admins(
+    client: TestClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    async with session_factory() as session:
+        session.add(
+            User(
+                email="admin@example.com",
+                hashed_password=hash_password("correct-horse-123"),
+                role="admin",
+                status="active",
+            )
+        )
+        await session.commit()
+
+    response = client.post(
+        "/api/v1/auth/admin/login",
+        json={"email": "admin@example.com", "password": "correct-horse-123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["user"]["role"] == "admin"
+
+
+def test_admin_login_rejects_normal_user_without_account_disclosure(client: TestClient) -> None:
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": "reader-admin-check@example.com", "password": "correct-horse-123"},
+    )
+
+    response = client.post(
+        "/api/v1/auth/admin/login",
+        json={"email": "reader-admin-check@example.com", "password": "correct-horse-123"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "管理员邮箱或密码错误"
 
 
 def test_registration_validates_email_and_password(client: TestClient) -> None:

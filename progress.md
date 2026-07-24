@@ -46,3 +46,4 @@
 - 2026-07-24：用户确认独立管理会话、开发测试管理员、DeepSeek OpenAI-compatible 接入、Flash 默认/Pro 手动切换和不自动回退策略；API key 明文未写入仓库或规划文件。
 - 2026-07-24：用户逐段批准管理鉴权、真实 DeepSeek 接入和新手友好逐问画像设计；准备确认异常处理、迁移与测试部分，尚未修改业务代码。
 - 2026-07-24：用户批准异常处理、迁移和验收设计；完整规格已写入 `docs/superpowers/specs/2026-07-24-admin-deepseek-auto-profile-design.md`，并通过占位符、敏感信息、矛盾、歧义和范围自检。
+- 2026-07-24：提交当前 Vue/FastAPI 重构基线 `a5e9643`；基线后端 57 passed/1 skipped，前端 36 passed。按 TDD 完成管理员专用登录和 development-only 管理员初始化脚本，聚焦测试 10 passed。
