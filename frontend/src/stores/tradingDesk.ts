@@ -1125,7 +1125,10 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         order.status === 'accepted' || order.status === 'partially_filled'
       ))
       if (pending.length) {
-        await Promise.all(pending.map((order) => reconcileSimulationOrder(order.order_id)))
+        await Promise.all(pending.map((order) => reconcileSimulationOrder(
+          order.order_id,
+          newIdempotencyKey('simulation-clock-reconcile'),
+        )))
         await loadSimulationData()
       }
     } catch (error) {
@@ -1254,7 +1257,10 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     if (!activeOrder.value) throw new Error('没有可撮合的模拟订单')
     orderError.value = null
     try {
-      activeOrder.value = await reconcileSimulationOrder(activeOrder.value.order_id)
+      activeOrder.value = await reconcileSimulationOrder(
+        activeOrder.value.order_id,
+        newIdempotencyKey('simulation-reconcile'),
+      )
       await loadSimulationData()
       return activeOrder.value
     } catch (error) {

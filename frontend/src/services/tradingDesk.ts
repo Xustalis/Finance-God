@@ -1388,10 +1388,11 @@ export function fetchAgentLearningSummary(): Promise<AgentLearningSummary> {
   return request(() => client.get('/agent-learning/summary'))
 }
 
-export function reconcileSimulationOrder(orderId: string): Promise<SimulationOrder> {
+export function reconcileSimulationOrder(orderId: string, idempotencyKey: IdempotencyKey): Promise<SimulationOrder> {
   return request(() => client.post(
     `/simulation/orders/${encodeURIComponent(orderId)}/reconcile`,
     {},
+    { headers: idempotencyHeaders(idempotencyKey) },
   ))
 }
 

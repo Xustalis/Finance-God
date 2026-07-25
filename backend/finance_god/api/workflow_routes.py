@@ -20,10 +20,12 @@ from finance_god.application.workflow_worker import (
     CONNECTED_DETERMINISTIC_SERVICES,
     worker_supports,
 )
+from finance_god.application.idempotency import canonical_request_hash
 from finance_god.domain import (
     ActiveWorkflowConflict,
     ConcurrentCommandConflict,
     DomainInvariantViolation,
+    IdempotencyConflict,
 )
 from finance_god.domain.models import VersionReference, WorkflowRun, WorkflowRunStatus
 from finance_god.orchestration.workflow_commands import (
@@ -333,8 +335,13 @@ def create_workflow_routes(
             owner_id = await _owner(owner_resolver, request)
             run_id = request.path_params["run_id"]
             await _owned_run(commands, owner_id, run_id)
-            _idempotency_key(request)
-            run = await commands.cancel(run_id, actor_id=owner_id, cancelled_at=clock())
+            run = await commands.cancel(
+                run_id,
+                actor_id=owner_id,
+                idempotency_key=_idempotency_key(request),
+                request_hash=canonical_request_hash({"run_id": run_id}),
+                cancelled_at=clock(),
+            )
             record = await commands.get_record(run.run_id)
             if record is None:
                 raise LookupError("workflow run was not found")
@@ -550,6 +557,8 @@ def _error_response(error: Exception) -> JSONResponse:
             },
             status_code=409,
         )
+    if isinstance(error, IdempotencyConflict):
+        return _error("IDEMPOTENCY_CONFLICT", str(error), 409)
     if isinstance(error, ConcurrentCommandConflict):
         return _error("CONFLICT", str(error), 409)
     if isinstance(error, DomainInvariantViolation):
