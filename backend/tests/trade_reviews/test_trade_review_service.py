@@ -8,12 +8,23 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import Base as AppBase
 from finance_god.infrastructure.persistence import Base as TradingBase
-from finance_god.trade_review import EpisodeStatus, TradeReviewService
+from finance_god.trade_review import (
+    EpisodeStatus,
+    TradeDecisionContext,
+    TradeReviewService,
+)
 
 
 class OrderFact:
     def __init__(
-        self, *, order_id: str, fill_id: str, side: str, quantity: str, price: str, at: datetime
+        self,
+        *,
+        order_id: str,
+        fill_id: str,
+        side: str,
+        quantity: str,
+        price: str,
+        at: datetime,
     ) -> None:
         self._payload = {
             "order_id": order_id,
@@ -53,19 +64,35 @@ async def test_position_cycle_reuses_episode_and_closes_once() -> None:
         owner_id="user-1",
         account_id="account-1",
         order=OrderFact(
-            order_id="order-1", fill_id="fill-1", side="buy",
-            quantity="100", price="10", at=now,
+            order_id="order-1",
+            fill_id="fill-1",
+            side="buy",
+            quantity="100",
+            price="10",
+            at=now,
         ),
         market_evidence=evidence,
         position_quantity_after=Decimal("100"),
         profile_version=None,
+        decision_context=TradeDecisionContext(
+            thesis="估值处于历史低位且盈利改善",
+            expected_return="三个月目标收益 10%",
+            primary_risks="盈利修复不及预期",
+            contrary_evidence="行业净息差仍在收窄",
+            expected_holding_period="三个月",
+            confidence="中等",
+        ),
     )
     reduced = await service.record_filled_order(
         owner_id="user-1",
         account_id="account-1",
         order=OrderFact(
-            order_id="order-2", fill_id="fill-2", side="sell",
-            quantity="40", price="11", at=now + timedelta(days=1),
+            order_id="order-2",
+            fill_id="fill-2",
+            side="sell",
+            quantity="40",
+            price="11",
+            at=now + timedelta(days=1),
         ),
         market_evidence=evidence,
         position_quantity_after=Decimal("60"),
@@ -75,8 +102,12 @@ async def test_position_cycle_reuses_episode_and_closes_once() -> None:
         owner_id="user-1",
         account_id="account-1",
         order=OrderFact(
-            order_id="order-3", fill_id="fill-3", side="sell",
-            quantity="60", price="12", at=now + timedelta(days=2),
+            order_id="order-3",
+            fill_id="fill-3",
+            side="sell",
+            quantity="60",
+            price="12",
+            at=now + timedelta(days=2),
         ),
         market_evidence=evidence,
         position_quantity_after=Decimal("0"),
@@ -91,7 +122,20 @@ async def test_position_cycle_reuses_episode_and_closes_once() -> None:
         owner_id="user-1", episode_id=str(closed["episode_id"])
     )
     assert episode.status is EpisodeStatus.REVIEW_COMPLETED
-    assert len(await service.decisions(owner_id="user-1", episode_id=episode.episode_id)) == 3
+    decisions = await service.decisions(
+        owner_id="user-1", episode_id=episode.episode_id
+    )
+    assert len(decisions) == 3
+    assert decisions[0].thesis.value == "估值处于历史低位且盈利改善"
+    assert decisions[0].expected_return.value == "三个月目标收益 10%"
+    assert decisions[0].primary_risks.value == "盈利修复不及预期"
+    assert decisions[0].contrary_evidence.value == "行业净息差仍在收窄"
+    assert decisions[0].expected_holding_period.value == "三个月"
+    assert decisions[0].confidence.value == "中等"
     review = await service.get_review(owner_id="user-1", episode_id=episode.episode_id)
     assert review.actual_return_rmb == Decimal("157")
+    assert "三个月目标收益 10%" in review.expected_return_assessment
+    assert "未记录" not in review.expected_return_assessment
+    assert review.unknown_points == ()
+    assert review.established_points == ("提交时六项决策上下文已完整留存。",)
     await engine.dispose()

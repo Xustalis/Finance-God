@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from finance_god.orchestration.crawler_data_provider import CrawlerDataProvider
 from research_runtime.models import DataQuery, PandaDataDataset
+
+from finance_god.orchestration.crawler_data_provider import CrawlerDataProvider
 
 
 class _Crawler:

@@ -137,6 +137,12 @@ class SimulationExecutionAuditRow(Base):
 
 class SimulationExecutionOutboxRow(Base):
     __tablename__ = "simulation_execution_outbox"
+    __table_args__ = (
+        CheckConstraint(
+            "attempt_count >= 0",
+            name="ck_simulation_execution_outbox_attempt_count",
+        ),
+    )
 
     message_id: Mapped[str] = mapped_column(String(160), primary_key=True)
     event_id: Mapped[str] = mapped_column(
@@ -150,6 +156,14 @@ class SimulationExecutionOutboxRow(Base):
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_error: Mapped[str | None] = mapped_column(String(2_000))
 
 
 class SimulationFillRow(Base):

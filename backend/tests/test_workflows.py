@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from pydantic import ValidationError
+
 from finance_god.agents.catalog import AgentGovernanceCatalog
 from finance_god.agents.contracts import OrderReviewMode, WorkflowKey
 from finance_god.domain.models import VersionReference, WorkflowBlockReason
@@ -22,7 +23,6 @@ from tests.workflows.support import (
     AsyncMemoryWorkflowRepository,
     SequenceRunIds,
 )
-
 
 INPUT = (
     VersionReference(

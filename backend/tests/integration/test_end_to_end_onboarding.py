@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.onboarding import OnboardingSession
 
-
 PASSWORD = "correct-horse-123"
 
 

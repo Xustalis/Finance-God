@@ -18,7 +18,9 @@ async def _resolve_server_user(_request) -> str:
 def test_workspace_routes_use_server_resolved_owner(tmp_path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'workspace-api.db'}"
     engine = create_async_engine(database_url)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    session_factory = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
     asyncio.run(_create_schema(engine))
     app = Starlette(
         routes=[
@@ -36,7 +38,10 @@ def test_workspace_routes_use_server_resolved_owner(tmp_path) -> None:
             created = client.post(
                 "/api/v1/watchlists",
                 json={"name": "China equities", "description": "liquid names"},
-                headers={"x-finance-god-owner-id": "untrusted-user"},
+                headers={
+                    "idempotency-key": "watchlist-create-1",
+                    "x-finance-god-owner-id": "untrusted-user",
+                },
             )
             assert created.status_code == 201
             assert created.json()["owner_user_id"] == "server-user"
@@ -53,6 +58,7 @@ def test_workspace_routes_use_server_resolved_owner(tmp_path) -> None:
                     "description": "liquid names",
                     "expected_revision": 1,
                 },
+                headers={"idempotency-key": "watchlist-update-1"},
             )
             assert updated.status_code == 200
             assert updated.json()["revision"] == 2
@@ -64,15 +70,18 @@ def test_workspace_routes_use_server_resolved_owner(tmp_path) -> None:
                     "description": None,
                     "expected_revision": 1,
                 },
+                headers={"idempotency-key": "watchlist-update-stale"},
             )
             assert stale.status_code == 409
             assert stale.json()["error"]["code"] == "REVISION_CONFLICT"
     finally:
         asyncio.run(engine.dispose())
 
+
 async def _create_schema(engine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+
 
 def test_notification_history_includes_read_and_honors_filters(tmp_path) -> None:
     """Toast hide ≠ read; history returns persisted unread|read only."""
@@ -88,7 +97,9 @@ def test_notification_history_includes_read_and_honors_filters(tmp_path) -> None
 
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'notification-history.db'}"
     engine = create_async_engine(database_url)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    session_factory = async_sessionmaker(
+        engine, expire_on_commit=False, class_=AsyncSession
+    )
     asyncio.run(_create_schema(engine))
     app = Starlette(
         routes=[
@@ -104,7 +115,9 @@ def test_notification_history_includes_read_and_honors_filters(tmp_path) -> None
     now = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 
     async def seed() -> None:
-        from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
+        from finance_god.infrastructure.persistence.workspace_uow import (
+            WorkspaceUnitOfWork,
+        )
 
         async with WorkspaceUnitOfWork(session_factory) as uow:
             await uow.notifications.create_notification(
@@ -160,7 +173,10 @@ def test_notification_history_includes_read_and_honors_filters(tmp_path) -> None
             unread_ids = {item["notification_id"] for item in unread.json()}
             assert unread_ids == {"n-unread"}
 
-            history = client.get("/api/notifications/history", params={"limit": 50, "include_read": "true"})
+            history = client.get(
+                "/api/notifications/history",
+                params={"limit": 50, "include_read": "true"},
+            )
             assert history.status_code == 200
             history_ids = {item["notification_id"] for item in history.json()}
             assert history_ids == {"n-unread", "n-read"}
@@ -170,9 +186,13 @@ def test_notification_history_includes_read_and_honors_filters(tmp_path) -> None
                 params={"limit": 50, "include_read": "false"},
             )
             assert unread_only.status_code == 200
-            assert {item["notification_id"] for item in unread_only.json()} == {"n-unread"}
+            assert {item["notification_id"] for item in unread_only.json()} == {
+                "n-unread"
+            }
 
-            bad_limit = client.get("/api/notifications/history", params={"limit": "nope"})
+            bad_limit = client.get(
+                "/api/notifications/history", params={"limit": "nope"}
+            )
             assert bad_limit.status_code == 400
     finally:
         asyncio.run(engine.dispose())

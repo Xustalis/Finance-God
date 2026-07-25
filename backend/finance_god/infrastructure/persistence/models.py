@@ -7,13 +7,13 @@ from typing import Any, cast
 
 from sqlalchemy import (
     DDL,
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Numeric,
     String,
     Table,

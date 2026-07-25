@@ -126,6 +126,8 @@ market_poller_stop: asyncio.Event | None = None
 workflow_worker_task: asyncio.Task[None] | None = None
 workflow_worker_stop: asyncio.Event | None = None
 workflow_worker_wakeup: asyncio.Event | None = None
+trade_review_projector_task: asyncio.Task[None] | None = None
+trade_review_projector_stop: asyncio.Event | None = None
 _agent_lock = Lock()
 _learning_lock = Lock()
 _service_lock = Lock()
@@ -243,6 +245,7 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     global learning_context_reader
     global market_poller_task, market_poller_stop
     global workflow_worker_task, workflow_worker_stop, workflow_worker_wakeup
+    global trade_review_projector_task, trade_review_projector_stop
     global _readiness_cache
     _readiness_cache = None
     market_data = None
@@ -260,6 +263,8 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     workflow_worker_task = None
     workflow_worker_stop = None
     workflow_worker_wakeup = None
+    trade_review_projector_task = None
+    trade_review_projector_stop = None
     try:
         workflow_runtime = create_workflow_command_runtime_from_environment(
             database_url=settings.database_url
@@ -277,6 +282,9 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         workflow_worker_wakeup,
         workflow_worker_task,
     ) = _start_workflow_worker()
+    trade_review_projector_stop, trade_review_projector_task = (
+        _start_trade_review_projector()
+    )
     try:
         yield
     finally:
@@ -285,6 +293,8 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         poller_task = market_poller_task
         worker_stop = workflow_worker_stop
         worker_task = workflow_worker_task
+        projector_stop = trade_review_projector_stop
+        projector_task = trade_review_projector_task
         workflow_commands = None
         workflow_runtime = None
         simulation_execution = None
@@ -299,10 +309,14 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         workflow_worker_task = None
         workflow_worker_stop = None
         workflow_worker_wakeup = None
+        trade_review_projector_task = None
+        trade_review_projector_stop = None
         if stop_event is not None:
             stop_event.set()
         if worker_stop is not None:
             worker_stop.set()
+        if projector_stop is not None:
+            projector_stop.set()
         if poller_task is not None:
             try:
                 await poller_task
@@ -313,6 +327,13 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
                 await worker_task
             except Exception:  # noqa: BLE001 - shutdown must not raise
                 _LOGGER.warning("workflow worker task did not shut down cleanly")
+        if projector_task is not None:
+            try:
+                await projector_task
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                _LOGGER.warning(
+                    "trade review projector task did not shut down cleanly"
+                )
         if runtime is not None:
             await runtime.close()
 
@@ -370,6 +391,11 @@ async def _probe_readiness() -> tuple[bool, str]:
         workflow_worker_task is None or workflow_worker_task.done()
     ):
         return False, "WORKFLOW_WORKER_UNAVAILABLE"
+    if (
+        trade_review_projector_task is None
+        or trade_review_projector_task.done()
+    ):
+        return False, "TRADE_REVIEW_PROJECTOR_UNAVAILABLE"
     try:
         _service, application = _services()
         return await asyncio.to_thread(application.probe_readiness)
@@ -1190,7 +1216,7 @@ def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | N
             _simulation_routes()
         if simulation_execution is None:
             raise RuntimeError("simulation execution service is unavailable")
-        await simulation_execution.evaluate_protective_strategies(
+        triggered = await simulation_execution.evaluate_protective_strategies(
             instrument_id=snapshot.symbol,
             trusted_price=snapshot.last,
             market_evidence=VersionReference(
@@ -1199,6 +1225,10 @@ def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | N
                 version=snapshot.provider_time,
             ),
         )
+        if triggered:
+            await TradeReviewService(
+                _workspace_session
+            ).project_execution_outbox()
 
     poller = MarketPoller(
         quotes_provider=_candidate_quotes,
@@ -1280,6 +1310,26 @@ def _start_workflow_worker() -> tuple[
         settings.workflow_worker_batch_size,
     )
     return stop_event, wake_event, task
+
+
+def _start_trade_review_projector() -> tuple[asyncio.Event, asyncio.Task[None]]:
+    stop_event = asyncio.Event()
+
+    async def run() -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=2.0)
+                continue
+            except TimeoutError:
+                pass
+            try:
+                await TradeReviewService(_workspace_session).project_execution_outbox(
+                    batch_size=100
+                )
+            except Exception:  # noqa: BLE001 - durable rows retain failure details
+                _LOGGER.exception("trade review projector iteration failed")
+
+    return stop_event, asyncio.create_task(run())
 
 
 async def _workflow_portfolio(owner_id: str):

@@ -332,9 +332,7 @@ class WorkflowRepository:
                 event_type=normalized_event_type,
                 payload_json=_json_mapping(payload_json, "payload_json"),
                 actor_id=(
-                    None
-                    if actor_id is None
-                    else _required_text(actor_id, "actor_id")
+                    None if actor_id is None else _required_text(actor_id, "actor_id")
                 ),
                 correlation_id=(
                     None
@@ -432,7 +430,9 @@ class WorkflowRepository:
             await self._session.scalars(
                 select(WorkflowRunRow)
                 .where(WorkflowRunRow.status == WorkflowRunStatus.QUEUED.value)
-                .order_by(WorkflowRunRow.requested_at.asc(), WorkflowRunRow.run_id.asc())
+                .order_by(
+                    WorkflowRunRow.requested_at.asc(), WorkflowRunRow.run_id.asc()
+                )
                 .limit(bound)
             )
         ).all()
@@ -454,25 +454,33 @@ class WorkflowRepository:
             query = query.where(WorkflowRunRow.status == status)
         if cursor:
             try:
-                requested_text, run_id = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+                requested_text, run_id = json.loads(
+                    base64.urlsafe_b64decode(cursor.encode()).decode()
+                )
                 requested_at = datetime.fromisoformat(requested_text)
             except Exception as error:
                 raise ValueError("invalid workflow cursor") from error
             query = query.where(
                 (WorkflowRunRow.requested_at < requested_at)
-                | ((WorkflowRunRow.requested_at == requested_at) & (WorkflowRunRow.run_id < run_id))
+                | (
+                    (WorkflowRunRow.requested_at == requested_at)
+                    & (WorkflowRunRow.run_id < run_id)
+                )
             )
         rows = (
             await self._session.scalars(
-                query.order_by(WorkflowRunRow.requested_at.desc(), WorkflowRunRow.run_id.desc())
-                .limit(bound + 1)
+                query.order_by(
+                    WorkflowRunRow.requested_at.desc(), WorkflowRunRow.run_id.desc()
+                ).limit(bound + 1)
             )
         ).all()
         page = rows[:bound]
         next_cursor = None
         if len(rows) > bound and page:
             next_cursor = base64.urlsafe_b64encode(
-                json.dumps([page[-1].requested_at.isoformat(), page[-1].run_id]).encode()
+                json.dumps(
+                    [page[-1].requested_at.isoformat(), page[-1].run_id]
+                ).encode()
             ).decode()
         return tuple(self._record(row) for row in page), next_cursor
 

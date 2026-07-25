@@ -4,6 +4,7 @@ import hashlib
 import unittest
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 from finance_god.domain import (
     AuditReference,
@@ -69,9 +70,7 @@ def draft(
         quantity=quantity,
         amount=amount,
         limit_price=limit_price,
-        time_in_force=(
-            None if order_type is OrderType.FUND else TimeInForce.DAY
-        ),
+        time_in_force=(None if order_type is OrderType.FUND else TimeInForce.DAY),
         fund_rule_version=fund_rule_version,
         valid_until=NOW + timedelta(days=2),
         input_versions=(INPUT,),
@@ -180,6 +179,7 @@ class MemoryRepository:
         self.order_keys: dict[tuple[str, str], tuple[str, str]] = {}
         self.strategies: dict[str, ProtectiveStrategy] = {}
         self.strategy_keys: dict[tuple[str, str], tuple[str, str]] = {}
+        self.idempotency: dict[tuple[str, str, str], object] = {}
 
     async def create_draft(
         self,
@@ -332,6 +332,8 @@ class MemoryRepository:
 class MemoryUnitOfWork:
     def __init__(self, repository: MemoryRepository) -> None:
         self.repository = repository
+        self.idempotency = MemoryIdempotency(repository)
+        self.locks = MemoryLocks()
 
     async def __aenter__(self) -> MemoryUnitOfWork:
         return self
@@ -346,6 +348,32 @@ class MemoryUnitOfWork:
 
     async def commit(self) -> None:
         return None
+
+
+class MemoryLocks:
+    async def owner(self, owner_user_id: str) -> None:
+        del owner_user_id
+
+
+class MemoryIdempotency:
+    def __init__(self, repository: MemoryRepository) -> None:
+        self._repository = repository
+
+    async def get(
+        self,
+        scope: str,
+        owner_user_id: str,
+        key: str,
+    ) -> object | None:
+        return self._repository.idempotency.get((scope, owner_user_id, key))
+
+    async def add(self, **values: object) -> None:
+        stable_key = (
+            str(values["scope"]),
+            str(values["owner_user_id"]),
+            str(values["key"]),
+        )
+        self._repository.idempotency[stable_key] = SimpleNamespace(**values)
 
 
 class Clock:
@@ -507,6 +535,8 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
             owner_id="owner-1",
             draft_id=created.draft.draft_id,
             expected_revision=1,
+            idempotency_key="review-key",
+            request_hash=HASH,
         )
         self.assertFalse(reviewed.review.succeeded if reviewed.review else True)
         assert reviewed.immutable_summary_hash is not None
@@ -515,6 +545,8 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
             draft_id=created.draft.draft_id,
             expected_revision=reviewed.record_revision,
             seen_summary_hash=reviewed.immutable_summary_hash,
+            idempotency_key="confirm-key",
+            request_hash=HASH,
         )
 
     async def test_manual_review_failure_does_not_bypass_formal_risk(self) -> None:
@@ -578,7 +610,9 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.repository.orders), 1)
         self.assertEqual(len(self.repository.fills), 1)
 
-    async def test_submit_is_idempotent_and_reconcile_records_partial_fill(self) -> None:
+    async def test_submit_is_idempotent_and_reconcile_records_partial_fill(
+        self,
+    ) -> None:
         confirmed = await self._confirmed()
         first = await self.service.submit(
             owner_id="owner-1",
@@ -595,6 +629,8 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         reconciled = await self.service.reconcile(
             owner_id="owner-1",
             order_id=first.order_id,
+            idempotency_key="reconcile-key",
+            request_hash=HASH,
         )
 
         self.assertEqual(first.order_id, second.order_id)
@@ -612,7 +648,9 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
             first.exchange_order.audit_reference.recorded_at,
         )
 
-    async def test_reconcile_without_post_submission_bar_keeps_order_waiting(self) -> None:
+    async def test_reconcile_without_post_submission_bar_keeps_order_waiting(
+        self,
+    ) -> None:
         confirmed = await self._confirmed()
         submitted = await self.service.submit(
             owner_id="owner-1",
@@ -625,6 +663,8 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         reconciled = await self.service.reconcile(
             owner_id="owner-1",
             order_id=submitted.order_id,
+            idempotency_key="reconcile-key",
+            request_hash=HASH,
         )
 
         assert reconciled.exchange_order is not None
@@ -647,7 +687,12 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         assert unknown.exchange_order is not None
         self.assertEqual(unknown.exchange_order.status, ExchangeOrderStatus.UNKNOWN)
 
-        await self.service.reconcile(owner_id="owner-1", order_id=unknown.order_id)
+        await self.service.reconcile(
+            owner_id="owner-1",
+            order_id=unknown.order_id,
+            idempotency_key="reconcile-key",
+            request_hash=HASH,
+        )
         self.assertEqual(self.transport.submit_calls, 1)
 
     async def test_order_view_exposes_fields_and_timeline(self) -> None:
@@ -658,7 +703,12 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
             idempotency_key="order-key",
             request_hash=HASH,
         )
-        await self.service.reconcile(owner_id="owner-1", order_id=submitted.order_id)
+        await self.service.reconcile(
+            owner_id="owner-1",
+            order_id=submitted.order_id,
+            idempotency_key="reconcile-key",
+            request_hash=HASH,
+        )
 
         views = await self.service.list_order_views(owner_id="owner-1")
         self.assertEqual(len(views), 1)

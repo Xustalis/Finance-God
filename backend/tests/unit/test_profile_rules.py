@@ -2,7 +2,6 @@ import re
 
 from app.services.profile_rules import assess_profile, match_style, rank_directions
 
-
 OBJECTIVE = {
     "loss_reaction": "hold",
     "fund_horizon": "5_plus_years",

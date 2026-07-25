@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.main import app
 from app.models.onboarding import OnboardingSession, ProfileMessage
-from app.services.ai_orchestrator import AIAdapterRegistry, get_ai_adapter_registry
 from app.models.profile import DirectionRecommendation, InvestmentProfile
+from app.services.ai_orchestrator import AIAdapterRegistry, get_ai_adapter_registry
 
 
 class CountingRegistry(AIAdapterRegistry):

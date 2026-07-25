@@ -12,6 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from finance_god.infrastructure.persistence.models import Base as FinanceBase
 
+DECISION_CONTEXT = {
+    "thesis": "估值处于历史低位且盈利改善",
+    "expected_return": "三个月目标收益 10%",
+    "primary_risks": "盈利修复不及预期",
+    "contrary_evidence": "行业净息差仍在收窄",
+    "expected_holding_period": "三个月",
+    "confidence": "中等",
+}
+
 
 def _register(client: TestClient, email: str) -> tuple[dict[str, str], str]:
     response = client.post(
@@ -66,24 +75,35 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             SimpleNamespace(quotes=[trusted_quote], errors={})
         )
     )
+    historical_market = SimpleNamespace(
+        read_historical_minute_bars=lambda *_args, **_kwargs: SimpleNamespace(
+            bars=[
+                SimpleNamespace(
+                    provider_time="2026-07-24T01:30:00+00:00",
+                    open=Decimal("11.10"),
+                    high=Decimal("11.15"),
+                    low=Decimal("11.05"),
+                    close=Decimal("11.10"),
+                    volume=Decimal("10000"),
+                    freshness="current",
+                ),
+                SimpleNamespace(
+                    provider_time="2026-07-24T04:59:00+00:00",
+                    open=Decimal("11.20"),
+                    high=Decimal("11.25"),
+                    low=Decimal("11.15"),
+                    close=Decimal("11.22"),
+                    volume=Decimal("10000"),
+                    freshness="current",
+                ),
+            ],
+            frequency="1m",
+        )
+    )
     monkeypatch.setattr(
         finance_server,
         "_services",
-        lambda: (
-            SimpleNamespace(
-                read_historical_minute_bars=lambda *_args, **_kwargs: (
-                    SimpleNamespace(
-                        bars=[
-                            SimpleNamespace(
-                                provider_time="2026-07-24T01:30:00+00:00",
-                                close=Decimal("11.10"),
-                            )
-                        ]
-                    )
-                )
-            ),
-            trusted_market,
-        ),
+        lambda: (historical_market, trusted_market),
     )
     first_headers, first_user_id = _register(client, "e2e-first@example.com")
     second_headers, _ = _register(client, "e2e-second@example.com")
@@ -125,15 +145,27 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
     reviewed = client.post(
         f"/api/simulation/drafts/{draft['draft']['draft_id']}/review",
         json={"expected_revision": draft["record_revision"]},
-        headers=first_headers,
+        headers={**first_headers, "idempotency-key": "e2e-review-complete"},
     )
     assert reviewed.status_code == 200
     review = reviewed.json()
     assert review["risk_result"]["status"] == "passed"
     assert review["risk_result"]["reason_hash"] == (
-        "e3b0c44298fc1c149afbf4c8996fb924"
-        "27ae41e4649b934ca495991b7852b855"
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     )
+    review_replay = client.post(
+        f"/api/simulation/drafts/{draft['draft']['draft_id']}/review",
+        json={"expected_revision": draft["record_revision"]},
+        headers={**first_headers, "idempotency-key": "e2e-review-complete"},
+    )
+    assert review_replay.status_code == 200
+    assert review_replay.json() == review
+    review_conflict = client.post(
+        f"/api/simulation/drafts/{draft['draft']['draft_id']}/review",
+        json={"expected_revision": review["record_revision"]},
+        headers={**first_headers, "idempotency-key": "e2e-review-complete"},
+    )
+    assert review_conflict.status_code == 409
 
     confirmed = client.post(
         f"/api/simulation/drafts/{draft['draft']['draft_id']}/confirm",
@@ -141,10 +173,29 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "expected_revision": review["record_revision"],
             "seen_summary_hash": review["immutable_summary_hash"],
         },
-        headers=first_headers,
+        headers={**first_headers, "idempotency-key": "e2e-confirm-complete"},
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["draft"]["status"] == "confirmed"
+    confirm_replay = client.post(
+        f"/api/simulation/drafts/{draft['draft']['draft_id']}/confirm",
+        json={
+            "expected_revision": review["record_revision"],
+            "seen_summary_hash": review["immutable_summary_hash"],
+        },
+        headers={**first_headers, "idempotency-key": "e2e-confirm-complete"},
+    )
+    assert confirm_replay.status_code == 200
+    assert confirm_replay.json() == confirmed.json()
+    confirm_conflict = client.post(
+        f"/api/simulation/drafts/{draft['draft']['draft_id']}/confirm",
+        json={
+            "expected_revision": review["record_revision"],
+            "seen_summary_hash": "0" * 64,
+        },
+        headers={**first_headers, "idempotency-key": "e2e-confirm-complete"},
+    )
+    assert confirm_conflict.status_code == 409
 
     submitted = client.post(
         f"/api/simulation/drafts/{draft['draft']['draft_id']}/submit",
@@ -164,10 +215,13 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
     assert reread.json()["draft"]["status"] == "confirmed"
     assert len(client.get("/api/simulation/orders", headers=first_headers).json()) == 1
 
-    assert client.get(
-        "/api/simulation/accounts/current",
-        headers=second_headers,
-    ).status_code == 404
+    assert (
+        client.get(
+            "/api/simulation/accounts/current",
+            headers=second_headers,
+        ).status_code
+        == 404
+    )
     cross_user_draft = client.get(
         f"/api/simulation/drafts/{draft['draft']['draft_id']}",
         headers=second_headers,
@@ -183,15 +237,19 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "100",
+            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
     )
     assert immediate.status_code == 201, immediate.text
     immediate_order = immediate.json()
-    assert immediate_order["status"] == "accepted"
-    assert immediate_order["average_fill_price"] is None
-    assert immediate_order["cumulative_filled"] == "0"
-    assert immediate_order["fills"] == []
+    assert immediate_order["status"] == "filled"
+    assert immediate_order["average_fill_price"] == "11.10000000"
+    assert immediate_order["cumulative_filled"] == "100"
+    assert len(immediate_order["fills"]) == 1
+    assert immediate_order["episode_id"]
+    assert immediate_order["decision_snapshot_id"]
+    assert immediate_order["review_triggered"] is False
 
     replay = client.post(
         "/api/simulation/market-orders",
@@ -200,11 +258,27 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "100",
+            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
     )
     assert replay.status_code == 201
     assert replay.json()["order_id"] == immediate_order["order_id"]
+    assert (
+        replay.json()["decision_snapshot_id"] == immediate_order["decision_snapshot_id"]
+    )
+    immediate_conflict = client.post(
+        "/api/simulation/market-orders",
+        json={
+            "account_id": account["account_id"],
+            "instrument_id": "000001.SZ",
+            "side": "buy",
+            "quantity": "101",
+            "decision_context": DECISION_CONTEXT,
+        },
+        headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
+    )
+    assert immediate_conflict.status_code == 409
 
     strategy = client.post(
         "/api/simulation/protective-strategies",
@@ -217,16 +291,18 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
         },
         headers={**first_headers, "idempotency-key": "e2e-protective-strategy"},
     )
-    assert strategy.status_code == 400
-    assert "exceeds available position" in strategy.text
+    assert strategy.status_code == 201
+    assert strategy.json()["status"] == "active"
     listed_strategies = client.get(
         "/api/simulation/protective-strategies",
         headers=first_headers,
     )
     assert listed_strategies.status_code == 200
-    assert listed_strategies.json() == []
+    assert len(listed_strategies.json()) == 1
 
-    order_count = len(client.get("/api/simulation/orders", headers=first_headers).json())
+    order_count = len(
+        client.get("/api/simulation/orders", headers=first_headers).json()
+    )
     insufficient = client.post(
         "/api/simulation/market-orders",
         json={
@@ -234,11 +310,15 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "1000000",
+            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-insufficient-cash"},
     )
     assert insufficient.status_code == 409
-    assert len(client.get("/api/simulation/orders", headers=first_headers).json()) == order_count
+    assert (
+        len(client.get("/api/simulation/orders", headers=first_headers).json())
+        == order_count
+    )
 
 
 async def _create_finance_schema(

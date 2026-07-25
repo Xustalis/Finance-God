@@ -136,7 +136,9 @@ def _candidate(instrument_id: str, *, tradable: bool = True) -> Candidate:
     )
 
 
-def _position(instrument_id: str, *, cost: Decimal, quantity: Decimal) -> PortfolioPosition:
+def _position(
+    instrument_id: str, *, cost: Decimal, quantity: Decimal
+) -> PortfolioPosition:
     return PortfolioPosition(
         instrument_id=instrument_id,
         currency="CNY",
@@ -272,6 +274,7 @@ def test_revise_appends_new_version_without_overwrite(tmp_path) -> None:
                         {"action_id": action_id, "quantity": "100", "included": True}
                     ],
                 },
+                headers={"idempotency-key": "revise-1"},
             )
             assert revised.status_code == 200
             body = revised.json()
@@ -311,6 +314,7 @@ def test_revise_with_stale_expected_revision_conflicts(tmp_path) -> None:
                         {"action_id": action_id, "quantity": "100", "included": True}
                     ],
                 },
+                headers={"idempotency-key": "revise-stale"},
             )
             assert conflict.status_code == 409
             assert conflict.json()["error"]["code"] == "REVISION_CONFLICT"
@@ -342,6 +346,7 @@ def test_confirm_and_generate_creates_drafts_and_marks_confirmed(tmp_path) -> No
                         {"action_id": action_id, "quantity": "100", "included": True}
                     ],
                 },
+                headers={"idempotency-key": "revise-before-confirm"},
             )
             confirmed = client.post(
                 f"/trade-plans/{plan_id}/confirm-and-generate",

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
+import pytest
 from pydantic import BaseModel
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -16,6 +18,14 @@ TRUSTED_VERSION = VersionReference(
     object_id="000001.SZ",
     version="2026-07-24T15:00:00+08:00",
 )
+DECISION_CONTEXT = {
+    "thesis": "估值处于历史低位且盈利改善",
+    "expected_return": "三个月目标收益 10%",
+    "primary_risks": "盈利修复不及预期",
+    "contrary_evidence": "行业净息差仍在收窄",
+    "expected_holding_period": "三个月",
+    "confidence": "中等",
+}
 
 
 class _HistoricalBar(BaseModel):
@@ -32,9 +42,58 @@ class _Execution:
         self.created = kwargs
         return {"created": True}
 
-    async def execute_immediate_market_order(self, **kwargs: object) -> dict[str, object]:
+    async def execute_immediate_market_order(
+        self, **kwargs: object
+    ) -> dict[str, object]:
         self.created = kwargs
-        return {"order_id": "order-1", "status": "filled"}
+        return {
+            "order_id": "order-1",
+            "status": "filled",
+            "fills": [{"fill_id": "fill-order-1"}],
+        }
+
+    async def reconcile(self, **kwargs: object) -> object:
+        self.created = kwargs
+        return SimpleNamespace(order_id=str(kwargs["order_id"]))
+
+    async def get_order_view(self, **kwargs: object) -> dict[str, object]:
+        return {
+            "order_id": str(kwargs["order_id"]),
+            "status": "filled",
+            "fills": [{"fill_id": f"fill-{kwargs['order_id']}"}],
+        }
+
+
+class _TradeReview:
+    def __init__(self) -> None:
+        self.projected_owner: str | None = None
+
+    async def current_profile_version(self, *, owner_id: str) -> int:
+        assert owner_id == "user-1"
+        return 7
+
+    async def project_execution_outbox(
+        self,
+        *,
+        owner_id: str,
+        fill_ids: frozenset[str],
+    ) -> tuple:
+        self.projected_owner = owner_id
+        assert fill_ids
+        return ()
+
+    async def journal_for_order(
+        self,
+        *,
+        owner_id: str,
+        order_id: str,
+    ) -> dict[str, object]:
+        assert owner_id == "user-1"
+        return {
+            "episode_id": f"episode-{order_id}",
+            "decision_snapshot_id": f"snapshot-{order_id}",
+            "review_triggered": False,
+        }
 
 
 async def _owner(_request) -> str:
@@ -86,6 +145,7 @@ def _app(
     execution: _Execution,
     *,
     historical_market_bars_provider=None,
+    trade_review_service=None,
 ) -> Starlette:
     return Starlette(
         routes=[
@@ -99,6 +159,7 @@ def _app(
                     owner_resolver=_owner,
                     market_reference_provider=_trusted_reference,
                     historical_market_bars_provider=historical_market_bars_provider,
+                    trade_review_service=trade_review_service,
                 ),
             )
         ]
@@ -175,6 +236,10 @@ def test_immediate_market_order_uses_only_the_server_quote() -> None:
                 "instrument_id": "000001.SZ",
                 "side": "buy",
                 "quantity": "100",
+                "decision_context": {
+                    **DECISION_CONTEXT,
+                    "thesis": "  估值处于历史低位且盈利改善  ",
+                },
             },
             headers={"Idempotency-Key": "market-order-1"},
         )
@@ -184,6 +249,68 @@ def test_immediate_market_order_uses_only_the_server_quote() -> None:
     assert execution.created is not None
     assert execution.created["trusted_price"] == Decimal("11.10")
     assert execution.created["market_evidence"] == TRUSTED_VERSION
+    assert execution.created["decision_context"].thesis == "估值处于历史低位且盈利改善"
+
+
+def test_immediate_market_order_binds_server_profile_version() -> None:
+    execution = _Execution()
+    trade_review = _TradeReview()
+    with TestClient(_app(execution, trade_review_service=trade_review)) as client:
+        response = client.post(
+            "/api/simulation/market-orders",
+            json={
+                "account_id": "account-1",
+                "instrument_id": "000001.SZ",
+                "side": "buy",
+                "quantity": "100",
+                "decision_context": DECISION_CONTEXT,
+            },
+            headers={"Idempotency-Key": "profile-bound-order"},
+        )
+
+    assert response.status_code == 201
+    assert execution.created is not None
+    assert execution.created["submission_profile_version"] == 7
+    assert trade_review.projected_owner == "user-1"
+    assert response.json()["decision_snapshot_id"] == "snapshot-order-1"
+
+
+def test_reconcile_projects_delayed_fill_through_the_same_outbox() -> None:
+    execution = _Execution()
+    trade_review = _TradeReview()
+    with TestClient(_app(execution, trade_review_service=trade_review)) as client:
+        response = client.post(
+            "/api/simulation/orders/order-delayed/reconcile",
+            json={},
+            headers={"Idempotency-Key": "reconcile-delayed"},
+        )
+
+    assert response.status_code == 200
+    assert trade_review.projected_owner == "user-1"
+    assert response.json()["decision_snapshot_id"] == "snapshot-order-delayed"
+
+
+@pytest.mark.parametrize("field_name", tuple(DECISION_CONTEXT))
+def test_immediate_market_order_rejects_blank_decision_context(
+    field_name: str,
+) -> None:
+    execution = _Execution()
+    context = {**DECISION_CONTEXT, field_name: " \n\t "}
+    with TestClient(_app(execution)) as client:
+        response = client.post(
+            "/api/simulation/market-orders",
+            json={
+                "account_id": "account-1",
+                "instrument_id": "000001.SZ",
+                "side": "buy",
+                "quantity": "100",
+                "decision_context": context,
+            },
+            headers={"Idempotency-Key": f"blank-{field_name}"},
+        )
+
+    assert response.status_code == 422
+    assert execution.created is None
 
 
 def test_historical_overview_uses_provider_clock_revision() -> None:

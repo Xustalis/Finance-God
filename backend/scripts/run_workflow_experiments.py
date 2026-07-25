@@ -15,7 +15,7 @@ from pathlib import Path
 
 from finance_god.agents.catalog import AgentGovernanceCatalog
 from finance_god.agents.contracts import WorkflowKey
-from finance_god.domain.models import VersionReference, WorkflowRunStatus
+from finance_god.domain.models import VersionReference
 from finance_god.orchestration.task_plans import TaskPlanFactory
 from finance_god.orchestration.workflow_commands import (
     WorkflowCommandService,

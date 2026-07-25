@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+
 from finance_god.market_data import (
     DataCategory,
     DataEnvelope,
@@ -14,11 +15,11 @@ from finance_god.market_data import (
     DQTriggerRequest,
     DQWorkflowReceipt,
     EmptyMeaning,
+    FactorQuery,
     InMemoryDQTriggerRepository,
     InMemoryScopeFreezeRepository,
     QualityContext,
     QualityGate,
-    FactorQuery,
     ReleaseState,
 )
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER

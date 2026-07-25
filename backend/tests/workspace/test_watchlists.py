@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from finance_god.domain.errors import ConcurrentCommandConflict, DomainInvariantViolation
+from finance_god.domain.errors import (
+    ConcurrentCommandConflict,
+    DomainInvariantViolation,
+)
 from finance_god.domain.models import WatchlistGroup
 from finance_god.infrastructure.persistence.models import Base
 from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork

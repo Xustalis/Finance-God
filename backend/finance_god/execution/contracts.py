@@ -5,7 +5,14 @@ from decimal import Decimal
 from enum import Enum
 from typing import Protocol
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from finance_god.domain import (
     ExchangeOrder,
@@ -46,9 +53,7 @@ class ProtectiveStrategy(StrictModel):
     created_at: AwareDatetime
     updated_at: AwareDatetime
     triggered_at: AwareDatetime | None = None
-    trigger_kind: str | None = Field(
-        default=None, pattern=r"^(take_profit|stop_loss)$"
-    )
+    trigger_kind: str | None = Field(default=None, pattern=r"^(take_profit|stop_loss)$")
     trigger_price: Decimal | None = Field(default=None, gt=0)
     order_id: str | None = Field(default=None, max_length=160)
     error: str | None = Field(default=None, max_length=1000)
@@ -87,7 +92,9 @@ class ManualReviewResult(StrictModel):
     @model_validator(mode="after")
     def validate_result(self) -> ManualReviewResult:
         if self.succeeded == (self.error is not None):
-            raise ValueError("successful review requires no error; failure requires error")
+            raise ValueError(
+                "successful review requires no error; failure requires error"
+            )
         return self
 
 
@@ -112,6 +119,25 @@ class CostEstimate(StrictModel):
     rule_version: str = Field(min_length=1, max_length=80)
 
 
+class TradeDecisionContext(StrictModel):
+    thesis: str = Field(min_length=1, max_length=2000)
+    expected_return: str = Field(min_length=1, max_length=1000)
+    primary_risks: str = Field(min_length=1, max_length=2000)
+    contrary_evidence: str = Field(min_length=1, max_length=2000)
+    expected_holding_period: str = Field(min_length=1, max_length=500)
+    confidence: str = Field(min_length=1, max_length=500)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def trim_required_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("decision context fields must not be blank")
+            return stripped
+        return value
+
+
 class StoredDraft(StrictModel):
     record_revision: int = Field(default=1, ge=1)
     owner_id: str = Field(min_length=1, max_length=160)
@@ -127,6 +153,8 @@ class StoredDraft(StrictModel):
         pattern=r"^[0-9a-f]{64}$",
     )
     confirmed_at: AwareDatetime | None = None
+    decision_context: TradeDecisionContext | None = None
+    submission_profile_version: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_mode(self) -> StoredDraft:
@@ -140,6 +168,8 @@ class StoredDraft(StrictModel):
 class StoredOrder(StrictModel):
     owner_id: str = Field(min_length=1, max_length=160)
     draft_reference: VersionReference
+    decision_context: TradeDecisionContext | None = None
+    submission_profile_version: int | None = Field(default=None, ge=1)
     exchange_order: ExchangeOrder | None = None
     fund_order: FundOrder | None = None
     execution_error: str | None = Field(default=None, max_length=2_000)

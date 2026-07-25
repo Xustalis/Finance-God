@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from finance_god.domain.models import WorkflowRun
 from finance_god.domain import ActiveWorkflowConflict
+from finance_god.domain.models import WorkflowRun
 
 
 class SequenceRunIds:
@@ -83,12 +83,8 @@ class AsyncMemoryWorkflowRepository:
         self.intents[run.run_id] = request_intent
         self.requested_at[run.run_id] = requested_at
         self.scopes[run.run_id] = dict(scope)
-        self.lineage[run.run_id] = (
-            parent_run_id, retry_mode, resumed_from_node_id
-        )
-        self.events.append(
-            (run.run_id, run.revision, "workflow_queued", audit_payload)
-        )
+        self.lineage[run.run_id] = (parent_run_id, retry_mode, resumed_from_node_id)
+        self.events.append((run.run_id, run.revision, "workflow_queued", audit_payload))
         self.outbox.append((run.run_id, str(outbox_payload["status"])))
         return run, True
 
@@ -124,7 +120,8 @@ class AsyncMemoryWorkflowRepository:
         records = [
             await self.get_record(run_id)
             for run_id, run in self.runs.items()
-            if self.owners[run_id] == owner_id and (status is None or run.status.value == status)
+            if self.owners[run_id] == owner_id
+            and (status is None or run.status.value == status)
         ]
         ordered = sorted(
             (item for item in records if item is not None),
@@ -148,9 +145,7 @@ class AsyncMemoryWorkflowRepository:
         if run.revision != expected_revision + 1:
             raise ValueError("CAS append requires exactly one revision")
         self.runs[run.run_id] = run
-        self.events.append(
-            (run.run_id, run.revision, event_type, event_payload)
-        )
+        self.events.append((run.run_id, run.revision, event_type, event_payload))
         self.outbox.append((run.run_id, outbox_topic))
         return run
 

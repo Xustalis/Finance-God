@@ -33,7 +33,7 @@ from finance_god.execution import (
     ExecutionFailure,
     SimulationExecutionService,
 )
-from finance_god.trade_review import TradeReviewService
+from finance_god.trade_review import TradeDecisionContext, TradeReviewService
 
 IDEMPOTENCY_HEADER = "idempotency-key"
 MarketReferenceProvider = Callable[
@@ -115,6 +115,7 @@ class ImmediateMarketOrderRequest(APIModel):
     side: OrderSide
     quantity: Decimal = Field(gt=0)
     market_mode: Literal["live", "historical"] = "live"
+    decision_context: TradeDecisionContext
 
 
 class ProtectiveStrategyCreateRequest(APIModel):
@@ -173,11 +174,44 @@ def create_simulation_routes(
     owner_resolver: OwnerResolver,
     simulation_clock: SimulationClockService | None = None,
     market_reference_provider: MarketReferenceProvider | None = None,
-    historical_market_reference_provider: HistoricalMarketReferenceProvider | None = None,
+    historical_market_reference_provider: HistoricalMarketReferenceProvider
+    | None = None,
     historical_market_bars_provider: HistoricalMarketBarsProvider | None = None,
     simulation_start_validator: SimulationStartValidator | None = None,
     trade_review_service: TradeReviewService | None = None,
 ) -> list[Route]:
+    async def project_order_journal(
+        *,
+        owner_id: str,
+        order: object,
+    ) -> object:
+        if trade_review_service is None:
+            return order
+        payload = (
+            order.model_dump(mode="json")
+            if isinstance(order, BaseModel)
+            else dict(order)  # type: ignore[arg-type]
+        )
+        if payload.get("status") not in {"partially_filled", "filled"}:
+            return order
+        fills = payload.get("fills")
+        fill_ids = frozenset(
+            str(fill["fill_id"])
+            for fill in fills
+            if isinstance(fill, dict) and fill.get("fill_id")
+        ) if isinstance(fills, list) else frozenset()
+        await trade_review_service.project_execution_outbox(
+            owner_id=owner_id,
+            fill_ids=fill_ids,
+        )
+        journal = await trade_review_service.journal_for_order(
+            owner_id=owner_id,
+            order_id=str(payload["order_id"]),
+        )
+        if journal is None:
+            return {**payload, "review_projection_status": "pending"}
+        return {**payload, **journal, "review_projection_status": "completed"}
+
     async def create_account(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, SimulationAccountCreate)
@@ -209,7 +243,9 @@ def create_simulation_routes(
 
     async def current_account(request: Request) -> JSONResponse:
         async def action() -> object:
-            account = await accounts.current(owner_id=await _owner(owner_resolver, request))
+            account = await accounts.current(
+                owner_id=await _owner(owner_resolver, request)
+            )
             if account is None:
                 raise LookupError("simulation account not found")
             return account
@@ -249,7 +285,9 @@ def create_simulation_routes(
     async def historical_overview(request: Request) -> JSONResponse:
         async def action() -> object:
             if historical_market_bars_provider is None:
-                raise SimulationServiceUnavailable("historical market data is unavailable")
+                raise SimulationServiceUnavailable(
+                    "historical market data is unavailable"
+                )
             owner_id = await _owner(owner_resolver, request)
             symbols = tuple(
                 item.strip().upper()
@@ -260,15 +298,16 @@ def create_simulation_routes(
             warnings = []
             for symbol in symbols:
                 try:
-                    result = await historical_market_bars_provider(owner_id, symbol, "1m")
+                    result = await historical_market_bars_provider(
+                        owner_id, symbol, "1m"
+                    )
                 except Exception:  # noqa: BLE001 - isolate batch items
                     warnings.append(
                         {
                             "code": "HISTORICAL_MARKET_DATA_UNAVAILABLE",
                             "symbol": symbol,
                             "message": (
-                                "该标的在当前模拟时点没有可展示的 "
-                                "PandaData 分钟行情"
+                                "该标的在当前模拟时点没有可展示的 PandaData 分钟行情"
                             ),
                         }
                     )
@@ -294,7 +333,9 @@ def create_simulation_routes(
                         "change": change,
                         "change_percent": (
                             change / previous.close
-                            if change is not None and previous is not None and previous.close
+                            if change is not None
+                            and previous is not None
+                            and previous.close
                             else None
                         ),
                         "provider": "PandaData",
@@ -314,7 +355,9 @@ def create_simulation_routes(
     async def historical_bars(request: Request) -> JSONResponse:
         async def action() -> object:
             if historical_market_bars_provider is None:
-                raise SimulationServiceUnavailable("historical market data is unavailable")
+                raise SimulationServiceUnavailable(
+                    "historical market data is unavailable"
+                )
             symbol = request.query_params.get("symbol", "").strip().upper()
             if not symbol:
                 raise ValueError("symbol is required")
@@ -403,10 +446,11 @@ def create_simulation_routes(
                     raise SimulationServiceUnavailable(
                         "trusted historical market reference provider is unavailable"
                     )
-                trusted_price, trusted_version = (
-                    await historical_market_reference_provider(
-                        owner_id, body.instrument_id
-                    )
+                (
+                    trusted_price,
+                    trusted_version,
+                ) = await historical_market_reference_provider(
+                    owner_id, body.instrument_id
                 )
             else:
                 if market_reference_provider is None:
@@ -433,33 +477,19 @@ def create_simulation_routes(
                 market_evidence=trusted_version,
                 idempotency_key=_idempotency_key(request),
                 request_hash=_request_hash(body),
+                decision_context=body.decision_context,
+                submission_profile_version=(
+                    await trade_review_service.current_profile_version(
+                        owner_id=owner_id
+                    )
+                    if trade_review_service is not None
+                    else None
+                ),
             )
             if business_time is not None:
                 execution_args["business_time"] = business_time.current_time
             order = await execution.execute_immediate_market_order(**execution_args)
-            if trade_review_service is None or order.status != "filled":
-                return order
-            positions = await accounts.positions(owner_id=owner_id)
-            position = next(
-                (
-                    item
-                    for item in positions
-                    if item.account_id == body.account_id
-                    and item.instrument_id == body.instrument_id
-                ),
-                None,
-            )
-            journal = await trade_review_service.record_filled_order(
-                owner_id=owner_id,
-                account_id=body.account_id,
-                order=order,
-                market_evidence=trusted_version.model_dump(mode="json"),
-                position_quantity_after=(
-                    position.long_quantity if position is not None else Decimal("0")
-                ),
-                profile_version=None,
-            )
-            return {**order.model_dump(mode="json"), **journal}
+            return await project_order_journal(owner_id=owner_id, order=order)
 
         return await _respond(action, success_status=201)
 
@@ -483,7 +513,9 @@ def create_simulation_routes(
                 else Decimal("0")
             )
             if body.quantity > available:
-                raise ValueError("protective strategy quantity exceeds available position")
+                raise ValueError(
+                    "protective strategy quantity exceeds available position"
+                )
             if market_reference_provider is None:
                 raise SimulationServiceUnavailable(
                     "trusted market reference provider is unavailable"
@@ -652,10 +684,11 @@ def create_simulation_routes(
                     {"order_id": request.path_params["order_id"]}
                 ),
             )
-            return await execution.get_order_view(
+            order = await execution.get_order_view(
                 owner_id=owner_id,
                 order_id=stored.order_id,
             )
+            return await project_order_journal(owner_id=owner_id, order=order)
 
         return await _respond(action)
 

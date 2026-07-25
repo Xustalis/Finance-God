@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
+
 from finance_god.market_data import (
     ALL_ENDPOINTS,
     CATALOG,
@@ -22,7 +24,6 @@ from finance_god.market_data.capabilities import (
     endpoint_manifest_hash,
 )
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
-from pydantic import ValidationError
 
 from .conftest import FakeSDK
 

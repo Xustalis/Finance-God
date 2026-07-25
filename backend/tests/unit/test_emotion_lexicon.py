@@ -6,7 +6,12 @@ import json
 
 import pytest
 
-from app.services.emotion_lexicon import AROUSAL_MAP, EMOTION_KEYWORDS, VALENCE_MAP, analyze
+from app.services.emotion_lexicon import (
+    AROUSAL_MAP,
+    EMOTION_KEYWORDS,
+    VALENCE_MAP,
+    analyze,
+)
 
 ALL_EMOTIONS = {"greed", "optimism", "calm", "anxiety", "frustration", "panic"}
 

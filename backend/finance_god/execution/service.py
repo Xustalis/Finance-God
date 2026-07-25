@@ -51,6 +51,7 @@ from .contracts import (
     SubmissionOutcome,
     SubmissionStatus,
     SubmissionTransport,
+    TradeDecisionContext,
     TradePlanPort,
     TrustedRiskPort,
 )
@@ -137,9 +138,9 @@ class SimulationExecutionService:
         ids: IdGenerator,
     ) -> None:
         self._uow_factory = uow_factory
-        self._active_repository: ContextVar[
-            ExecutionRepositoryPort | None
-        ] = ContextVar("simulation_execution_repository", default=None)
+        self._active_repository: ContextVar[ExecutionRepositoryPort | None] = (
+            ContextVar("simulation_execution_repository", default=None)
+        )
         self._active_uow: ContextVar[ExecutionUnitOfWork | None] = ContextVar(
             "simulation_execution_uow", default=None
         )
@@ -263,6 +264,8 @@ class SimulationExecutionService:
         idempotency_key: str,
         request_hash: str,
         business_time: datetime | None = None,
+        decision_context: TradeDecisionContext | None = None,
+        submission_profile_version: int | None = None,
     ) -> StoredOrderView:
         """Create and submit a simulation order for next-minute-bar execution."""
         recorded_at = self._clock.now()
@@ -296,6 +299,8 @@ class SimulationExecutionService:
             mode=DraftMode.MANUAL,
             draft=draft,
             reference_price=trusted_price,
+            decision_context=decision_context,
+            submission_profile_version=submission_profile_version,
         )
         review = await self._manual_review.review(initial)
         pending = draft.transition(
@@ -576,17 +581,13 @@ class SimulationExecutionService:
         return await self._repository.list_fills(order_ids=owned_ids)
 
     @_transactional(commit=False)
-    async def list_order_views(
-        self, *, owner_id: str
-    ) -> tuple[StoredOrderView, ...]:
+    async def list_order_views(self, *, owner_id: str) -> tuple[StoredOrderView, ...]:
         orders = await self.list_orders(owner_id=owner_id)
         views = [await self._build_order_view(order) for order in orders]
         return tuple(views)
 
     @_transactional(commit=False)
-    async def get_order_view(
-        self, *, owner_id: str, order_id: str
-    ) -> StoredOrderView:
+    async def get_order_view(self, *, owner_id: str, order_id: str) -> StoredOrderView:
         stored = await self._owned_order(owner_id, order_id)
         return await self._build_order_view(stored)
 
@@ -846,9 +847,7 @@ class SimulationExecutionService:
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             result_reference=draft_id,
-            response_json=updated.model_dump(
-                mode="json", exclude_computed_fields=True
-            ),
+            response_json=updated.model_dump(mode="json", exclude_computed_fields=True),
         )
         return updated
 
@@ -914,9 +913,7 @@ class SimulationExecutionService:
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             result_reference=draft_id,
-            response_json=updated.model_dump(
-                mode="json", exclude_computed_fields=True
-            ),
+            response_json=updated.model_dump(mode="json", exclude_computed_fields=True),
         )
         return updated
 
@@ -962,6 +959,8 @@ class SimulationExecutionService:
         submitting = StoredOrder(
             owner_id=owner_id,
             draft_reference=_draft_reference(draft.draft),
+            decision_context=draft.decision_context,
+            submission_profile_version=draft.submission_profile_version,
             exchange_order=exchange,
         )
         persisted = await self._repository.create_order(
@@ -1244,9 +1243,7 @@ class SimulationExecutionService:
             idempotency_key=idempotency_key,
             request_hash=request_hash,
             result_reference=result.order_id,
-            response_json=result.model_dump(
-                mode="json", exclude_computed_fields=True
-            ),
+            response_json=result.model_dump(mode="json", exclude_computed_fields=True),
         )
         return result
 
@@ -1301,7 +1298,9 @@ class SimulationExecutionService:
         if draft.order_type is OrderType.LIMIT and draft.limit_price is not None:
             price = draft.limit_price
             price_source = "limit_price"
-        elif draft.order_type is OrderType.MARKET and stored.reference_price is not None:
+        elif (
+            draft.order_type is OrderType.MARKET and stored.reference_price is not None
+        ):
             direction = Decimal("1" if draft.side.is_buy_direction else "-1")
             price = (
                 stored.reference_price
@@ -1390,13 +1389,8 @@ def _summary_hash(draft: StoredDraft, risk: RiskCheckResult) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _protective_trigger(
-    strategy: ProtectiveStrategy, price: Decimal
-) -> str | None:
-    if (
-        strategy.take_profit_price is not None
-        and price >= strategy.take_profit_price
-    ):
+def _protective_trigger(strategy: ProtectiveStrategy, price: Decimal) -> str | None:
+    if strategy.take_profit_price is not None and price >= strategy.take_profit_price:
         return "take_profit"
     if strategy.stop_loss_price is not None and price <= strategy.stop_loss_price:
         return "stop_loss"

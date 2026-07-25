@@ -27,8 +27,8 @@ from starlette.routing import Route
 from finance_god.agents.contracts import WorkflowKey
 from finance_god.api.auth import AuthenticationError, OwnerResolver
 from finance_god.api.desk_intent import (
-    requires_desk_workflow,
     requests_trade_form_prefill,
+    requires_desk_workflow,
     select_desk_workflow,
 )
 from finance_god.api.desk_routes import (

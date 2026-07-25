@@ -19,11 +19,11 @@ from finance_god.api.desk_intent import (
     requests_trade_form_prefill,
     select_desk_workflow,
 )
+from finance_god.application.idempotency import canonical_request_hash
 from finance_god.application.workflow_worker import (
     CONNECTED_DETERMINISTIC_SERVICES,
     worker_supports,
 )
-from finance_god.application.idempotency import canonical_request_hash
 from finance_god.domain import (
     ActiveWorkflowConflict,
     ConcurrentCommandConflict,

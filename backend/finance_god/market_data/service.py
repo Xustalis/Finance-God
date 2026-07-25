@@ -18,7 +18,6 @@ from .adapter import PandaCredentials, PandaDataAdapter
 from .bar_cache import PersistentBarCache
 from .capabilities import EXPECTED_SDK_VERSION
 from .contracts import (
-    AssetClass,
     DataCategory,
     DataDiagnostic,
     DataEnvelope,
@@ -89,9 +88,9 @@ class MarketQuote(BaseModel):
     retrieved_at: datetime
     frequency: str
     freshness: str
-    session_alignment: Literal[
-        "current_session", "latest_released_session"
-    ] = "current_session"
+    session_alignment: Literal["current_session", "latest_released_session"] = (
+        "current_session"
+    )
     market_status: str
     source_endpoint: str
     capability_version: str
@@ -354,8 +353,7 @@ class MarketDataService:
         merged_result = live_result.model_copy(
             update={
                 "bars": tuple(
-                    merged_by_time[key]
-                    for key in sorted(merged_by_time, reverse=True)
+                    merged_by_time[key] for key in sorted(merged_by_time, reverse=True)
                 )
             }
         )
@@ -437,7 +435,11 @@ class MarketDataService:
         error_message = (
             envelope.diagnostics[-1].message
             if envelope.diagnostics and not envelope.items
-            else ("PandaData returned no historical minute bars" if not envelope.items else None)
+            else (
+                "PandaData returned no historical minute bars"
+                if not envelope.items
+                else None
+            )
         )
         return MarketBarsResult(
             frequency=_display_frequency(DataFrequency.MINUTE_1),
@@ -867,7 +869,7 @@ def _quote(item: NormalizedSnapshot) -> MarketQuote:
         capability_version=item.source.capability_version,
         instrument_master_identity=item.source.instrument_master_identity,
         instrument_master_version=item.source.instrument_master_version,
-        trade_eligible=item.instrument.asset_class is AssetClass.EQUITY,
+        trade_eligible=False,
     )
 
 

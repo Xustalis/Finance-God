@@ -19,7 +19,10 @@ def test_preflight_rejects_legacy_backend_env(tmp_path: Path) -> None:
 
 def test_port_preflight_fails_without_stopping_existing_listener() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
+        try:
+            listener.bind(("127.0.0.1", 0))
+        except PermissionError:
+            pytest.skip("runtime sandbox does not permit local socket binding")
         listener.listen()
         port = listener.getsockname()[1]
 
@@ -38,9 +41,7 @@ def test_launcher_executes_only_supported_asgi_target(
     monkeypatch.setattr(
         startup.os,
         "execv",
-        lambda executable, arguments: executed.append(
-            (executable, arguments)
-        ),
+        lambda executable, arguments: executed.append((executable, arguments)),
     )
 
     assert startup.main() == 0

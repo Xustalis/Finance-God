@@ -110,6 +110,7 @@ def test_workspace_uses_jwt_subject_and_isolates_users(
         json={"name": "A only"},
         headers={
             "Authorization": f"Bearer {first['access_token']}",
+            "idempotency-key": "workspace-a-watchlist",
             "x-finance-god-owner-id": second["user"]["id"],
         },
     )

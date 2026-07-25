@@ -13,28 +13,10 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.postgres_support import reset_public_schema
+
 POSTGRES_URL = os.getenv("FINANCE_GOD_TEST_POSTGRES_URL")
 BACKEND = Path(__file__).resolve().parents[2]
-LEDGER_TABLES = (
-    "workflow_outbox_messages",
-    "workflow_execution_audit_records",
-    "workflow_audit_records",
-    "workflow_events",
-    "workflow_runs",
-    "account_activities",
-    "outbox_messages",
-    "audit_records",
-    "idempotency_records",
-    "fills",
-    "reservations",
-    "position_projections",
-    "account_projections",
-    "ledger_postings",
-    "journal_entries",
-    "account_events",
-    "simulation_accounts",
-    "alembic_version",
-)
 
 
 class MigrationSmokeTest(unittest.TestCase):
@@ -42,9 +24,7 @@ class MigrationSmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "ledger.db"
             config = Config(str(BACKEND / "alembic.ini"))
-            config.set_main_option(
-                "sqlalchemy.url", f"sqlite+aiosqlite:///{database}"
-            )
+            config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database}")
             command.upgrade(config, "head")
             command.check(config)
 
@@ -75,7 +55,7 @@ class MigrationSmokeTest(unittest.TestCase):
         if POSTGRES_URL is None:
             self.skipTest("FINANCE_GOD_TEST_POSTGRES_URL is not configured")
         _require_test_database(POSTGRES_URL)
-        asyncio.run(_clear_ledger_schema(POSTGRES_URL))
+        asyncio.run(reset_public_schema(POSTGRES_URL))
         config = Config(str(BACKEND / "alembic.ini"))
         config.set_main_option("sqlalchemy.url", POSTGRES_URL)
         command.upgrade(config, "head")
@@ -107,33 +87,6 @@ def _require_test_database(database_url: str) -> None:
         )
 
 
-async def _clear_ledger_schema(database_url: str) -> None:
-    engine = create_async_engine(database_url)
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "DROP TABLE IF EXISTS "
-                    + ", ".join(LEDGER_TABLES)
-                    + " CASCADE"
-                )
-            )
-            await connection.execute(
-                text(
-                    "DROP FUNCTION IF EXISTS "
-                    "finance_god_prevent_fact_mutation()"
-                )
-            )
-            await connection.execute(
-                text(
-                    "DROP FUNCTION IF EXISTS "
-                    "finance_god_prevent_workflow_fact_mutation()"
-                )
-            )
-    finally:
-        await engine.dispose()
-
-
 async def _postgres_has_fact_triggers() -> bool:
     assert POSTGRES_URL is not None
     engine = create_async_engine(POSTGRES_URL)
@@ -142,10 +95,10 @@ async def _postgres_has_fact_triggers() -> bool:
             trigger_names = set(
                 (
                     await connection.execute(
-                text(
-                    "SELECT tgname FROM pg_trigger "
-                    "WHERE tgname LIKE '%_no_mutation' AND NOT tgisinternal"
-                )
+                        text(
+                            "SELECT tgname FROM pg_trigger "
+                            "WHERE tgname LIKE '%_no_mutation' AND NOT tgisinternal"
+                        )
                     )
                 ).scalars()
             )

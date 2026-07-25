@@ -11,13 +11,13 @@ from alembic.config import Config
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from finance_god.application import (
     ResetAccountCommand,
     SimulationLedgerService,
     rebuild_projections,
 )
+from finance_god.application.projections import project_event_stream
 from finance_god.domain import (
     DomainInvariantViolation,
     ExchangeRateEvidence,
@@ -25,6 +25,7 @@ from finance_god.domain import (
     LedgerPosting,
     ReservationKind,
     canonical_hash,
+    projection_checksum,
 )
 from finance_god.infrastructure.persistence import (
     SqlAlchemyUnitOfWork,
@@ -40,12 +41,11 @@ from finance_god.infrastructure.persistence.models import (
     OutboxRow,
     ReservationRow,
 )
-
 from tests.ledger.support import (
-    FixedClock,
     NOW_UTC,
-    Rules,
     SOURCE,
+    FixedClock,
+    Rules,
     SequentialIds,
     buy_command,
     cover_command,
@@ -56,29 +56,10 @@ from tests.ledger.support import (
     sell_command,
     short_command,
 )
+from tests.postgres_support import reset_public_schema
 
 POSTGRES_URL = os.getenv("FINANCE_GOD_TEST_POSTGRES_URL")
 BACKEND = Path(__file__).resolve().parents[2]
-LEDGER_TABLES = (
-    "workflow_outbox_messages",
-    "workflow_execution_audit_records",
-    "workflow_audit_records",
-    "workflow_events",
-    "workflow_runs",
-    "account_activities",
-    "outbox_messages",
-    "audit_records",
-    "idempotency_records",
-    "fills",
-    "reservations",
-    "position_projections",
-    "account_projections",
-    "ledger_postings",
-    "journal_entries",
-    "account_events",
-    "simulation_accounts",
-    "alembic_version",
-)
 
 
 def _require_test_database(database_url: str) -> None:
@@ -93,33 +74,6 @@ def _require_test_database(database_url: str) -> None:
         )
 
 
-async def _clear_ledger_schema(database_url: str) -> None:
-    engine = create_async_engine(database_url)
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "DROP TABLE IF EXISTS "
-                    + ", ".join(LEDGER_TABLES)
-                    + " CASCADE"
-                )
-            )
-            await connection.execute(
-                text(
-                    "DROP FUNCTION IF EXISTS "
-                    "finance_god_prevent_fact_mutation()"
-                )
-            )
-            await connection.execute(
-                text(
-                    "DROP FUNCTION IF EXISTS "
-                    "finance_god_prevent_workflow_fact_mutation()"
-                )
-            )
-    finally:
-        await engine.dispose()
-
-
 @unittest.skipUnless(
     POSTGRES_URL,
     "FINANCE_GOD_TEST_POSTGRES_URL is not configured",
@@ -128,7 +82,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         assert POSTGRES_URL is not None
         _require_test_database(POSTGRES_URL)
-        await _clear_ledger_schema(POSTGRES_URL)
+        await reset_public_schema(POSTGRES_URL)
         config = Config(str(BACKEND / "alembic.ini"))
         config.set_main_option("sqlalchemy.url", POSTGRES_URL)
         await asyncio.to_thread(command.upgrade, config, "head")
@@ -142,6 +96,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
+
     async def test_postgres_full_market_lifecycle_and_reset(self) -> None:
         account_id = await self.service.create_account(create_command())
         usd_reservation = await self.service.freeze_cash(
@@ -354,9 +309,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
                 price=Decimal("0.33333333"),
             )
         )
-        for index, quantity in enumerate(
-            (Decimal("1"), Decimal("2")), start=1
-        ):
+        for index, quantity in enumerate((Decimal("1"), Decimal("2")), start=1):
             await self.service.record_sell_fill(
                 sell_command(
                     account_id,
@@ -369,9 +322,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
                 )
             )
         async with SqlAlchemyUnitOfWork(self.sessions) as uow:
-            position = await uow.position_projections.get(
-                account_id, "CYCLE.SSE"
-            )
+            position = await uow.position_projections.get(account_id, "CYCLE.SSE")
             fills = await uow.fills.list(account_id)
         assert position is not None
         self.assertEqual(position.long_cost_rmb, Decimal("0E-8"))
@@ -401,28 +352,17 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
         )
         async with self.engine.begin() as connection:
             await connection.execute(
-                text(
-                    "DROP TRIGGER ledger_postings_no_mutation "
-                    "ON ledger_postings"
-                )
+                text("DROP TRIGGER ledger_postings_no_mutation ON ledger_postings")
             )
             await connection.execute(
-                text(
-                    "DROP TRIGGER journal_entries_no_mutation "
-                    "ON journal_entries"
-                )
+                text("DROP TRIGGER journal_entries_no_mutation ON journal_entries")
             )
             await connection.execute(
-                text(
-                    "DROP TRIGGER audit_records_no_mutation "
-                    "ON audit_records"
-                )
+                text("DROP TRIGGER audit_records_no_mutation ON audit_records")
             )
             await connection.execute(
                 update(LedgerPostingRow)
-                .where(
-                    LedgerPostingRow.posting_id == original.posting_id
-                )
+                .where(LedgerPostingRow.posting_id == original.posting_id)
                 .values(
                     account_code=forged_posting.account_code,
                     posting_hash=forged_posting.posting_hash,
@@ -439,9 +379,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
                 .values(journal_hash=forged_journal.journal_hash)
             )
         async with SqlAlchemyUnitOfWork(self.sessions) as uow:
-            with self.assertRaisesRegex(
-                DomainInvariantViolation, "semantics"
-            ):
+            with self.assertRaisesRegex(DomainInvariantViolation, "semantics"):
                 await rebuild_projections(uow, account_id)
 
     async def test_postgres_rejects_rehashed_shifted_posting_sequences(
@@ -469,29 +407,18 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
         forged_journal_hash = canonical_hash(journal_values)
         async with self.engine.begin() as connection:
             await connection.execute(
-                text(
-                    "DROP TRIGGER ledger_postings_no_mutation "
-                    "ON ledger_postings"
-                )
+                text("DROP TRIGGER ledger_postings_no_mutation ON ledger_postings")
             )
             await connection.execute(
-                text(
-                    "DROP TRIGGER journal_entries_no_mutation "
-                    "ON journal_entries"
-                )
+                text("DROP TRIGGER journal_entries_no_mutation ON journal_entries")
             )
             await connection.execute(
-                text(
-                    "DROP TRIGGER audit_records_no_mutation "
-                    "ON audit_records"
-                )
+                text("DROP TRIGGER audit_records_no_mutation ON audit_records")
             )
             for posting in forged_postings:
                 await connection.execute(
                     update(LedgerPostingRow)
-                    .where(
-                        LedgerPostingRow.posting_id == posting.posting_id
-                    )
+                    .where(LedgerPostingRow.posting_id == posting.posting_id)
                     .values(
                         sequence=posting.sequence,
                         posting_hash=posting.posting_hash,
@@ -508,9 +435,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
                 .values(journal_hash=forged_journal_hash)
             )
         async with SqlAlchemyUnitOfWork(self.sessions) as uow:
-            with self.assertRaisesRegex(
-                DomainInvariantViolation, "posting sequences"
-            ):
+            with self.assertRaisesRegex(DomainInvariantViolation, "posting sequences"):
                 await rebuild_projections(uow, account_id)
 
     async def test_postgres_atomic_rollback(self) -> None:
@@ -528,9 +453,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
                 )
             )
         async with self.sessions() as session:
-            projection = await session.get(
-                AccountProjectionRow, (account_id, "CNY")
-            )
+            projection = await session.get(AccountProjectionRow, (account_id, "CNY"))
             assert projection is not None
             self.assertEqual(projection.frozen, Decimal("0E-8"))
             self.assertEqual(
@@ -552,9 +475,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
             self.service.create_account(create_command()),
         )
         self.assertEqual(first, second)
-        same = freeze_command(
-            first, Decimal("100"), key="same", order="same-order"
-        )
+        same = freeze_command(first, Decimal("100"), key="same", order="same-order")
         result_one, result_two = await asyncio.gather(
             self.service.freeze_cash(same),
             self.service.freeze_cash(same),
@@ -588,31 +509,40 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
     async def test_postgres_rebuild_and_writer_are_serialized(self) -> None:
         account_id = await self.service.create_account(create_command())
         reservation = await self.service.freeze_cash(
-            freeze_command(
-                account_id, Decimal("100"), key="buy-freeze", order="buy"
-            )
+            freeze_command(account_id, Decimal("100"), key="buy-freeze", order="buy")
         )
         await self.service.record_buy_fill(
             buy_command(account_id, reservation, key="buy", order="buy")
         )
-        writer = freeze_command(
-            account_id, Decimal("50"), key="writer", order="writer"
-        )
+        writer = freeze_command(account_id, Decimal("50"), key="writer", order="writer")
 
         async def rebuild() -> str:
             async with SqlAlchemyUnitOfWork(self.sessions) as uow:
                 return await rebuild_projections(uow, account_id)
 
-        checksums = await asyncio.gather(
+        async def event_stream_checksum() -> str:
+            async with SqlAlchemyUnitOfWork(self.sessions) as uow:
+                events = await uow.events.list(account_id)
+            cash, positions, reservations = project_event_stream(events)
+            return projection_checksum(
+                tuple(cash[key] for key in sorted(cash)),
+                tuple(positions[key] for key in sorted(positions)),
+                tuple(reservations[key] for key in sorted(reservations)),
+            )
+
+        before_writer = await event_stream_checksum()
+        first_rebuild, second_rebuild, _reservation_id = await asyncio.gather(
             rebuild(),
             rebuild(),
             self.service.freeze_cash(writer),
         )
-        self.assertEqual(checksums[0], checksums[1])
+        after_writer = await event_stream_checksum()
+        self.assertNotEqual(before_writer, after_writer)
+        self.assertTrue(
+            {first_rebuild, second_rebuild} <= {before_writer, after_writer}
+        )
         async with self.sessions() as session:
-            projection = await session.get(
-                AccountProjectionRow, (account_id, "CNY")
-            )
+            projection = await session.get(AccountProjectionRow, (account_id, "CNY"))
             assert projection is not None
             self.assertEqual(projection.frozen, Decimal("50.00000000"))
             self.assertEqual(
@@ -643,9 +573,7 @@ class PostgresLedgerContractTest(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             with self.assertRaises(DBAPIError):
                 await session.execute(
-                    delete(AccountEventRow).where(
-                        AccountEventRow.event_id == event_id
-                    )
+                    delete(AccountEventRow).where(AccountEventRow.event_id == event_id)
                 )
         async with self.sessions() as session:
             self.assertEqual(

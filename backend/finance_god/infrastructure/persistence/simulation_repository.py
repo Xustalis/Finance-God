@@ -95,7 +95,17 @@ class SimulationRepository:
     ) -> None:
         async with self._lock:
             if draft.record_revision != expected_revision + 1:
-                raise DomainInvariantViolation("draft record revision must advance by one")
+                raise DomainInvariantViolation(
+                    "draft record revision must advance by one"
+                )
+            current_payload = await self._session.scalar(
+                select(SimulationDraftRow.payload_json).where(
+                    SimulationDraftRow.draft_id == draft.draft.draft_id
+                )
+            )
+            if current_payload is not None:
+                current = StoredDraft.model_validate(current_payload)
+                _require_submission_facts_unchanged(current, draft)
             result = await self._session.execute(
                 update(SimulationDraftRow)
                 .where(
@@ -193,6 +203,14 @@ class SimulationRepository:
             assert domain_order is not None
             if domain_order.revision != expected_revision + 1:
                 raise DomainInvariantViolation("order revision must advance by one")
+            current_payload = await self._session.scalar(
+                select(SimulationOrderRow.payload_json).where(
+                    SimulationOrderRow.order_id == domain_order.order_id
+                )
+            )
+            if current_payload is not None:
+                current = StoredOrder.model_validate(current_payload)
+                _require_submission_facts_unchanged(current, order)
             result = await self._session.execute(
                 update(SimulationOrderRow)
                 .where(
@@ -222,6 +240,17 @@ class SimulationRepository:
 
     async def append_fill(self, fill: SimulationFill) -> None:
         async with self._lock:
+            order_row = await self._session.get(SimulationOrderRow, fill.order_id)
+            if order_row is None:
+                raise DomainInvariantViolation("fill order does not exist")
+            draft_row = await self._session.get(
+                SimulationDraftRow,
+                order_row.draft_id,
+            )
+            if draft_row is None:
+                raise DomainInvariantViolation("fill draft does not exist")
+            order = StoredOrder.model_validate(order_row.payload_json)
+            draft = StoredDraft.model_validate(draft_row.payload_json)
             self._session.add(
                 SimulationFillRow(
                     fill_id=fill.fill_id,
@@ -232,6 +261,22 @@ class SimulationRepository:
                     ),
                     occurred_at=fill.occurred_at,
                 )
+            )
+            await self._session.flush()
+            payload = {
+                "owner_id": order.owner_id,
+                "order": order.model_dump(mode="json", exclude_computed_fields=True),
+                "draft": draft.model_dump(mode="json", exclude_computed_fields=True),
+                "fill": fill.model_dump(mode="json", exclude_computed_fields=True),
+            }
+            await self._append_bundle(
+                "fill",
+                fill.fill_id,
+                1,
+                "fill_recorded",
+                payload,
+                order.owner_id,
+                fill.occurred_at,
             )
             await self._session.flush()
 
@@ -319,9 +364,7 @@ class SimulationRepository:
             )
         rows = (
             await self._session.scalars(
-                statement.order_by(
-                    SimulationProtectiveStrategyRow.created_at.desc()
-                )
+                statement.order_by(SimulationProtectiveStrategyRow.created_at.desc())
             )
         ).all()
         return tuple(
@@ -376,7 +419,7 @@ class SimulationRepository:
             .limit(1)
         )
         previous_hash = previous.event_hash if previous else None
-        event_hash = _digest(
+        event_hash = simulation_event_digest(
             {
                 "aggregate_type": aggregate_type,
                 "aggregate_id": aggregate_id,
@@ -443,7 +486,7 @@ def _require_cas(result: object, message: str) -> None:
         raise ConcurrentCommandConflict(message)
 
 
-def _digest(value: object) -> str:
+def simulation_event_digest(value: object) -> str:
     encoded = json.dumps(
         value,
         ensure_ascii=False,
@@ -451,3 +494,16 @@ def _digest(value: object) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _require_submission_facts_unchanged(
+    current: StoredDraft | StoredOrder,
+    updated: StoredDraft | StoredOrder,
+) -> None:
+    if (
+        current.decision_context != updated.decision_context
+        or current.submission_profile_version != updated.submission_profile_version
+    ):
+        raise DomainInvariantViolation(
+            "decision context and submission profile version are immutable"
+        )

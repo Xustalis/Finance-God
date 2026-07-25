@@ -222,6 +222,7 @@ def test_candidate_plan_versions_confirm_and_generate_planned_draft(tmp_path) ->
                         quantity=Decimal("10"),
                     ),
                 ),
+                idempotency_key="revise-candidate-plan-1",
             )
             assert revised.object.revision == 2
             assert revised.object.estimated_fee_rmb == Decimal("4.50")
@@ -258,7 +259,7 @@ def test_candidate_plan_versions_confirm_and_generate_planned_draft(tmp_path) ->
             retried = await service.confirm_and_generate(
                 owner_id="owner-1",
                 plan_id=created.object.plan_id,
-                expected_revision=3,
+                expected_revision=2,
                 idempotency_key="confirm-1",
             )
             assert len(retried.draft_links) == 1
@@ -308,6 +309,7 @@ def test_revise_rejects_stale_plan_revision(tmp_path) -> None:
                         quantity=Decimal("1"),
                     ),
                 ),
+                idempotency_key="revise-candidate-plan-2",
             )
             with pytest.raises(ConcurrentCommandConflict, match="has changed"):
                 await service.revise(
@@ -320,6 +322,7 @@ def test_revise_rejects_stale_plan_revision(tmp_path) -> None:
                             quantity=Decimal("2"),
                         ),
                     ),
+                    idempotency_key="revise-candidate-plan-stale",
                 )
         finally:
             await engine.dispose()

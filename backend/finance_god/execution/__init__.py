@@ -16,6 +16,7 @@ from .contracts import (
     StoredOrderView,
     SubmissionOutcome,
     SubmissionStatus,
+    TradeDecisionContext,
 )
 from .matcher import DeterministicMatcher, MatchResult, SimulationRuleSet
 from .service import SimulationExecutionService
@@ -40,4 +41,5 @@ __all__ = [
     "StoredOrderView",
     "SubmissionOutcome",
     "SubmissionStatus",
+    "TradeDecisionContext",
 ]

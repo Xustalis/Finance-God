@@ -12,6 +12,7 @@ from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
+from finance_god.agents.contracts import WorkflowKey
 from finance_god.domain import (
     AuditReference,
     ConcurrentCommandConflict,
@@ -20,7 +21,6 @@ from finance_god.domain import (
     WorkflowRun,
     WorkflowRunStatus,
 )
-from finance_god.agents.contracts import WorkflowKey
 from finance_god.infrastructure.persistence.workflow_persistence import (
     WorkflowUnitOfWork,
     create_workflow_session_factory,

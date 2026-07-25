@@ -47,9 +47,7 @@ def test_workflow_market_context_derives_index_snapshot_from_daily_bars(
             requested_at=NOW,
             cache_hit=False,
             quotes=(),
-            errors={
-                "000001.SH": "asset class has no verified snapshot endpoint"
-            },
+            errors={"000001.SH": "asset class has no verified snapshot endpoint"},
             diagnostics=(),
             quality={},
         )
@@ -87,9 +85,7 @@ def test_workflow_market_context_derives_index_snapshot_from_daily_bars(
         lambda: (SimpleNamespace(), HistoricalApplication()),
     )
 
-    result = asyncio.run(
-        server._workflow_market_context_quotes(["000001.SH"])
-    )
+    result = asyncio.run(server._workflow_market_context_quotes(["000001.SH"]))
 
     assert result.errors == {}
     assert len(result.quotes) == 1
@@ -181,16 +177,13 @@ def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
     information = asyncio.run(
         server.information_facts(
             _request(
-                b"symbol=600519.SH&start_quarter=2026q1"
-                b"&end_quarter=2026q2&limit=3"
+                b"symbol=600519.SH&start_quarter=2026q1&end_quarter=2026q2&limit=3"
             )
         )
     )
     sentiment = asyncio.run(
         server.sentiment_facts(
-            _request(
-                b"symbol=600519.SH&start_date=20260701&end_date=20260723"
-            )
+            _request(b"symbol=600519.SH&start_date=20260701&end_date=20260723")
         )
     )
     information_payload = _payload(information)
@@ -203,11 +196,7 @@ def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
     assert information_payload["fallback_reason"]
     assert information_payload["symbol"] == "600519.SH"
     assert all(
-        next(
-            field["value"]
-            for field in fact["fields"]
-            if field["name"] == "source"
-        )
+        next(field["value"] for field in fact["fields"] if field["name"] == "source")
         == "Finance-God Mock"
         for fact in information_payload["facts"]
     )
@@ -230,12 +219,8 @@ def test_reference_fact_endpoints_do_not_mock_unsupported_instruments(
     )
     monkeypatch.setattr(server.settings, "market_reference_mock_fallback", True)
 
-    information = asyncio.run(
-        server.information_facts(_request(b"symbol=000001.SH"))
-    )
-    sentiment = asyncio.run(
-        server.sentiment_facts(_request(b"symbol=000001.SH"))
-    )
+    information = asyncio.run(server.information_facts(_request(b"symbol=000001.SH")))
+    sentiment = asyncio.run(server.sentiment_facts(_request(b"symbol=000001.SH")))
     information_payload = _payload(information)
     sentiment_payload = _payload(sentiment)
 
@@ -263,10 +248,7 @@ def test_reference_fact_endpoints_keep_explicit_error_when_mock_is_disabled(
 
     information = asyncio.run(
         server.information_facts(
-            _request(
-                b"symbol=600519.SH&start_quarter=2026q1"
-                b"&end_quarter=2026q2"
-            )
+            _request(b"symbol=600519.SH&start_quarter=2026q1&end_quarter=2026q2")
         )
     )
     sentiment = asyncio.run(server.sentiment_facts(_request(b"symbol=600519.SH")))
@@ -297,7 +279,9 @@ def test_daily_bar_route_uses_adapter_supported_limit(
             )
             return SimpleNamespace(
                 frequency="日频",
-                bars=(),
+                bars=(
+                    SimpleNamespace(model_dump=lambda mode="json": {"close": "10.00"}),
+                ),
                 quality=SimpleNamespace(model_dump=lambda mode="json": {}),
             )
 
@@ -307,9 +291,7 @@ def test_daily_bar_route_uses_adapter_supported_limit(
         lambda: (DailyBarService(), FailingApplication()),
     )
 
-    response = asyncio.run(
-        server.bars(_request(b"symbol=000001.SZ&frequency=daily"))
-    )
+    response = asyncio.run(server.bars(_request(b"symbol=000001.SZ&frequency=daily")))
 
     assert response.status_code == 200
     assert captured == {
@@ -406,9 +388,7 @@ def test_overview_api_returns_latest_open_session_during_weekend(
     monkeypatch.setattr(server, "market_data", service)
     monkeypatch.setattr(server, "market_application", application)
 
-    response = asyncio.run(
-        server.market_overview(_request(b"symbols=000001.SZ"))
-    )
+    response = asyncio.run(server.market_overview(_request(b"symbols=000001.SZ")))
     payload = _payload(response)
 
     assert response.status_code == 200
