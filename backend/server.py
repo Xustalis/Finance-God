@@ -609,6 +609,11 @@ async def bars(request: Request) -> JSONResponse:
             limit=limit,
             frequency_override=frequency_override,
         )
+        if not result.bars:
+            raise MarketDataError(
+                result.error_kind or ErrorKind.EMPTY,
+                result.error_message or "PandaData returned no normalized bars",
+            )
     except (ValueError, ValidationError):
         return _safe_error(
             code="MARKET_DATA_INVALID_REQUEST",

@@ -18,6 +18,7 @@ from .adapter import PandaCredentials, PandaDataAdapter
 from .bar_cache import PersistentBarCache
 from .capabilities import EXPECTED_SDK_VERSION
 from .contracts import (
+    AssetClass,
     DataCategory,
     DataDiagnostic,
     DataEnvelope,
@@ -96,7 +97,7 @@ class MarketQuote(BaseModel):
     capability_version: str
     instrument_master_identity: str
     instrument_master_version: str
-    trade_eligible: Literal[False] = False
+    trade_eligible: bool = False
 
 
 class MarketBar(BaseModel):
@@ -866,6 +867,7 @@ def _quote(item: NormalizedSnapshot) -> MarketQuote:
         capability_version=item.source.capability_version,
         instrument_master_identity=item.source.instrument_master_identity,
         instrument_master_version=item.source.instrument_master_version,
+        trade_eligible=item.instrument.asset_class is AssetClass.EQUITY,
     )
 
 

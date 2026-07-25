@@ -1244,6 +1244,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         instrument_id: input.instrumentId,
         side: input.side,
         quantity: input.quantity,
+        market_mode: simulationClock.value ? 'historical' : 'live',
       }, newIdempotencyKey('simulation-market-order'))
       await loadSimulationData()
       return activeOrder.value

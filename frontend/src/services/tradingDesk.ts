@@ -33,6 +33,7 @@ client.interceptors.response.use(undefined, (error: AxiosError) => {
 export interface DeskQuote {
   symbol: string
   name: string
+  trade_eligible: boolean
   last: number | null
   open?: number | null
   high?: number | null
@@ -74,6 +75,7 @@ export function normalizeDeskQuote(raw: Record<string, unknown>): DeskQuote {
   return {
     symbol: String(raw.symbol ?? ''),
     name: String(raw.name ?? raw.symbol ?? ''),
+    trade_eligible: raw.trade_eligible === true,
     last: parseMarketNumber(raw.last),
     open: parseMarketNumber(raw.open),
     high: parseMarketNumber(raw.high),
@@ -97,15 +99,17 @@ export function normalizeDeskQuote(raw: Record<string, unknown>): DeskQuote {
  * 交易中或已发布收盘（released）且有有效最新价即可；
  * 允许 stale（收盘后缓存），拒绝无价或明确不可用。
  */
-export function canUseQuoteAsDraftReference(quote: Pick<DeskQuote, 'last' | 'freshness' | 'market_status'>): boolean {
+export function canUseQuoteAsDraftReference(quote: Pick<DeskQuote, 'last' | 'freshness' | 'market_status' | 'trade_eligible'>): boolean {
+  if (!quote.trade_eligible) return false
   if (quote.last === null || quote.last <= 0) return false
   if (!['in_session', 'released'].includes(quote.market_status)) return false
   if (['error', 'unavailable', 'missing'].includes(quote.freshness)) return false
   return true
 }
 
-export function draftReferenceBlockedReason(quote: Pick<DeskQuote, 'last' | 'freshness' | 'market_status'> | null | undefined): string {
+export function draftReferenceBlockedReason(quote: Pick<DeskQuote, 'last' | 'freshness' | 'market_status' | 'trade_eligible'> | null | undefined): string {
   if (!quote) return '该标的没有可用的真实行情，无法创建引用价格明确的订单草稿。'
+  if (!quote.trade_eligible) return '该标的是只读市场参考对象，不能用于创建模拟订单。'
   if (quote.last === null || quote.last <= 0) return '该标的没有可用的最新价，无法创建引用价格明确的订单草稿。'
   if (!['in_session', 'released'].includes(quote.market_status)) {
     return `该标的市场状态为 ${quote.market_status}，请等待交易中行情或已发布收盘价后再创建草稿。`
@@ -614,6 +618,7 @@ export interface ImmediateMarketOrderInput {
   instrument_id: string
   side: 'buy' | 'sell'
   quantity: string
+  market_mode: 'live' | 'historical'
 }
 
 export interface SimulationFill {

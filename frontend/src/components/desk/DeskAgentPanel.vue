@@ -596,13 +596,23 @@ watch(prompt, (value) => {
             :disabled="!canSubmit"
             :placeholder="desk.workflowActive ? '任务执行中，仍可提问或加入新任务' : '输入研究问题或任务'"
           />
-          <button class="agent-voice-button" type="button" aria-label="开始语音通话" title="开始语音通话" :disabled="!desk.serverContextVersion" @click="startVoice">
+          <button
+            class="agent-voice-button"
+            type="button"
+            aria-label="开始语音通话"
+            :title="voiceSession.unavailableReason || '开始语音通话'"
+            :disabled="!desk.serverContextVersion || !voiceSession.canStart"
+            @click="startVoice"
+          >
             <Phone :size="19"/>
           </button>
           <button class="agent-send-button" type="submit" aria-label="发送给 Agent" :disabled="!canSubmit || !prompt.trim()">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-7 18-4-8-8-4Z"/><path d="m10 13 4-4"/></svg>
           </button>
         </div>
+        <p v-if="voiceSession.unavailableReason" class="workflow-note" role="status">
+          {{ voiceSession.unavailableReason }}
+        </p>
         <p v-if="voiceSession.error" class="data-error" role="alert">{{ voiceSession.error }}</p>
       </form>
     </div>

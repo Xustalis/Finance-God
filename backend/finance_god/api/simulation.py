@@ -4,7 +4,7 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from starlette.requests import Request
@@ -114,6 +114,7 @@ class ImmediateMarketOrderRequest(APIModel):
     instrument_id: str = Field(min_length=1, max_length=160)
     side: OrderSide
     quantity: Decimal = Field(gt=0)
+    market_mode: Literal["live", "historical"] = "live"
 
 
 class ProtectiveStrategyCreateRequest(APIModel):
@@ -397,24 +398,31 @@ def create_simulation_routes(
             if body.side not in {OrderSide.BUY, OrderSide.SELL}:
                 raise ValueError("immediate market order only supports buy or sell")
             owner_id = await _owner(owner_resolver, request)
-            provider = historical_market_reference_provider
-            if provider is None:
-                if market_reference_provider is None:
+            if body.market_mode == "historical":
+                if historical_market_reference_provider is None:
                     raise SimulationServiceUnavailable(
                         "trusted historical market reference provider is unavailable"
+                    )
+                trusted_price, trusted_version = (
+                    await historical_market_reference_provider(
+                        owner_id, body.instrument_id
+                    )
+                )
+            else:
+                if market_reference_provider is None:
+                    raise SimulationServiceUnavailable(
+                        "trusted live market reference provider is unavailable"
                     )
                 trusted_price, trusted_version = await market_reference_provider(
                     body.instrument_id
                 )
-            else:
-                trusted_price, trusted_version = await provider(
-                    owner_id, body.instrument_id
-                )
-            business_time = (
-                await simulation_clock.current_for_owner(owner_id)
-                if simulation_clock is not None
-                else None
-            )
+            business_time = None
+            if body.market_mode == "historical":
+                if simulation_clock is None:
+                    raise SimulationServiceUnavailable(
+                        "simulation clock is unavailable in historical mode"
+                    )
+                business_time = await simulation_clock.current_for_owner(owner_id)
             execution_args = dict(
                 owner_id=owner_id,
                 account_id=body.account_id,

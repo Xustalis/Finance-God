@@ -160,6 +160,15 @@ export function useRealtimeVoice() {
   const userTranscript = ref('')
   const assistantTranscript = ref('')
   const error = ref('')
+  const unavailableReason = computed(() => {
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      return '当前页面不是 HTTPS 安全连接，浏览器不会开放麦克风；请使用文字输入。'
+    }
+    if (typeof navigator !== 'undefined' && !navigator.mediaDevices?.getUserMedia) {
+      return '当前浏览器不支持麦克风采集，请使用文字输入。'
+    }
+    return ''
+  })
 
   let socket: WebSocket | null = null
   let stream: MediaStream | null = null
@@ -172,7 +181,7 @@ export function useRealtimeVoice() {
   let workletUrl: string | null = null
   let stopping = false
 
-  const canStart = computed(() => phase.value === 'idle' || phase.value === 'error')
+  const canStart = computed(() => !unavailableReason.value && (phase.value === 'idle' || phase.value === 'error'))
 
   function stopPlayback() {
     if (outputContext) void outputContext.close()
@@ -331,6 +340,7 @@ export function useRealtimeVoice() {
 
   return {
     active, muted, phase, statusText, userTranscript, assistantTranscript, error, canStart,
+    unavailableReason,
     start, stop, toggleMute,
   }
 }
