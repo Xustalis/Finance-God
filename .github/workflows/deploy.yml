@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
+  boundary:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,24 @@ jobs:
             --add-host backend:127.0.0.1 \
             -v "$PWD/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
             nginx:1.27-alpine nginx -t
+
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            paths: tests/unit tests/domain tests/application tests/agents tests/learning
+          - name: api
+            paths: tests/api tests/integration tests/e2e
+          - name: trading
+            paths: tests/execution tests/ledger tests/market_data tests/trading tests/trade_reviews
+          - name: workflow
+            paths: tests/workflows tests/workflow_persistence tests/workspace tests/test_multi_agent.py tests/test_workflows.py
+    name: backend (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -40,7 +58,12 @@ jobs:
         env:
           PANDA_DATA_USERNAME: ci-contract-test
           PANDA_DATA_PASSWORD: ci-contract-test
-        run: timeout 60s pytest -q
+        run: timeout 60s pytest -q ${{ matrix.paths }}
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
@@ -53,7 +76,7 @@ jobs:
         run: npm ci && npm test && npm run build
 
   deploy:
-    needs: test
+    needs: [boundary, backend, frontend]
     runs-on: ubuntu-latest
     environment: production
     steps:
