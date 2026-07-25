@@ -15,9 +15,11 @@ _ = settings
 
 pytestmark = pytest.mark.skipif(
     not (
-        os.environ.get("PANDA_DATA_USERNAME") and os.environ.get("PANDA_DATA_PASSWORD")
+        os.environ.get("RUN_PANDADATA_LIVE_SMOKE") == "1"
+        and os.environ.get("PANDA_DATA_USERNAME")
+        and os.environ.get("PANDA_DATA_PASSWORD")
     ),
-    reason="PandaData credentials are required for live market-fact regression",
+    reason="set RUN_PANDADATA_LIVE_SMOKE=1 with credentials for live regression",
 )
 
 

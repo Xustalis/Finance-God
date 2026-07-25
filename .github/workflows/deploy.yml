@@ -37,6 +37,9 @@ jobs:
 
       - name: Test backend
         working-directory: backend
+        env:
+          PANDA_DATA_USERNAME: ci-contract-test
+          PANDA_DATA_PASSWORD: ci-contract-test
         run: timeout 60s pytest -q
 
       - uses: actions/setup-node@v4
