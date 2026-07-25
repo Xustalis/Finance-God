@@ -82,6 +82,7 @@ function formatProviderTime(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value || '时间未知'
   return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

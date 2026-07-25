@@ -166,6 +166,8 @@ jobs:
         env:
           FINANCE_GOD_POSTGRES_TEST_URL: postgresql://finance_god:finance-god-ci@127.0.0.1:5432/finance_god_test
           FINANCE_GOD_TEST_POSTGRES_URL: postgresql+asyncpg://finance_god:finance-god-ci@127.0.0.1:5432/finance_god_test
+          PANDA_DATA_USERNAME: ci-contract-test
+          PANDA_DATA_PASSWORD: ci-contract-test
         run: >-
           timeout --kill-after=5s 60s .venv/bin/pytest -q
           tests/integration/test_postgres_migrations.py
