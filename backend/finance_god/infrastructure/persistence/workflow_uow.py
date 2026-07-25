@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import (
 
 from finance_god.domain import WorkflowRun
 
+from .locks import AggregateLocks
+from .repositories import IdempotencyRepository
 from .uow import create_session_factory
 from .workflow_models import (
     WorkflowAuditRow,
@@ -105,6 +107,8 @@ class WorkflowUnitOfWork:
         else:
             self._transaction = await self._session.begin()
         self.workflows = WorkflowRepository(self._session)
+        self.idempotency = IdempotencyRepository(self._session)
+        self.locks = AggregateLocks(self._session)
         return self
 
     async def __aexit__(

@@ -52,6 +52,18 @@ class TradePlanRepository:
         row = await self._session.get(TradePlanVersionRow, (plan_id, revision))
         return _stored(row) if row is not None else None
 
+    async def get_exact_owned(
+        self, owner_user_id: str, plan_id: str, revision: int
+    ) -> StoredTradePlan | None:
+        row = await self._session.scalar(
+            select(TradePlanVersionRow).where(
+                TradePlanVersionRow.owner_user_id == owner_user_id,
+                TradePlanVersionRow.plan_id == plan_id,
+                TradePlanVersionRow.revision == revision,
+            )
+        )
+        return _stored(row) if row is not None else None
+
     async def get_by_creation_key(
         self, owner_user_id: str, creation_key: str
     ) -> StoredTradePlan | None:

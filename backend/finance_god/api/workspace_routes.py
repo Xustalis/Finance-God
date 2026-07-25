@@ -17,9 +17,11 @@ from finance_god.application.candidate_service import (
     CandidateScoringService,
     candidates_for_profile,
 )
+from finance_god.application.idempotency import canonical_request_hash
 from finance_god.domain.errors import (
     ConcurrentCommandConflict,
     DomainInvariantViolation,
+    IdempotencyConflict,
 )
 from finance_god.domain.models import (
     NotificationCategory,
@@ -68,6 +70,7 @@ class NotificationPreferenceUpdate(APIModel):
 CandidateServiceProvider = Callable[[], CandidateScoringService]
 CandidateProfileProvider = Callable[[str], Awaitable[dict | None]]
 Model = TypeVar("Model", bound=APIModel)
+IDEMPOTENCY_HEADER = "idempotency-key"
 
 
 def create_workspace_routes(
@@ -95,20 +98,29 @@ def create_workspace_routes(
         async def action() -> object:
             body = await _body(request, WatchlistGroupCreate)
             owner_user_id = await _owner(owner_resolver, request)
-            now = datetime.now(UTC)
-            group = WatchlistGroup(
-                group_id=str(uuid.uuid4()),
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
+                now = datetime.now(UTC)
+                return await uow.watchlists.create_group(
+                    WatchlistGroup(
+                        group_id=str(uuid.uuid4()),
+                        owner_user_id=owner_user_id,
+                        name=body.name,
+                        description=body.description,
+                        revision=1,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
                 owner_user_id=owner_user_id,
-                name=body.name,
-                description=body.description,
-                revision=1,
-                created_at=now,
-                updated_at=now,
+                scope="workspace.watchlist.create",
+                payload=body.model_dump(mode="json"),
+                mutate=mutate,
             )
-            async with WorkspaceUnitOfWork(session_factory) as uow:
-                created = await uow.watchlists.create_group(group)
-                await uow.commit()
-                return created
 
         return await _respond(action, success_status=201)
 
@@ -116,7 +128,8 @@ def create_workspace_routes(
         async def action() -> object:
             body = await _body(request, WatchlistGroupUpdate)
             owner_user_id = await _owner(owner_resolver, request)
-            async with WorkspaceUnitOfWork(session_factory) as uow:
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
                 group = await uow.watchlists.get_group(
                     owner_user_id, request.path_params["group_id"]
                 )
@@ -128,8 +141,16 @@ def create_workspace_routes(
                     ),
                     expected_revision=body.expected_revision,
                 )
-                await uow.commit()
                 return updated
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
+                owner_user_id=owner_user_id,
+                scope="workspace.watchlist.update",
+                payload=body.model_dump(mode="json"),
+                mutate=mutate,
+            )
 
         return await _respond(action)
 
@@ -137,15 +158,23 @@ def create_workspace_routes(
         async def action() -> object:
             body = await _body(request, WatchlistInstrumentCreate)
             owner_user_id = await _owner(owner_resolver, request)
-            async with WorkspaceUnitOfWork(session_factory) as uow:
-                instrument = await uow.watchlists.add_instrument(
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
+                return await uow.watchlists.add_instrument(
                     owner_user_id=owner_user_id,
                     group_id=request.path_params["group_id"],
                     instrument_id=body.instrument_id,
                     added_by=owner_user_id,
                 )
-                await uow.commit()
-                return instrument
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
+                owner_user_id=owner_user_id,
+                scope="workspace.watchlist.instrument.add",
+                payload=body.model_dump(mode="json"),
+                mutate=mutate,
+            )
 
         return await _respond(action, success_status=201)
 
@@ -163,7 +192,8 @@ def create_workspace_routes(
         async def action() -> object:
             body = await _body(request, WatchlistGroupDelete)
             owner_user_id = await _owner(owner_resolver, request)
-            async with WorkspaceUnitOfWork(session_factory) as uow:
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
                 group = await uow.watchlists.get_group(
                     owner_user_id, request.path_params["group_id"]
                 )
@@ -174,26 +204,43 @@ def create_workspace_routes(
                     request.path_params["group_id"],
                     expected_revision=body.expected_revision,
                 )
-                await uow.commit()
                 return {"group_id": request.path_params["group_id"], "deleted": True}
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
+                owner_user_id=owner_user_id,
+                scope="workspace.watchlist.delete",
+                payload=body.model_dump(mode="json"),
+                mutate=mutate,
+            )
 
         return await _respond(action)
 
     async def remove_watchlist_instrument(request: Request) -> JSONResponse:
         async def action() -> object:
             owner_user_id = await _owner(owner_resolver, request)
-            async with WorkspaceUnitOfWork(session_factory) as uow:
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
                 await uow.watchlists.remove_instrument(
                     owner_user_id,
                     request.path_params["group_id"],
                     request.path_params["instrument_id"],
                 )
-                await uow.commit()
                 return {
                     "group_id": request.path_params["group_id"],
                     "instrument_id": request.path_params["instrument_id"],
                     "removed": True,
                 }
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
+                owner_user_id=owner_user_id,
+                scope="workspace.watchlist.instrument.remove",
+                payload={},
+                mutate=mutate,
+            )
 
         return await _respond(action)
 
@@ -226,30 +273,47 @@ def create_workspace_routes(
         async def action() -> object:
             body = await _body(request, CandidateIgnoreCreate)
             owner_user_id = await _owner(owner_resolver, request)
-            async with WorkspaceUnitOfWork(session_factory) as uow:
-                ignored = await uow.candidate_ignores.upsert(
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
+                return await uow.candidate_ignores.upsert(
                     owner_user_id=owner_user_id,
                     instrument_id=request.path_params["instrument_id"],
                     reason=body.reason,
                     note=body.note,
                 )
-                await uow.commit()
-                return ignored
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
+                owner_user_id=owner_user_id,
+                scope="workspace.candidate.ignore",
+                payload=body.model_dump(mode="json"),
+                mutate=mutate,
+            )
 
         return await _respond(action, success_status=201)
 
     async def unignore_candidate(request: Request) -> JSONResponse:
         async def action() -> object:
             owner_user_id = await _owner(owner_resolver, request)
-            async with WorkspaceUnitOfWork(session_factory) as uow:
+
+            async def mutate(uow: WorkspaceUnitOfWork) -> object:
                 await uow.candidate_ignores.remove(
                     owner_user_id, request.path_params["instrument_id"]
                 )
-                await uow.commit()
                 return {
                     "instrument_id": request.path_params["instrument_id"],
                     "ignored": False,
                 }
+
+            return await _idempotent_workspace_command(
+                session_factory=session_factory,
+                request=request,
+                owner_user_id=owner_user_id,
+                scope="workspace.candidate.unignore",
+                payload={},
+                mutate=mutate,
+            )
 
         return await _respond(action)
 
@@ -402,6 +466,64 @@ async def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
     return owner_user_id
 
 
+async def _idempotent_workspace_command(
+    *,
+    session_factory: Callable[[], AsyncSession],
+    request: Request,
+    owner_user_id: str,
+    scope: str,
+    payload: object,
+    mutate: Callable[[WorkspaceUnitOfWork], Awaitable[object]],
+) -> object:
+    key = _idempotency_key(request)
+    request_hash = _request_hash(request, payload)
+    async with WorkspaceUnitOfWork(session_factory) as uow:
+        await uow.locks.owner(owner_user_id)
+        prior = await uow.idempotency.get(scope, owner_user_id, key)
+        if prior is not None:
+            if prior.request_hash != request_hash:
+                raise IdempotencyConflict(
+                    "idempotency key was already used with a different request"
+                )
+            if prior.response_json is None:
+                raise RuntimeError("workspace idempotency response is missing")
+            return prior.response_json
+
+        result = await mutate(uow)
+        response_json = _json_value(result)
+        await uow.idempotency.add(
+            scope=scope,
+            owner_user_id=owner_user_id,
+            key=key,
+            request_hash=request_hash,
+            result_reference=key,
+            response_json=response_json,
+            created_at=datetime.now(UTC),
+        )
+        await uow.flush()
+        await uow.commit()
+        return result
+
+
+def _idempotency_key(request: Request) -> str:
+    key = request.headers.get(IDEMPOTENCY_HEADER, "").strip()
+    if not key:
+        raise ValueError(f"{IDEMPOTENCY_HEADER} is required")
+    if len(key) > 160:
+        raise ValueError(f"{IDEMPOTENCY_HEADER} must not exceed 160 characters")
+    return key
+
+
+def _request_hash(request: Request, payload: object) -> str:
+    return canonical_request_hash(
+        {
+            "method": request.method,
+            "path": request.url.path,
+            "payload": payload,
+        }
+    )
+
+
 async def _respond(
     action: Callable[[], Awaitable[object]], *, success_status: int = 200
 ) -> JSONResponse:
@@ -415,6 +537,8 @@ async def _respond(
         return _error("NOT_FOUND", str(error), 404)
     except LookupError as error:
         return _error("NOT_FOUND", str(error), 404)
+    except IdempotencyConflict as error:
+        return _error("IDEMPOTENCY_CONFLICT", str(error), 409)
     except ConcurrentCommandConflict as error:
         return _error("REVISION_CONFLICT", str(error), 409)
     except DomainInvariantViolation as error:

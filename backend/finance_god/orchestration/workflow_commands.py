@@ -201,7 +201,13 @@ class WorkflowCommandPort(Protocol):
     ) -> tuple[tuple[dict[str, object], ...], str | None]: ...
 
     async def cancel(
-        self, run_id: str, *, actor_id: str, cancelled_at: datetime
+        self,
+        run_id: str,
+        *,
+        actor_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        cancelled_at: datetime,
     ) -> WorkflowRun: ...
 
     async def retry(

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from finance_god.domain import IdempotencyConflict
 from finance_god.domain.models import WorkflowRun
 from finance_god.infrastructure.persistence.workflow_persistence import (
     WorkflowUnitOfWork,
@@ -122,10 +123,24 @@ class WorkflowCommandRuntime:
         run_id: str,
         *,
         actor_id: str,
+        idempotency_key: str,
+        request_hash: str,
         cancelled_at: datetime,
     ) -> WorkflowRun:
         self._ensure_open()
         async with WorkflowUnitOfWork(self._session_factory) as uow:
+            await uow.locks.owner(actor_id)
+            prior = await uow.idempotency.get(
+                "workflow.cancel", actor_id, idempotency_key
+            )
+            if prior is not None:
+                if prior.request_hash != request_hash:
+                    raise IdempotencyConflict(
+                        "idempotency key was already used with a different request"
+                    )
+                if prior.response_json is None:
+                    raise RuntimeError("workflow cancel response is missing")
+                return WorkflowRun.model_validate(prior.response_json)
             service = WorkflowCommandService(
                 registry=self._registry,
                 repository=uow.workflows,
@@ -135,6 +150,15 @@ class WorkflowCommandRuntime:
                 run_id,
                 actor_id=actor_id,
                 cancelled_at=cancelled_at,
+            )
+            await uow.idempotency.add(
+                scope="workflow.cancel",
+                owner_user_id=actor_id,
+                key=idempotency_key,
+                request_hash=request_hash,
+                result_reference=run.run_id,
+                response_json=run.model_dump(mode="json"),
+                created_at=cancelled_at,
             )
             await uow.commit()
             return run

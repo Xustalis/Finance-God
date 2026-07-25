@@ -21,6 +21,7 @@ class IdempotencyRecord(Protocol):
     key: str
     request_hash: str
     result_reference: str
+    response_json: object | None
 
 
 class AccountRepository(Protocol):
@@ -95,6 +96,7 @@ class IdempotencyRepository(Protocol):
         request_hash: str,
         result_reference: str,
         created_at: datetime,
+        response_json: object | None = None,
     ) -> None: ...
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -14,6 +13,7 @@ from starlette.routing import Route
 
 from finance_god.api.auth import AuthenticationError, OwnerResolver
 from finance_god.application.decision_inbox import DecisionInboxService
+from finance_god.application.idempotency import canonical_request_hash
 from finance_god.application.portfolio_query import PortfolioQueryService
 from finance_god.application.simulation_clock import (
     SimulationClockService,
@@ -22,6 +22,7 @@ from finance_god.application.simulation_clock import (
 from finance_god.domain import (
     ConcurrentCommandConflict,
     DomainInvariantViolation,
+    IdempotencyConflict,
     OrderSide,
     OrderType,
     TimeInForce,
@@ -509,6 +510,10 @@ def create_simulation_routes(
             return await execution.cancel_protective_strategy(
                 owner_id=await _owner(owner_resolver, request),
                 strategy_id=request.path_params["strategy_id"],
+                idempotency_key=_idempotency_key(request),
+                request_hash=_request_hash(
+                    {"strategy_id": request.path_params["strategy_id"]}
+                ),
             )
 
         return await _respond(action)
@@ -530,6 +535,13 @@ def create_simulation_routes(
                 owner_id=await _owner(owner_resolver, request),
                 draft_id=request.path_params["draft_id"],
                 expected_revision=body.expected_revision,
+                idempotency_key=_idempotency_key(request),
+                request_hash=_request_hash(
+                    {
+                        "draft_id": request.path_params["draft_id"],
+                        **body.model_dump(mode="json"),
+                    }
+                ),
             )
 
         return await _respond(action)
@@ -541,6 +553,13 @@ def create_simulation_routes(
                 owner_id=await _owner(owner_resolver, request),
                 draft_id=request.path_params["draft_id"],
                 seen_reason_hash=body.seen_reason_hash,
+                idempotency_key=_idempotency_key(request),
+                request_hash=_request_hash(
+                    {
+                        "draft_id": request.path_params["draft_id"],
+                        **body.model_dump(mode="json"),
+                    }
+                ),
             )
 
         return await _respond(action)
@@ -553,6 +572,13 @@ def create_simulation_routes(
                 draft_id=request.path_params["draft_id"],
                 expected_revision=body.expected_revision,
                 seen_summary_hash=body.seen_summary_hash,
+                idempotency_key=_idempotency_key(request),
+                request_hash=_request_hash(
+                    {
+                        "draft_id": request.path_params["draft_id"],
+                        **body.model_dump(mode="json"),
+                    }
+                ),
             )
 
         return await _respond(action)
@@ -613,6 +639,10 @@ def create_simulation_routes(
             stored = await execution.reconcile(
                 owner_id=owner_id,
                 order_id=request.path_params["order_id"],
+                idempotency_key=_idempotency_key(request),
+                request_hash=_request_hash(
+                    {"order_id": request.path_params["order_id"]}
+                ),
             )
             return await execution.get_order_view(
                 owner_id=owner_id,
@@ -627,6 +657,10 @@ def create_simulation_routes(
             return await execution.cancel(
                 owner_id=owner_id,
                 order_id=request.path_params["order_id"],
+                idempotency_key=_idempotency_key(request),
+                request_hash=_request_hash(
+                    {"order_id": request.path_params["order_id"]}
+                ),
             )
 
         return await _respond(action)
@@ -717,13 +751,7 @@ def _idempotency_key(request: Request) -> str:
 
 def _request_hash(value: BaseModel | dict[str, object]) -> str:
     payload = value.model_dump(mode="json") if isinstance(value, BaseModel) else value
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_request_hash(payload)
 
 
 async def _respond(
@@ -742,6 +770,8 @@ async def _respond(
         return _error("UNAUTHORIZED", str(error), 401)
     except (LookupError, PermissionError) as error:
         return _error("NOT_FOUND", str(error), 404)
+    except IdempotencyConflict as error:
+        return _error("IDEMPOTENCY_CONFLICT", str(error), 409)
     except ConcurrentCommandConflict as error:
         return _error("REVISION_CONFLICT", str(error), 409)
     except DomainInvariantViolation as error:

@@ -3,6 +3,7 @@ from .errors import (
     ActiveWorkflowConflict,
     ConcurrentCommandConflict,
     DomainInvariantViolation,
+    IdempotencyConflict,
     InvalidStateTransition,
 )
 from .ledger import (
@@ -91,6 +92,7 @@ __all__ = [
     "CashReservedPayload",
     "ConcurrentCommandConflict",
     "DomainInvariantViolation",
+    "IdempotencyConflict",
     "ExchangeOrder",
     "ExchangeOrderStatus",
     "FundOrder",

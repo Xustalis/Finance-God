@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Table,
@@ -402,6 +403,7 @@ class IdempotencyRow(Base):
     key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     result_reference: Mapped[str] = mapped_column(String(160), nullable=False)
+    response_json: Mapped[object | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 

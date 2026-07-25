@@ -20,6 +20,10 @@ class ConcurrentCommandConflict(DomainError):
     """Raised when an aggregate or projection revision changed concurrently."""
 
 
+class IdempotencyConflict(ConcurrentCommandConflict):
+    """Raised when one idempotency key is reused for a different command."""
+
+
 class ActiveWorkflowConflict(ConcurrentCommandConflict):
     """Raised when an owner already has a non-terminal workflow run."""
 

@@ -6,6 +6,8 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .locks import AggregateLocks
+from .repositories import IdempotencyRepository
 from .workspace_repository import (
     IgnoredCandidateRepository,
     NotificationPreferenceRepository,
@@ -30,6 +32,8 @@ class WorkspaceUnitOfWork:
         self.candidate_ignores = IgnoredCandidateRepository(self._session)
         self.notifications = NotificationRepository(self._session)
         self.preferences = NotificationPreferenceRepository(self._session)
+        self.idempotency = IdempotencyRepository(self._session)
+        self.locks = AggregateLocks(self._session)
         return self
 
     async def __aexit__(

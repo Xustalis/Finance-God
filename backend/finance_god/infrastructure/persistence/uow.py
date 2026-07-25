@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Self
 
-from sqlalchemy import event, select, text
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -48,7 +48,7 @@ from finance_god.application.ports import (
     ReservationRepository as ReservationRepositoryPort,
 )
 
-from .models import AccountRow
+from .locks import AggregateLocks
 from .repositories import (
     AccountProjectionRepository,
     AccountRepository,
@@ -78,27 +78,6 @@ def create_session_factory(
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
     return engine, async_sessionmaker(engine, expire_on_commit=False)
-
-
-class AggregateLocks:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    async def owner(self, owner_user_id: str) -> None:
-        if self._session.bind and self._session.bind.dialect.name == "postgresql":
-            await self._session.execute(
-                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-                {"key": f"owner:{owner_user_id}"},
-            )
-
-    async def account(self, account_id: str) -> None:
-        row = await self._session.scalar(
-            select(AccountRow.account_id)
-            .where(AccountRow.account_id == account_id)
-            .with_for_update()
-        )
-        if row is None:
-            return
 
 
 class SqlAlchemyUnitOfWork:

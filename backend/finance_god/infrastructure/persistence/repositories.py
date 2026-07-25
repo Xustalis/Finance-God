@@ -413,6 +413,7 @@ class IdempotencyRepository:
         request_hash: str,
         result_reference: str,
         created_at: datetime,
+        response_json: object | None = None,
     ) -> None:
         self._session.add(
             IdempotencyRow(
@@ -421,6 +422,7 @@ class IdempotencyRepository:
                 key=key,
                 request_hash=request_hash,
                 result_reference=result_reference,
+                response_json=response_json,
                 created_at=created_at,
             )
         )

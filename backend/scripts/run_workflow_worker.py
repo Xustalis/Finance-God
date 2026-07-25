@@ -29,6 +29,10 @@ from finance_god.application.candidate_service import (
     candidates_for_profile,
 )
 from finance_god.application.evidence_service import EvidenceService
+from finance_god.application.idempotency import (
+    canonical_request_hash,
+    stable_idempotency_key,
+)
 from finance_god.application.ledger_service import SimulationLedgerService
 from finance_god.application.mandate_service import MandateService
 from finance_god.application.portfolio_query import PortfolioQueryService
@@ -228,10 +232,19 @@ async def _run(args: argparse.Namespace) -> None:
         draft_id: str,
         expected_revision: int,
     ):
+        command = {
+            "draft_id": draft_id,
+            "expected_revision": expected_revision,
+        }
         return await execution.review(
             owner_id=owner_id,
             draft_id=draft_id,
             expected_revision=expected_revision,
+            idempotency_key=stable_idempotency_key(
+                "workflow-draft-review",
+                {"owner_id": owner_id, **command},
+            ),
+            request_hash=canonical_request_hash(command),
         )
 
     async def record_evidence(

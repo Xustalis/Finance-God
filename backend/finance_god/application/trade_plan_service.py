@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -13,11 +11,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finance_god.application.candidate_service import CandidateResponse
+from finance_god.application.idempotency import (
+    canonical_request_hash,
+    stable_idempotency_key,
+)
 from finance_god.application.portfolio_query import PortfolioPosition, PortfolioView
 from finance_god.domain import (
     AuditReference,
     ConcurrentCommandConflict,
     DomainInvariantViolation,
+    IdempotencyConflict,
     OrderSide,
     OrderType,
     TimeInForce,
@@ -292,7 +295,26 @@ class TradePlanService:
         plan_id: str,
         expected_revision: int,
         actions: tuple[TradePlanActionRevision, ...],
+        idempotency_key: str,
     ) -> TradePlanPageView:
+        request_hash = canonical_request_hash(
+            {
+                "plan_id": plan_id,
+                "expected_revision": expected_revision,
+                "actions": [
+                    action.model_dump(mode="json") for action in actions
+                ],
+            }
+        )
+        replay = await self._receipt_plan(
+            scope="trade_plan.revise",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return await self._view(replay)
+
         stored = await self._require_latest(owner_id, plan_id)
         if stored.plan.revision != expected_revision:
             raise ConcurrentCommandConflict(
@@ -347,7 +369,35 @@ class TradePlanService:
                 previous_status=stored.data_status,
             ),
         )
-        await self._insert(next_stored)
+        async with TradePlanUnitOfWork(self._session_factory) as uow:
+            await uow.locks.owner(owner_id)
+            replay = await self._receipt_plan_in_uow(
+                uow=uow,
+                scope="trade_plan.revise",
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+            if replay is not None:
+                return await self._view(replay)
+            latest = await uow.plans.get_latest(owner_id, plan_id)
+            if latest is None:
+                raise LookupError("trade plan not found")
+            if latest.plan.revision != expected_revision:
+                raise ConcurrentCommandConflict(
+                    "trade plan has changed since it was loaded"
+                )
+            await uow.plans.insert(next_stored)
+            await self._record_receipt(
+                uow=uow,
+                scope="trade_plan.revise",
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                stored=next_stored,
+            )
+            await uow.flush()
+            await uow.commit()
         return await self._view(next_stored)
 
     async def confirm_and_generate(
@@ -358,69 +408,79 @@ class TradePlanService:
         expected_revision: int,
         idempotency_key: str,
     ) -> TradePlanPageView:
-        stored = await self._require_latest(owner_id, plan_id)
-        plan = stored.plan
-        if plan.revision != expected_revision:
-            raise ConcurrentCommandConflict(
-                "trade plan has changed since it was loaded"
-            )
-        reason = _confirmation_block(plan, stored.data_status, self._clock.now())
-        if reason is not None:
-            raise DomainInvariantViolation(reason)
-        if plan.status is TradePlanStatus.PENDING_REVIEW:
-            confirmed = plan.transition(
-                TradePlanStatus.CONFIRMED,
-                audit_reference=self._audit(owner_id, self._clock.now()),
-            )
-            stored = StoredTradePlan(
-                owner_user_id=stored.owner_user_id,
-                source_type=stored.source_type,
-                source_id=stored.source_id,
-                plan=confirmed,
-                data_status=stored.data_status,
-            )
-            await self._insert(stored)
-            plan = confirmed
-        elif plan.status is not TradePlanStatus.CONFIRMED:
-            raise DomainInvariantViolation("trade plan cannot generate drafts")
-
-        existing_links = {
-            link.action_id: link
-            for link in await self._draft_links(plan.plan_id, plan.revision)
-        }
-        plan_reference = VersionReference(
-            object_type="trade_plan",
-            object_id=plan.plan_id,
-            version=str(plan.revision),
+        request_hash = canonical_request_hash(
+            {
+                "plan_id": plan_id,
+                "expected_revision": expected_revision,
+            }
         )
-        for action in plan.actions:
-            if not action.included or action.action_id in existing_links:
-                continue
-            created = await self._drafts.create_order_draft(
-                owner_id=owner_id,
-                mode=DraftMode.PLANNED,
-                account_id=plan.account_id,
-                instrument_id=action.instrument_id,
-                side=OrderSide(action.side),
-                order_type=OrderType(action.order_type),
-                quantity=action.quantity,
-                amount=None,
-                limit_price=action.limit_price,
-                time_in_force=TimeInForce(action.time_in_force),
-                fund_rule_version=None,
-                valid_until=plan.expires_at,
-                input_versions=plan.input_versions + (plan_reference,),
-                plan_reference=plan_reference,
-                idempotency_key=f"{idempotency_key}:{action.action_id}",
-                request_hash=_request_hash(plan_reference, action),
-                reference_price=action.reference_price,
-            )
-            await self._link_draft(
-                plan=plan,
-                action_id=action.action_id,
-                draft_id=created.draft.draft_id,
-                draft_revision=created.draft.revision,
-            )
+        stored = await self._receipt_plan(
+            scope="trade_plan.confirm_generate",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if stored is None:
+            async with TradePlanUnitOfWork(self._session_factory) as uow:
+                await uow.locks.owner(owner_id)
+                stored = await self._receipt_plan_in_uow(
+                    uow=uow,
+                    scope="trade_plan.confirm_generate",
+                    owner_id=owner_id,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                )
+                if stored is None:
+                    latest = await uow.plans.get_latest(owner_id, plan_id)
+                    if latest is None:
+                        raise LookupError("trade plan not found")
+                    plan = latest.plan
+                    recovering_confirmed = (
+                        plan.status is TradePlanStatus.CONFIRMED
+                        and plan.revision in {expected_revision, expected_revision + 1}
+                    )
+                    if plan.revision != expected_revision and not recovering_confirmed:
+                        raise ConcurrentCommandConflict(
+                            "trade plan has changed since it was loaded"
+                        )
+                    reason = _confirmation_block(
+                        plan, latest.data_status, self._clock.now()
+                    )
+                    if reason is not None:
+                        raise DomainInvariantViolation(reason)
+                    if plan.status is TradePlanStatus.PENDING_REVIEW:
+                        confirmed = plan.transition(
+                            TradePlanStatus.CONFIRMED,
+                            audit_reference=self._audit(
+                                owner_id, self._clock.now()
+                            ),
+                        )
+                        stored = StoredTradePlan(
+                            owner_user_id=latest.owner_user_id,
+                            source_type=latest.source_type,
+                            source_id=latest.source_id,
+                            plan=confirmed,
+                            data_status=latest.data_status,
+                        )
+                        await uow.plans.insert(stored)
+                    elif plan.status is TradePlanStatus.CONFIRMED:
+                        stored = latest
+                    else:
+                        raise DomainInvariantViolation(
+                            "trade plan cannot generate drafts"
+                        )
+                    await self._record_receipt(
+                        uow=uow,
+                        scope="trade_plan.confirm_generate",
+                        owner_id=owner_id,
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        stored=stored,
+                    )
+                    await uow.flush()
+                    await uow.commit()
+
+        await self._ensure_draft_links(owner_id=owner_id, stored=stored)
         return await self._view(stored)
 
     def _new_plan(
@@ -477,6 +537,150 @@ class TradePlanService:
             )
         return quotes
 
+    async def _receipt_plan(
+        self,
+        *,
+        scope: str,
+        owner_id: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> StoredTradePlan | None:
+        async with TradePlanUnitOfWork(self._session_factory) as uow:
+            await uow.locks.owner(owner_id)
+            return await self._receipt_plan_in_uow(
+                uow=uow,
+                scope=scope,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
+
+    async def _receipt_plan_in_uow(
+        self,
+        *,
+        uow: TradePlanUnitOfWork,
+        scope: str,
+        owner_id: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> StoredTradePlan | None:
+        prior = await uow.idempotency.get(scope, owner_id, idempotency_key)
+        if prior is None:
+            return None
+        if prior.request_hash != request_hash:
+            raise IdempotencyConflict(
+                "idempotency key was already used with a different request"
+            )
+        payload = prior.response_json
+        if not isinstance(payload, dict):
+            raise RuntimeError("trade plan idempotency response is missing")
+        replay_plan_id = payload.get("plan_id")
+        replay_revision = payload.get("revision")
+        if not isinstance(replay_plan_id, str) or not isinstance(
+            replay_revision, int
+        ):
+            raise RuntimeError("trade plan idempotency response is invalid")
+        stored = await uow.plans.get_exact_owned(
+            owner_id, replay_plan_id, replay_revision
+        )
+        if stored is None:
+            raise RuntimeError("trade plan idempotency target is missing")
+        return stored
+
+    async def _record_receipt(
+        self,
+        *,
+        uow: TradePlanUnitOfWork,
+        scope: str,
+        owner_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        stored: StoredTradePlan,
+    ) -> None:
+        await uow.idempotency.add(
+            scope=scope,
+            owner_user_id=owner_id,
+            key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=stored.plan.plan_id,
+            response_json={
+                "plan_id": stored.plan.plan_id,
+                "revision": stored.plan.revision,
+            },
+            created_at=self._clock.now(),
+        )
+
+    async def _ensure_draft_links(
+        self, *, owner_id: str, stored: StoredTradePlan
+    ) -> None:
+        plan = stored.plan
+        plan_reference = VersionReference(
+            object_type="trade_plan",
+            object_id=plan.plan_id,
+            version=str(plan.revision),
+        )
+        async with TradePlanUnitOfWork(self._session_factory) as uow:
+            await uow.locks.owner(owner_id)
+            confirmed = await uow.plans.get_exact_owned(
+                owner_id, plan.plan_id, plan.revision
+            )
+            if (
+                confirmed is None
+                or confirmed.plan.status is not TradePlanStatus.CONFIRMED
+            ):
+                raise DomainInvariantViolation(
+                    "confirmed trade plan version is unavailable"
+                )
+            existing_links = {
+                link.action_id: link
+                for link in await uow.plans.list_draft_links(
+                    plan.plan_id, plan.revision
+                )
+            }
+            changed = False
+            for action in plan.actions:
+                if not action.included or action.action_id in existing_links:
+                    continue
+                draft_key = stable_idempotency_key(
+                    "trade-plan-draft",
+                    {
+                        "owner_id": owner_id,
+                        "plan_id": plan.plan_id,
+                        "plan_revision": plan.revision,
+                        "action_id": action.action_id,
+                    },
+                )
+                created = await self._drafts.create_order_draft(
+                    owner_id=owner_id,
+                    mode=DraftMode.PLANNED,
+                    account_id=plan.account_id,
+                    instrument_id=action.instrument_id,
+                    side=OrderSide(action.side),
+                    order_type=OrderType(action.order_type),
+                    quantity=action.quantity,
+                    amount=None,
+                    limit_price=action.limit_price,
+                    time_in_force=TimeInForce(action.time_in_force),
+                    fund_rule_version=None,
+                    valid_until=plan.expires_at,
+                    input_versions=plan.input_versions + (plan_reference,),
+                    plan_reference=plan_reference,
+                    idempotency_key=draft_key,
+                    request_hash=_request_hash(plan_reference, action),
+                    reference_price=action.reference_price,
+                )
+                await uow.plans.add_draft_link(
+                    plan_id=plan.plan_id,
+                    plan_revision=plan.revision,
+                    action_id=action.action_id,
+                    draft_id=created.draft.draft_id,
+                    draft_revision=created.draft.revision,
+                    created_at=self._clock.now(),
+                )
+                changed = True
+            if changed:
+                await uow.commit()
+
     async def _insert(
         self, stored: StoredTradePlan, *, creation_key: str | None = None
     ) -> None:
@@ -498,31 +702,6 @@ class TradePlanService:
         if stored is None:
             raise LookupError("trade plan not found")
         return stored
-
-    async def _draft_links(
-        self, plan_id: str, revision: int
-    ) -> tuple[TradePlanDraftLink, ...]:
-        async with TradePlanUnitOfWork(self._session_factory) as uow:
-            return await uow.plans.list_draft_links(plan_id, revision)
-
-    async def _link_draft(
-        self,
-        *,
-        plan: TradePlan,
-        action_id: str,
-        draft_id: str,
-        draft_revision: int,
-    ) -> None:
-        async with TradePlanUnitOfWork(self._session_factory) as uow:
-            await uow.plans.add_draft_link(
-                plan_id=plan.plan_id,
-                plan_revision=plan.revision,
-                action_id=action_id,
-                draft_id=draft_id,
-                draft_revision=draft_revision,
-                created_at=self._clock.now(),
-            )
-            await uow.commit()
 
     async def _view(self, stored: StoredTradePlan) -> TradePlanPageView:
         history: list[StoredTradePlan]
@@ -740,9 +919,9 @@ def _warnings(
 def _request_hash(
     plan_reference: VersionReference, action: TradePlanAction
 ) -> str:
-    payload = {
-        "plan_reference": plan_reference.model_dump(mode="json"),
-        "action": action.model_dump(mode="json"),
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_request_hash(
+        {
+            "plan_reference": plan_reference.model_dump(mode="json"),
+            "action": action.model_dump(mode="json"),
+        }
+    )

@@ -10,14 +10,20 @@ from functools import wraps
 from types import TracebackType
 from typing import ParamSpec, Protocol, Self, TypeVar
 
+from finance_god.application.ports import (
+    AggregateLockRepository,
+    IdempotencyRepository,
+)
 from finance_god.domain import (
     AuditReference,
+    DomainInvariantViolation,
     ExchangeOrder,
     ExchangeOrderStatus,
     OrderDraft,
     OrderDraftStatus,
     OrderSide,
     OrderType,
+    IdempotencyConflict,
     RiskCheckResult,
     RiskCheckStatus,
     TimeInForce,
@@ -57,6 +63,8 @@ R = TypeVar("R")
 
 class ExecutionUnitOfWork(Protocol):
     repository: ExecutionRepositoryPort
+    idempotency: IdempotencyRepository
+    locks: AggregateLockRepository
 
     async def __aenter__(self) -> Self: ...
 
@@ -92,12 +100,14 @@ def _transactional(
                 return await method(*args, **kwargs)
             async with service._uow_factory() as uow:
                 token = service._active_repository.set(uow.repository)
+                uow_token = service._active_uow.set(uow)
                 try:
                     result = await method(*args, **kwargs)
                     if commit:
                         await uow.commit()
                     return result
                 finally:
+                    service._active_uow.reset(uow_token)
                     service._active_repository.reset(token)
 
         return wrapped
@@ -131,6 +141,9 @@ class SimulationExecutionService:
         self._active_repository: ContextVar[
             ExecutionRepositoryPort | None
         ] = ContextVar("simulation_execution_repository", default=None)
+        self._active_uow: ContextVar[ExecutionUnitOfWork | None] = ContextVar(
+            "simulation_execution_uow", default=None
+        )
         self._accounts = accounts
         self._plans = plans
         self._manual_review = manual_review
@@ -415,8 +428,21 @@ class SimulationExecutionService:
 
     @_transactional(commit=True)
     async def cancel_protective_strategy(
-        self, *, owner_id: str, strategy_id: str
+        self,
+        *,
+        owner_id: str,
+        strategy_id: str,
+        idempotency_key: str,
+        request_hash: str,
     ) -> ProtectiveStrategy:
+        replay = await self._replay_command(
+            scope="simulation.strategy.cancel",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return ProtectiveStrategy.model_validate(replay)
         current = await self._repository.get_strategy(strategy_id)
         if current is None or current.owner_id != owner_id:
             raise LookupError("protective strategy not found")
@@ -431,6 +457,14 @@ class SimulationExecutionService:
         )
         await self._repository.save_strategy(
             updated, expected_revision=current.revision
+        )
+        await self._record_command(
+            scope="simulation.strategy.cancel",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=strategy_id,
+            response_json=updated.model_dump(mode="json"),
         )
         return updated
 
@@ -700,7 +734,17 @@ class SimulationExecutionService:
         owner_id: str,
         draft_id: str,
         expected_revision: int,
+        idempotency_key: str,
+        request_hash: str,
     ) -> StoredDraft:
+        replay = await self._replay_command(
+            scope="simulation.draft.review",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return StoredDraft.model_validate(replay)
         current = await self._owned_draft(owner_id, draft_id)
         if current.record_revision != expected_revision:
             raise ValueError("draft record revision changed")
@@ -741,6 +785,16 @@ class SimulationExecutionService:
             reviewed,
             expected_revision=expected_revision,
         )
+        await self._record_command(
+            scope="simulation.draft.review",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=draft_id,
+            response_json=reviewed.model_dump(
+                mode="json", exclude_computed_fields=True
+            ),
+        )
         return reviewed
 
     @_transactional(commit=True)
@@ -750,7 +804,17 @@ class SimulationExecutionService:
         owner_id: str,
         draft_id: str,
         seen_reason_hash: str,
+        idempotency_key: str,
+        request_hash: str,
     ) -> StoredDraft:
+        replay = await self._replay_command(
+            scope="simulation.draft.soft_risk",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return StoredDraft.model_validate(replay)
         current = await self._owned_draft(owner_id, draft_id)
         if current.risk_result is None:
             raise ExecutionFailure(
@@ -776,6 +840,16 @@ class SimulationExecutionService:
             updated,
             expected_revision=current.record_revision,
         )
+        await self._record_command(
+            scope="simulation.draft.soft_risk",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=draft_id,
+            response_json=updated.model_dump(
+                mode="json", exclude_computed_fields=True
+            ),
+        )
         return updated
 
     @_transactional(commit=True)
@@ -786,7 +860,17 @@ class SimulationExecutionService:
         draft_id: str,
         expected_revision: int,
         seen_summary_hash: str,
+        idempotency_key: str,
+        request_hash: str,
     ) -> StoredDraft:
+        replay = await self._replay_command(
+            scope="simulation.draft.confirm",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return StoredDraft.model_validate(replay)
         current = await self._owned_draft(owner_id, draft_id)
         if current.record_revision != expected_revision:
             raise ValueError("draft record revision changed")
@@ -823,6 +907,16 @@ class SimulationExecutionService:
         await self._repository.save_draft(
             updated,
             expected_revision=expected_revision,
+        )
+        await self._record_command(
+            scope="simulation.draft.confirm",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=draft_id,
+            response_json=updated.model_dump(
+                mode="json", exclude_computed_fields=True
+            ),
         )
         return updated
 
@@ -883,7 +977,22 @@ class SimulationExecutionService:
         return await self._apply_submission_outcome(persisted, outcome)
 
     @_transactional(commit=True)
-    async def reconcile(self, *, owner_id: str, order_id: str) -> StoredOrder:
+    async def reconcile(
+        self,
+        *,
+        owner_id: str,
+        order_id: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> StoredOrder:
+        replay = await self._replay_command(
+            scope="simulation.order.reconcile",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return StoredOrder.model_validate(replay)
         stored = await self._owned_order(owner_id, order_id)
         order = stored.exchange_order
         if order is None:
@@ -900,7 +1009,13 @@ class SimulationExecutionService:
             ExchangeOrderStatus.ACCEPTED,
             ExchangeOrderStatus.PARTIALLY_FILLED,
         }:
-            return stored
+            return await self._finish_order_command(
+                scope="simulation.order.reconcile",
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                result=stored,
+            )
         draft = await self._repository.get_draft(order.draft_reference.object_id)
         if draft is None:
             raise ValueError("order draft not found")
@@ -916,21 +1031,39 @@ class SimulationExecutionService:
             ),
         )
         if bar is None:
-            return stored
+            return await self._finish_order_command(
+                scope="simulation.order.reconcile",
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                result=stored,
+            )
         result = self._matcher.match(
             draft.draft,
             bar,
             remaining_quantity=order.quantity - order.cumulative_filled,
         )
         if result.fill_quantity == 0 or result.fill_price is None:
-            return stored
+            return await self._finish_order_command(
+                scope="simulation.order.reconcile",
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                result=stored,
+            )
         await self._record_fill(
             owner_id=owner_id,
             stored=stored,
             draft=draft,
             result=result,
         )
-        return await self._owned_order(owner_id, order_id)
+        return await self._finish_order_command(
+            scope="simulation.order.reconcile",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result=await self._owned_order(owner_id, order_id),
+        )
 
     async def _record_fill(
         self,
@@ -988,7 +1121,22 @@ class SimulationExecutionService:
         return updated
 
     @_transactional(commit=True)
-    async def cancel(self, *, owner_id: str, order_id: str) -> StoredOrder:
+    async def cancel(
+        self,
+        *,
+        owner_id: str,
+        order_id: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> StoredOrder:
+        replay = await self._replay_command(
+            scope="simulation.order.cancel",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if replay is not None:
+            return StoredOrder.model_validate(replay)
         stored = await self._owned_order(owner_id, order_id)
         order = stored.exchange_order
         if order is None or order.status not in {
@@ -1027,6 +1175,79 @@ class SimulationExecutionService:
             }
         )
         await self._repository.save_order(result, expected_revision=cancelling.revision)
+        return await self._finish_order_command(
+            scope="simulation.order.cancel",
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result=result,
+        )
+
+    async def _replay_command(
+        self,
+        *,
+        scope: str,
+        owner_id: str,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> object | None:
+        uow = self._active_uow.get()
+        if uow is None:
+            raise RuntimeError("idempotent command used outside transaction")
+        await uow.locks.owner(owner_id)
+        prior = await uow.idempotency.get(scope, owner_id, idempotency_key)
+        if prior is None:
+            return None
+        if prior.request_hash != request_hash:
+            raise IdempotencyConflict(
+                "idempotency key was already used with a different request"
+            )
+        if prior.response_json is None:
+            raise RuntimeError("simulation idempotency response is missing")
+        return prior.response_json
+
+    async def _record_command(
+        self,
+        *,
+        scope: str,
+        owner_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        result_reference: str,
+        response_json: object,
+    ) -> None:
+        uow = self._active_uow.get()
+        if uow is None:
+            raise RuntimeError("idempotent command used outside transaction")
+        await uow.idempotency.add(
+            scope=scope,
+            owner_user_id=owner_id,
+            key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=result_reference,
+            response_json=response_json,
+            created_at=self._clock.now(),
+        )
+
+    async def _finish_order_command(
+        self,
+        *,
+        scope: str,
+        owner_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        result: StoredOrder,
+    ) -> StoredOrder:
+        await self._record_command(
+            scope=scope,
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            result_reference=result.order_id,
+            response_json=result.model_dump(
+                mode="json", exclude_computed_fields=True
+            ),
+        )
         return result
 
     async def _apply_submission_outcome(

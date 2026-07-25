@@ -14,7 +14,11 @@ from finance_god.application.trade_plan_service import (
     TradePlanActionRevision,
     TradePlanService,
 )
-from finance_god.domain import ConcurrentCommandConflict, DomainInvariantViolation
+from finance_god.domain import (
+    ConcurrentCommandConflict,
+    DomainInvariantViolation,
+    IdempotencyConflict,
+)
 from finance_god.execution import ExecutionFailure
 
 IDEMPOTENCY_HEADER = "idempotency-key"
@@ -83,6 +87,7 @@ def create_trade_plan_routes(
                 plan_id=request.path_params["plan_id"],
                 expected_revision=body.expected_revision,
                 actions=body.actions,
+                idempotency_key=_idempotency_key(request),
             )
 
         return await _respond(action)
@@ -129,7 +134,7 @@ async def _owner(owner_resolver: OwnerResolver, request: Request) -> str:
 
 def _idempotency_key(request: Request) -> str:
     key = request.headers.get(IDEMPOTENCY_HEADER, "").strip()
-    if not key or len(key) > 200:
+    if not key or len(key) > 160:
         raise ValueError("a valid idempotency-key header is required")
     return key
 
@@ -150,6 +155,8 @@ async def _respond(
         return _error("NOT_FOUND", str(error), 404)
     except LookupError as error:
         return _error("NOT_FOUND", str(error), 404)
+    except IdempotencyConflict as error:
+        return _error("IDEMPOTENCY_CONFLICT", str(error), 409)
     except ConcurrentCommandConflict as error:
         return _error("REVISION_CONFLICT", str(error), 409)
     except DomainInvariantViolation as error:

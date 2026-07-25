@@ -7,6 +7,8 @@ from typing import Self
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 
+from .locks import AggregateLocks
+from .repositories import IdempotencyRepository
 from .simulation_repository import SimulationRepository
 
 
@@ -34,6 +36,8 @@ class SimulationUnitOfWork:
             self._session = None
             raise
         self.repository = SimulationRepository(self._session)
+        self.idempotency = IdempotencyRepository(self._session)
+        self.locks = AggregateLocks(self._session)
         return self
 
     async def __aexit__(

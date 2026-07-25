@@ -6,6 +6,8 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .locks import AggregateLocks
+from .repositories import IdempotencyRepository
 from .trade_plan_repository import TradePlanRepository
 
 
@@ -20,7 +22,14 @@ class TradePlanUnitOfWork:
         self._session = self._session_factory()
         self._transaction = await self._session.begin()
         self.plans = TradePlanRepository(self._session)
+        self.idempotency = IdempotencyRepository(self._session)
+        self.locks = AggregateLocks(self._session)
         return self
+
+    async def flush(self) -> None:
+        if self._session is None:
+            raise RuntimeError("trade plan unit of work is not active")
+        await self._session.flush()
 
     async def __aexit__(
         self,
