@@ -129,7 +129,7 @@ class ContractHandler(BaseHTTPRequestHandler):
                 != "production-smoke-test-sha"
                 or payload.get("account_id") != "smoke-account"
                 or payload.get("instrument_id") != "000001.SZ"
-                or len(payload.get("decision_context") or {}) != 6
+                or "decision_context" in payload
             ):
                 self._json(400, {"error": {"code": "INVALID_REQUEST"}})
                 return

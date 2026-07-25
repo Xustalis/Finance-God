@@ -328,14 +328,6 @@ def _verify_authenticated_simulation(
             "instrument_id": symbol,
             "side": "buy",
             "quantity": quantity,
-            "decision_context": {
-                "thesis": "生产部署烟测验证模拟交易链路与真实行情引用",
-                "expected_return": "仅验证订单接收与执行契约",
-                "primary_risks": "行情服务不可用或账户风控拒绝",
-                "contrary_evidence": "本次请求不构成投资判断",
-                "expected_holding_period": "自动化验证周期",
-                "confidence": "仅用于系统契约验证",
-            },
         },
     )
     _require_non_empty_string(order.get("order_id"), "order_id")
