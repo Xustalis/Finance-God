@@ -1024,7 +1024,7 @@ describe('trading workspace routing', () => {
     const status = wrapper.get('[data-test="candidate-status"]')
     expect(wrapper.text()).toContain('现金与固收')
     expect(status.text()).toContain('当前画像方向不生成股票候选')
-    expect(status.classes()).toContain('empty-data')
+    expect(status.classes()).toContain('wl-empty-hint')
     expect(status.classes()).not.toContain('data-error')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 

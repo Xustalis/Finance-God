@@ -71,8 +71,33 @@ function decisionText(field: { status: string; value: string | null; unavailable
         <dl>
           <div><dt>案例起点</dt><dd>模拟买入成交形成持仓周期，并保存当时可用的决策快照。</dd></div>
           <div><dt>周期记录</dt><dd>后续买卖、成交价格、画像版本与已记录的风险证据按时间排列。</dd></div>
-          <div><dt>终局复盘</dt><dd>持仓归零后生成收益、执行评价、未知项与下次调整；缺失字段显示“当时未记录”。</dd></div>
+          <div><dt>终局复盘</dt><dd>持仓归零后生成收益、执行评价、未知项与下次调整；缺失字段显示"当时未记录"。</dd></div>
         </dl>
+      </div>
+      <div v-if="!episodes.length && !loading" class="review-guide" aria-label="复盘流程说明">
+        <section class="review-guide-block">
+          <h3>复盘机制</h3>
+          <p>每完成一轮从买入到清仓的持仓周期，系统自动生成终局复盘报告。复盘记录决策质量、收益归因与执行偏离，为画像演化提供事实反馈。</p>
+        </section>
+        <section class="review-guide-block">
+          <h3>如何产生首个案例</h3>
+          <ol class="review-guide-steps">
+            <li><span class="step-num">1</span><span>在「交易」工作区选择标的，完成一次模拟买入</span></li>
+            <li><span class="step-num">2</span><span>持仓期间的买卖操作与决策快照自动归档</span></li>
+            <li><span class="step-num">3</span><span>卖出至持仓为零时，系统生成终局复盘</span></li>
+          </ol>
+        </section>
+        <section class="review-guide-block">
+          <h3>复盘报告包含</h3>
+          <dl class="review-guide-contents">
+            <div><dt>收益归因</dt><dd>实际盈亏金额与百分比、持有时长</dd></div>
+            <div><dt>预期验证</dt><dd>买入时的交易理由是否成立、预期收益与实际的偏差</dd></div>
+            <div><dt>执行评价</dt><dd>入场价格、出场时机、仓位管理的评估</dd></div>
+            <div><dt>未知项</dt><dd>因记录不完整而无法评价的决策维度</dd></div>
+            <div><dt>下次调整</dt><dd>基于本次复盘生成的改进建议</dd></div>
+            <div><dt>画像反馈</dt><dd>复盘结论自动更新投资者画像版本</dd></div>
+          </dl>
+        </section>
       </div>
       <div v-else class="market-table-wrap">
         <table class="market-table">
@@ -172,6 +197,17 @@ function decisionText(field: { status: string; value: string | null; unavailable
             <p v-if="lesson.invalidation_conditions.length" class="learning-meta">失效条件：{{ lesson.invalidation_conditions.join('；') }}</p>
           </li>
         </ol>
+      </template>
+      <template v-else-if="!learningLoading && !learningError">
+        <div class="learning-unavailable-detail">
+          <p class="empty-data">持续学习 Worker 尚未产出知识快照。</p>
+          <dl class="market-sheet learning-summary">
+            <div><dt>学习机制</dt><dd>后台 Worker 周期性从市场数据观察、推理并验证投资知识</dd></div>
+            <div><dt>产出形式</dt><dd>经验证的学习结论，附带主题、验证方法与失效条件</dd></div>
+            <div><dt>更新频率</dt><dd>默认每 15 分钟执行一个学习周期</dd></div>
+          </dl>
+          <p class="learning-note">Worker 首次运行并完成观察—推理—验证周期后，此处将展示最近已验证的学习成果。</p>
+        </div>
       </template>
       <p v-else-if="learningLoading" class="empty-data">正在读取 Agent 自学习状态。</p>
     </section>

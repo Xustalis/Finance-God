@@ -134,14 +134,17 @@ function asShanghaiIso(value: string): string {
           <table class="market-table">
             <thead><tr><th scope="col">标的</th><th scope="col" class="numeric">数量</th><th scope="col" class="numeric">可用</th><th scope="col" class="numeric">成本</th><th scope="col" class="numeric">市值</th><th scope="col" class="numeric">浮盈</th><th scope="col" class="numeric">已实现</th><th scope="col">操作</th></tr></thead>
             <tbody>
-              <tr v-for="position in portfolio.positions" :key="position.instrument_id">
+              <tr
+                v-for="position in portfolio.positions"
+                :key="position.instrument_id"
+                class="position-row"
+                tabindex="0"
+                :aria-label="`点击查看 ${position.instrument_id} 的交易页面`"
+                @click="onOpenPosition?.(position)"
+                @keydown.enter="onOpenPosition?.(position)"
+              >
                 <th scope="row">
-                  <button
-                    class="position-symbol-link"
-                    type="button"
-                    :aria-label="`查看 ${position.instrument_id} 的交易页面`"
-                    @click="onOpenPosition?.(position)"
-                  >{{ position.instrument_id }}</button>
+                  <span class="position-symbol-link">{{ position.instrument_id }}</span>
                   <small>{{ quoteMeta(position) }}</small>
                 </th>
                 <td class="numeric">{{ quantity(position.quantity) }}</td>
@@ -159,7 +162,7 @@ function asShanghaiIso(value: string): string {
                     type="button"
                     :disabled="!canSell(position)"
                     :aria-label="`卖出 ${position.instrument_id}`"
-                    @click="onSellPosition?.(position)"
+                    @click.stop="onSellPosition?.(position)"
                   >卖出</button>
                 </td>
               </tr>

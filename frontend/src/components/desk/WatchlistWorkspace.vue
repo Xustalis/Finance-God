@@ -46,6 +46,8 @@ const props = defineProps<{
 
 const selectedGroupId = ref<string | null>(null)
 const selectedGroup = computed(() => props.groups.find((item) => item.group_id === selectedGroupId.value) ?? props.groups[0] ?? null)
+const showCreateForm = ref(false)
+const showEditForm = ref(false)
 const newGroupName = ref('')
 const newGroupDescription = ref('')
 const groupName = ref('')
@@ -85,10 +87,29 @@ const candidateUnavailableIsError = computed(() => (
   )
 ))
 
-function selectGroup(group: WatchlistGroup) { selectedGroupId.value = group.group_id; groupName.value = group.name; groupDescription.value = group.description ?? '' }
-async function createGroup() { if (!newGroupName.value.trim()) return; await props.onCreateGroup({ name: newGroupName.value.trim(), description: newGroupDescription.value.trim() || null }); newGroupName.value = ''; newGroupDescription.value = '' }
-async function renameGroup() { if (!selectedGroup.value || !groupName.value.trim()) return; await props.onRenameGroup({ groupId: selectedGroup.value.group_id, name: groupName.value.trim(), description: groupDescription.value.trim() || null, expectedRevision: selectedGroup.value.revision }) }
-async function addInstrument() { if (!selectedGroup.value || !instrumentId.value.trim()) return; await props.onAddInstrument({ groupId: selectedGroup.value.group_id, instrumentId: instrumentId.value.trim() }); instrumentId.value = '' }
+function selectGroup(group: WatchlistGroup) {
+  selectedGroupId.value = group.group_id
+  groupName.value = group.name
+  groupDescription.value = group.description ?? ''
+  showEditForm.value = false
+}
+async function createGroup() {
+  if (!newGroupName.value.trim()) return
+  await props.onCreateGroup({ name: newGroupName.value.trim(), description: newGroupDescription.value.trim() || null })
+  newGroupName.value = ''
+  newGroupDescription.value = ''
+  showCreateForm.value = false
+}
+async function renameGroup() {
+  if (!selectedGroup.value || !groupName.value.trim()) return
+  await props.onRenameGroup({ groupId: selectedGroup.value.group_id, name: groupName.value.trim(), description: groupDescription.value.trim() || null, expectedRevision: selectedGroup.value.revision })
+  showEditForm.value = false
+}
+async function addInstrument() {
+  if (!selectedGroup.value || !instrumentId.value.trim()) return
+  await props.onAddInstrument({ groupId: selectedGroup.value.group_id, instrumentId: instrumentId.value.trim() })
+  instrumentId.value = ''
+}
 
 watch(
   () => [selectedGroup.value?.group_id, selectedGroup.value?.revision] as const,
@@ -107,56 +128,153 @@ watch(
 </script>
 
 <template>
-  <section class="information-workspace" aria-labelledby="watchlist-title">
-    <header class="overview-heading"><h1 id="watchlist-title">自选</h1><button class="refresh-button" type="button" :disabled="loading" @click="onLoad">{{ loading ? '正在刷新' : '刷新' }}</button></header>
-    <section class="overview-section" aria-labelledby="group-title">
-      <header><h2 id="group-title">自选分组</h2><small>每项修改均由服务端修订版本校验</small></header>
-      <div class="quote-strip" role="list" aria-label="自选分组"><button v-for="group in groups" :key="group.group_id" type="button" :class="{ selected: selectedGroup?.group_id === group.group_id }" @click="selectGroup(group)"><strong>{{ group.name }}</strong><span>{{ group.instruments.length }} 个标的 · 修订 {{ group.revision }}</span></button></div>
-      <form class="form-workspace" @submit.prevent="createGroup"><label>新分组名称<input v-model="newGroupName" maxlength="100" required></label><label>说明（可选）<input v-model="newGroupDescription" maxlength="500"></label><button class="ink-button" type="submit">创建分组</button></form>
-      <template v-if="selectedGroup">
-        <form class="form-workspace" @submit.prevent="renameGroup"><label>当前分组名称<input v-model="groupName" maxlength="100" required></label><label>说明（可选）<input v-model="groupDescription" maxlength="500"></label><button class="refresh-button" type="submit">保存分组</button><button class="refresh-button" type="button" @click="onDeleteGroup({ groupId: selectedGroup!.group_id, expectedRevision: selectedGroup!.revision })">删除分组</button></form>
-        <div class="market-table-wrap"><table class="market-table"><thead><tr><th scope="col">标的</th><th scope="col">加入时间</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="instrument in selectedGroup.instruments" :key="instrument.instrument_id"><th scope="row">{{ instrument.instrument_id }}</th><td>{{ instrument.added_at ?? '—' }}</td><td><button class="refresh-button" type="button" @click="onRemoveInstrument({ groupId: selectedGroup!.group_id, instrumentId: instrument.instrument_id })">移除</button></td></tr></tbody></table></div>
-        <form class="form-workspace" @submit.prevent="addInstrument"><label>标的代码<input v-model="instrumentId" placeholder="例如：000001.SZ" required></label><button class="ink-button" type="submit">加入当前分组</button></form>
+  <section class="watchlist-workspace" aria-labelledby="watchlist-title">
+    <header class="overview-heading">
+      <h1 id="watchlist-title">自选</h1>
+      <button class="refresh-button" type="button" :disabled="loading" @click="onLoad">{{ loading ? '正在刷新…' : '刷新' }}</button>
+    </header>
+
+    <!-- 自选分组 -->
+    <section class="wl-section" aria-labelledby="group-title">
+      <header class="wl-section-header">
+        <h2 id="group-title">自选分组</h2>
+        <button v-if="groups.length" class="refresh-button" type="button" @click="showCreateForm = !showCreateForm">{{ showCreateForm ? '取消' : '+ 新建分组' }}</button>
+      </header>
+
+      <!-- 有分组时：标签选择器 -->
+      <template v-if="groups.length">
+        <nav class="wl-group-tabs" aria-label="自选分组">
+          <button
+            v-for="group in groups" :key="group.group_id" type="button"
+            :class="['wl-tab', { active: selectedGroup?.group_id === group.group_id }]"
+            @click="selectGroup(group)"
+          >
+            <span class="wl-tab-name">{{ group.name }}</span>
+            <span class="wl-tab-count">{{ group.instruments.length }}</span>
+          </button>
+        </nav>
+
+        <!-- 新建分组（折叠） -->
+        <form v-if="showCreateForm" class="wl-inline-form" @submit.prevent="createGroup">
+          <input v-model="newGroupName" placeholder="分组名称" maxlength="100" required>
+          <input v-model="newGroupDescription" placeholder="说明（可选）" maxlength="500">
+          <button class="ink-button" type="submit">创建</button>
+        </form>
+
+        <!-- 选中分组详情 -->
+        <div v-if="selectedGroup" class="wl-group-detail">
+          <div class="wl-group-toolbar">
+            <span class="wl-group-meta">{{ selectedGroup.name }}<small v-if="selectedGroup.description"> · {{ selectedGroup.description }}</small></span>
+            <button class="refresh-button" type="button" @click="showEditForm = !showEditForm">{{ showEditForm ? '取消' : '编辑' }}</button>
+            <button class="refresh-button wl-delete-btn" type="button" @click="onDeleteGroup({ groupId: selectedGroup.group_id, expectedRevision: selectedGroup.revision })">删除</button>
+          </div>
+
+          <!-- 编辑分组（折叠） -->
+          <form v-if="showEditForm" class="wl-inline-form" @submit.prevent="renameGroup">
+            <input v-model="groupName" placeholder="分组名称" maxlength="100" required>
+            <input v-model="groupDescription" placeholder="说明（可选）" maxlength="500">
+            <button class="ink-button" type="submit">保存</button>
+          </form>
+
+          <!-- 标的列表 -->
+          <div v-if="selectedGroup.instruments.length" class="market-table-wrap">
+            <table class="market-table">
+              <thead>
+                <tr><th scope="col">标的代码</th><th scope="col">加入时间</th><th scope="col">操作</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="instrument in selectedGroup.instruments" :key="instrument.instrument_id">
+                  <th scope="row">{{ instrument.instrument_id }}</th>
+                  <td>{{ instrument.added_at ?? '—' }}</td>
+                  <td><button class="refresh-button" type="button" @click="onRemoveInstrument({ groupId: selectedGroup!.group_id, instrumentId: instrument.instrument_id })">移除</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="wl-empty-hint">该分组暂无标的，请在下方添加。</p>
+
+          <!-- 添加标的 -->
+          <form class="wl-inline-form wl-add-form" @submit.prevent="addInstrument">
+            <input v-model="instrumentId" placeholder="输入代码，如 000001.SZ" required>
+            <button class="ink-button" type="submit">加入</button>
+          </form>
+        </div>
       </template>
-      <div v-else class="workspace-empty-ledger" role="status">
-        <header><strong>尚无自选分组</strong><span>先建立服务端分组，再加入标的</span></header>
-        <dl>
-          <div><dt>第一步</dt><dd>填写分组名称，例如“重点跟踪”或“等待估值”。</dd></div>
-          <div><dt>第二步</dt><dd>使用六位证券代码与交易所后缀加入当前分组。</dd></div>
-          <div><dt>数据边界</dt><dd>自选只保存关注关系，不生成价格、评级或交易建议。</dd></div>
+
+      <!-- 无分组时：简洁空状态 -->
+      <div v-else class="wl-empty-state">
+        <p class="wl-empty-message">尚无自选分组，创建后即可管理关注标的。</p>
+        <form class="wl-inline-form" @submit.prevent="createGroup">
+          <input v-model="newGroupName" placeholder="分组名称，如 重点跟踪" maxlength="100" required>
+          <input v-model="newGroupDescription" placeholder="说明（可选）" maxlength="500">
+          <button class="ink-button" type="submit">创建分组</button>
+        </form>
+        <dl class="wl-guidance">
+          <div><dt>分组</dt><dd>按策略或关注维度组织标的</dd></div>
+          <div><dt>标的</dt><dd>使用代码 + 交易所后缀（如 000001.SZ）</dd></div>
+          <div><dt>数据边界</dt><dd>自选只保存关注关系，不生成交易建议</dd></div>
         </dl>
       </div>
+
       <p v-if="watchlistError" class="data-error" role="alert">自选读取失败：{{ watchlistError }}</p>
     </section>
-    <section class="overview-section" aria-labelledby="candidate-title">
-      <header>
+
+    <!-- 可研究候选 -->
+    <section class="wl-section" aria-labelledby="candidate-title">
+      <header class="wl-section-header">
         <h2 id="candidate-title">可研究候选</h2>
-        <small v-if="candidateMeta">
+        <small v-if="candidateMeta" class="wl-meta">
           画像 v{{ candidateMeta.profile_version ?? '—' }} ·
           {{ candidateDirectionsText }} ·
           {{ candidateMeta.generated_at }}
         </small>
-        <small v-else>画像投影与市场事实的研究入口</small>
+        <small v-else class="wl-meta">基于画像投影与市场事实生成</small>
       </header>
-      <div v-if="candidates.length" class="market-table-wrap candidate-table"><table class="market-table"><thead><tr><th scope="col">标的</th><th scope="col">用途</th><th scope="col">五项解释维度</th><th scope="col">反方证据 / 未知项</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="candidate in candidates" :key="candidate.instrument_id"><th scope="row">{{ candidate.name || candidate.symbol }}<small>{{ candidate.symbol }} · {{ candidate.direction_label }}</small></th><td>{{ candidate.purpose }}<small>{{ candidate.provider || '—' }} · {{ candidate.as_of || '—' }}</small></td><td><ul class="fact-list"><li v-for="dimension in candidate.dimensions.slice(0, 5)" :key="dimension.dimension"><strong>{{ dimension.label }} · {{ dimension.rating }}</strong><span>{{ dimension.detail }}</span></li></ul></td><td><p v-for="exclusion in candidate.exclusions" :key="exclusion.reason_code">{{ exclusion.detail }}</p><p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">未知：{{ dimension.missing_fields.join('、') }}</p><span v-if="!candidate.exclusions.length && !candidate.dimensions.some((item) => item.missing_fields.length)">未返回反方证据或未知项。</span></td><td class="candidate-actions"><template v-if="candidate.ignored"><small>已忽略：{{ candidate.ignore_reason || '—' }}</small></template><template v-else><button class="refresh-button" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button><button v-if="onCreateTradePlan" class="refresh-button" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划，不是直接下单'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button></template></td></tr></tbody></table></div>
+
+      <div v-if="candidates.length" class="wl-candidate-list">
+        <article v-for="candidate in candidates" :key="candidate.instrument_id" class="wl-candidate-card">
+          <header class="wl-candidate-header">
+            <div>
+              <strong>{{ candidate.name || candidate.symbol }}</strong>
+              <span class="wl-candidate-symbol">{{ candidate.symbol }} · {{ candidate.direction_label }}</span>
+            </div>
+            <div class="wl-candidate-actions" v-if="!candidate.ignored">
+              <button class="refresh-button" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button>
+              <button v-if="onCreateTradePlan" class="ink-button" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button>
+            </div>
+            <small v-else class="wl-ignored-label">已忽略：{{ candidate.ignore_reason || '—' }}</small>
+          </header>
+          <p class="wl-candidate-purpose">{{ candidate.purpose }}</p>
+          <div class="wl-candidate-body">
+            <div class="wl-dimensions">
+              <div v-for="dimension in candidate.dimensions.slice(0, 5)" :key="dimension.dimension" class="wl-dimension-item">
+                <span class="wl-dim-label">{{ dimension.label }}</span>
+                <span class="wl-dim-rating">{{ dimension.rating }}</span>
+                <span class="wl-dim-detail">{{ dimension.detail }}</span>
+              </div>
+            </div>
+            <aside v-if="candidate.exclusions.length || candidate.dimensions.some((item) => item.missing_fields.length)" class="wl-exclusions">
+              <p v-for="exclusion in candidate.exclusions" :key="exclusion.reason_code">{{ exclusion.detail }}</p>
+              <p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">未知：{{ dimension.missing_fields.join('、') }}</p>
+            </aside>
+          </div>
+          <footer class="wl-candidate-footer">
+            <small>{{ candidate.provider || '—' }} · {{ candidate.as_of || '—' }}</small>
+          </footer>
+        </article>
+      </div>
+
       <p
         v-else-if="candidateUnavailableText"
         data-test="candidate-status"
-        :class="candidateUnavailableIsError ? 'data-error' : 'empty-data'"
+        :class="candidateUnavailableIsError ? 'data-error' : 'wl-empty-hint'"
         role="status"
       >
         {{ candidateUnavailableText }}
         <a v-if="!candidateUnavailableIsError" href="/app/profile-report">调整画像方向</a>
       </p>
-      <p v-else-if="candidateNotice" data-test="candidate-status" class="empty-data" role="status">{{ candidateNotice }}</p>
-      <div v-else-if="!candidateError" data-test="candidate-status" class="workspace-empty-ledger" role="status">
-        <header><strong>暂无可研究候选</strong><span>候选必须同时具备画像投影与真实行情快照</span></header>
-        <dl>
-          <div><dt>适配依据</dt><dd>服务端读取风险等级、投资方向与当前模拟持仓的脱敏投影。</dd></div>
-          <div><dt>市场依据</dt><dd>缺少 PandaData 上游时间的标的不会进入候选列表。</dd></div>
-          <div><dt>后续动作</dt><dd>候选仅用于继续研究，可申请交易计划，但不会直接下单。</dd></div>
-        </dl>
-      </div>
+      <p v-else-if="candidateNotice" data-test="candidate-status" class="wl-empty-hint" role="status">{{ candidateNotice }}</p>
+      <p v-else-if="!candidateError" data-test="candidate-status" class="wl-empty-hint" role="status">暂无可研究候选。候选需同时具备画像投影与 PandaData 实时快照。</p>
       <p v-if="candidateError" class="data-error" role="alert">候选读取失败：{{ candidateError }}</p>
       <p v-if="planError" class="data-error" role="alert">交易计划：{{ planError }}</p>
     </section>
