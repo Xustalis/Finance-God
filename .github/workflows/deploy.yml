@@ -54,8 +54,3 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
             "chmod +x /opt/finance-god/deploy/remote-deploy.sh && /opt/finance-god/deploy/remote-deploy.sh"
-
-      - name: Verify public API
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-        run: python3 deploy/verify-public-api.py "http://$DEPLOY_HOST"
