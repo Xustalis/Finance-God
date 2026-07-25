@@ -19,6 +19,10 @@ function validStoredSession(tokenKey: string, userKey: string, role?: string) {
   } catch { return false }
 }
 
+function profileCompleted(): boolean {
+  return localStorage.getItem('finance-god-profile-completed') === 'true'
+}
+
 const LEGACY_TRADING_PATHS = [
   '/markets',
   '/watchlist',
@@ -35,7 +39,7 @@ const LEGACY_TRADING_PATHS = [
 
 export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({ history, routes: [
-    { path: '/', redirect: () => validStoredSession('finance-god-token', 'finance-god-user') ? '/app/exe' : '/login' },
+    { path: '/', redirect: () => validStoredSession('finance-god-token', 'finance-god-user') ? (profileCompleted() ? '/desk' : '/app/exe') : '/login' },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },
     { path: '/app/exe', name: 'onboarding', component: () => import('@/views/OnboardingView.vue'), meta: { requiresAuth: true } },
     { path: '/app/profile-report', name: 'report', component: () => import('@/views/ProfileReportView.vue'), meta: { requiresAuth: true } },

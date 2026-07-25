@@ -13,6 +13,7 @@ import {
   createWorkflow,
   deleteWatchlistGroup,
   fetchInformationFacts,
+  fetchBars,
   fetchMarketOverview,
   fetchNotifications,
   fetchProfile,
@@ -35,6 +36,7 @@ import {
   unignoreResearchCandidate,
   updateWatchlistGroup,
   type DeskFactBatch,
+  type DeskBar,
   type DeskNotification,
   type DeskQuote,
   type DeskWorkflowRun,
@@ -55,7 +57,7 @@ import type { ProfileWithRecommendations } from '@/types/api'
 export type DeskSection = 'information' | 'portfolio' | 'watchlist' | 'trading'
 export type AgentWorkflow = 'market_context' | 'company_research' | 'portfolio_stress' | 'trade_plan_generation' | 'strategy_validation' | 'event_impact'
 
-const BASELINE_SYMBOLS = ['000001.SZ', '600519.SH', '300750.SZ'] as const
+const BASELINE_SYMBOLS = ['000001.SH', '399001.SZ', '000300.SH'] as const
 const POLL_INTERVAL_MS = 60_000
 
 function failureText(error: unknown, fallback: string): string {
@@ -73,6 +75,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const profile = ref<ProfileWithRecommendations | null>(null)
   const informationFacts = ref<DeskFactBatch | null>(null)
   const sentimentFacts = ref<DeskFactBatch | null>(null)
+  const bars = ref<DeskBar[]>([])
   const notifications = ref<DeskNotification[]>([])
   const account = ref<SimulationAccount | null>(null)
   const portfolio = ref<SimulationPortfolio | null>(null)
@@ -90,6 +93,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const profileError = ref<string | null>(null)
   const informationFactsError = ref<string | null>(null)
   const sentimentFactsError = ref<string | null>(null)
+  const barsError = ref<string | null>(null)
   const notificationError = ref<string | null>(null)
   const simulationError = ref<string | null>(null)
   const accountError = ref<string | null>(null)
@@ -134,18 +138,49 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     if (next === 'trading') void Promise.all([loadSimulationData(), loadOrders()])
   }
 
+  const barsFrequency = ref<string | undefined>(undefined)
+
   function setSymbol(next: string) {
     symbol.value = next
     contextVersion.value += 1
     void loadMarketFacts()
+    void loadBars()
   }
 
-  async function refreshMarket() {
+  function setBarsFrequency(freq: string | undefined) {
+    if (barsFrequency.value === freq) return
+    barsFrequency.value = freq
+    bars.value = []
+    void loadBars()
+  }
+
+  async function refreshMarket(options: { withBars?: boolean } = {}) {
     loadingMarket.value = true
     marketError.value = null
     try { quotes.value = await fetchMarketOverview(quoteSymbols.value) }
     catch (error) { marketError.value = failureText(error, '真实行情不可用') }
     finally { loadingMarket.value = false }
+    // 轮询只刷新快照；K线仅在显式要求（手动刷新、切换标的/频率、初始化）时重拉。
+    if (options.withBars) void loadBars()
+  }
+
+  async function ensureQuote(instrumentId: string): Promise<DeskQuote | null> {
+    const cached = quotes.value.find((item) => item.symbol === instrumentId)
+    if (cached) return cached
+    const fetched = await fetchMarketOverview([instrumentId])
+    if (fetched.length) {
+      const known = new Set(quotes.value.map((item) => item.symbol))
+      quotes.value = [...quotes.value, ...fetched.filter((item) => !known.has(item.symbol))]
+    }
+    return fetched.find((item) => item.symbol === instrumentId) ?? null
+  }
+
+  async function loadBars() {
+    barsError.value = null
+    const freq = barsFrequency.value
+    const limit = freq === '1m' ? 500 : 250
+    try { bars.value = await fetchBars(symbol.value, limit, freq) }
+    catch (error) { barsError.value = failureText(error, 'K线数据不可用') }
   }
 
   async function loadProfile() {
@@ -223,6 +258,8 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       simulationLoadedAt.value = new Date().toISOString()
     }
     loadingSimulation.value = false
+    // 持仓标的变化后立即补一次快照行情，市值/浮盈无需等待下个轮询周期。
+    void refreshMarket()
   }
 
   async function loadOrders() {
@@ -243,6 +280,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       if (!selectedWatchlistId.value || !groups.some((item) => item.group_id === selectedWatchlistId.value)) selectedWatchlistId.value = groups[0]?.group_id ?? null
       const entries = await Promise.all(groups.map(async (group) => [group.group_id, await fetchWatchlistInstruments(group.group_id)] as const))
       watchlistInstruments.value = Object.fromEntries(entries)
+      // 自选标的变更后补一次快照行情，不触发 K 线重拉。
       void refreshMarket()
     } catch (error) { watchlistError.value = failureText(error, '自选分组不可用') }
     finally { loadingWatchlists.value = false }
@@ -435,7 +473,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   function onVisibilityChange() { if (!document.hidden) void refreshMarket() }
 
   async function initialize() {
-    await Promise.all([refreshMarket(), loadProfile(), loadNotifications(), loadMarketFacts()])
+    await Promise.all([refreshMarket({ withBars: true }), loadProfile(), loadNotifications(), loadMarketFacts()])
     startPolling()
     document.addEventListener('visibilitychange', onVisibilityChange)
   }
@@ -447,14 +485,14 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   onScopeDispose(dispose)
 
   return {
-    section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, notifications,
+    section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, bars, notifications,
     account, portfolio, orders, fills, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
     selectedWatchlistInstruments, candidates, activeDraft, activeOrder, activeTradePlan, hasSimulationAccount,
-    marketError, profileError, informationFactsError, sentimentFactsError, notificationError, simulationError,
+    marketError, profileError, informationFactsError, sentimentFactsError, barsError, notificationError, simulationError,
     accountError, ordersError, fillsError, simulationLoadedAt, watchlistError, candidateError, tradeError,
     loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates,
     activeWorkflow, workflowError, contextVersion, selectedQuote, unreadCount, profileSummary, quickCommands,
-    setSection, setSymbol, refreshMarket, loadProfile, loadMarketFacts, loadNotifications, dismissNotification,
+    setSection, setSymbol, setBarsFrequency, refreshMarket, ensureQuote, loadProfile, loadMarketFacts, loadNotifications, dismissNotification,
     loadSimulationData, loadOrders, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
     acknowledgeSoftRisk, confirmDraft, submitDraft, createWatchlist, renameWatchlist, removeWatchlist,
     addToWatchlist, removeFromWatchlist, ignoreCandidate, restoreCandidate, startCandidateTradePlan,

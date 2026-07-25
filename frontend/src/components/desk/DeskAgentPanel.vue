@@ -51,7 +51,6 @@ function syncWorkflowExpanded(event: Event) {
         </div>
       </header>
       <section class="agent-thread" aria-live="polite">
-      <p class="agent-ready">输入问题后将创建可审计的后端工作流。只呈现服务端工作流回执与真实错误，不生成本地结论。</p>
       <details v-if="desk.activeWorkflow || desk.workflowError" class="workflow-detail" :open="workflowExpanded" @toggle="syncWorkflowExpanded">
         <summary><span>后端工作流</span><small>{{ desk.workflowError || desk.activeWorkflow?.status }}</small></summary>
         <p v-if="desk.activeWorkflow">{{ desk.activeWorkflow.workflow_key }} · {{ desk.activeWorkflow.run_id }}</p>

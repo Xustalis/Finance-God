@@ -10,7 +10,7 @@ const progress=computed(()=>phase.value==='objective'?(store.objectiveIndex+1)/o
 const sensitive=computed(()=>store.session?.current_dimension==='income_stability')
 const currentQuestion=computed(()=>store.session?.current_question||'正在准备下一问…')
 const showQuestionCard=computed(()=>{const q=(store.session?.current_question||'').trim();if(!q)return false;const lastAssistant=[...store.messages].reverse().find(m=>m.role==='assistant');return !lastAssistant||!lastAssistant.content.includes(q)})
-async function restoreSession(){try{await store.restore();if(store.session?.objective_profile)started.value=true}catch(e){store.error=e instanceof Error?e.message:'无法恢复会话'}}
+async function restoreSession(){try{await store.restore();if(store.session?.objective_profile)started.value=true;if(localStorage.getItem('finance-god-profile-completed')==='true'){router.replace('/desk');return}}catch(e){store.error=e instanceof Error?e.message:'无法恢复会话'}}
 onMounted(async()=>{await restoreSession();timer=window.setInterval(()=>thinkingIndex.value=(thinkingIndex.value+1)%thinking.length,1800)})
 onBeforeUnmount(()=>clearInterval(timer));watch(transcript,(value)=>{if(value){draft.value=value;inputMode.value='voice'}});watch([()=>store.messages.length,currentQuestion],async()=>{await nextTick();if(messageStream.value)messageStream.value.scrollTop=messageStream.value.scrollHeight})
 async function choose(value:string|number){store.selectObjective(value)}

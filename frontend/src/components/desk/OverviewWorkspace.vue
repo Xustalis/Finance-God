@@ -1,10 +1,20 @@
 <script setup lang="ts">
+import MarketChart, { type ChartQuote } from './MarketChart.vue'
+import type { DeskBar } from '@/services/tradingDesk'
+import { computed } from 'vue'
+
 export interface OverviewQuote {
   symbol: string
   name: string
   last: number | null
+  open?: number | null
+  high?: number | null
+  low?: number | null
+  previous_close?: number | null
   change: number | null
   change_percent: number | null
+  volume?: number | null
+  amount?: number | null
   provider_time: string
   frequency: string
   freshness: string
@@ -22,30 +32,58 @@ interface FactBatch {
   facts: MarketFact[]
 }
 
-defineProps<{
+const props = defineProps<{
   quotes: readonly OverviewQuote[]
+  bars: readonly DeskBar[]
   selectedSymbol: string
   loading: boolean
   marketError: string | null
+  barsError: string | null
   sentimentFacts: FactBatch | null
   sentimentError: string | null
   informationFacts: FactBatch | null
   informationError: string | null
   onSelectSymbol: (symbol: string) => void
   onRefresh: () => void | Promise<void>
+  onPeriodChange?: (period: string) => void
 }>()
 
-function number(value: number | null): string {
-  return value === null ? '—' : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)
-}
-
-function signedNumber(value: number): string {
-  return `${value >= 0 ? '+' : ''}${number(value)}`
-}
+const selectedQuote = computed<ChartQuote | null>(() => {
+  const q = props.quotes.find(q => q.symbol === props.selectedSymbol)
+  return q ? { ...q } as ChartQuote : null
+})
 
 function field(value: string | number | boolean | null): string {
   return value === null ? '—' : String(value)
 }
+
+/** Map sentiment level to a representative emoji. */
+const sentimentEmoji = computed(() => {
+  if (!props.sentimentFacts?.facts?.length) return ''
+  const levelField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'level')
+  const level = String(levelField?.value ?? '').toLowerCase()
+  const scoreField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'score')
+  const score = Number(scoreField?.value ?? 50)
+  if (level === 'bullish' || level === 'very_bullish' || score >= 70) return '😄'
+  if (level === 'bearish' || level === 'very_bearish' || score <= 30) return '😢'
+  if (level === 'neutral' && score >= 55) return '🙂'
+  if (level === 'neutral' && score <= 45) return '😐'
+  return '🙂'
+})
+
+const sentimentLabel = computed(() => {
+  if (!props.sentimentFacts?.facts?.length) return ''
+  const levelField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'level')
+  const level = String(levelField?.value ?? '')
+  const map: Record<string, string> = { very_bullish: '极度乐观', bullish: '乐观', neutral: '中性', bearish: '悲观', very_bearish: '极度悲观' }
+  return map[level] || level
+})
+
+const sentimentScore = computed(() => {
+  if (!props.sentimentFacts?.facts?.length) return null
+  const scoreField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'score')
+  return scoreField?.value ?? null
+})
 </script>
 
 <template>
@@ -58,36 +96,42 @@ function field(value: string | number | boolean | null): string {
     </header>
 
     <section class="overview-section market-overview" aria-labelledby="market-title">
-      <header>
+      <header class="market-header-row">
         <h2 id="market-title">大盘指数</h2>
-        <small>PandaData · 上游时间与实际频率</small>
+        <div v-if="sentimentFacts" class="sentiment-badge" :class="sentimentLabel">
+          <span class="sentiment-emoji">{{ sentimentEmoji }}</span>
+          <span class="sentiment-text">{{ sentimentLabel }}</span>
+          <span v-if="sentimentScore !== null" class="sentiment-score">{{ sentimentScore }}</span>
+        </div>
       </header>
-      <div class="market-table-wrap">
-        <table v-if="quotes.length" class="market-table">
-          <thead><tr><th scope="col">标的</th><th scope="col" class="numeric">最新价</th><th scope="col" class="numeric">涨跌</th><th scope="col" class="numeric">涨跌幅</th><th scope="col">数据状态</th></tr></thead>
-          <tbody>
-            <tr v-for="quote in quotes" :key="quote.symbol" :class="{ selected: selectedSymbol === quote.symbol }" @click="onSelectSymbol(quote.symbol)">
-              <th scope="row">{{ quote.name }} <small>{{ quote.symbol }}</small></th>
-              <td class="numeric">{{ number(quote.last) }}</td>
-              <td class="numeric" :class="(quote.change ?? 0) >= 0 ? 'up' : 'down'">{{ quote.change === null ? '—' : signedNumber(quote.change) }}</td>
-              <td class="numeric" :class="(quote.change_percent ?? 0) >= 0 ? 'up' : 'down'">{{ quote.change_percent === null ? '—' : `${quote.change_percent >= 0 ? '+' : ''}${quote.change_percent.toFixed(2)}%` }}</td>
-              <td><small>{{ quote.provider_time }}</small><small>{{ quote.frequency }} · {{ quote.freshness }}</small></td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- Index switcher: always visible -->
+      <div class="index-switcher">
+        <button
+          v-for="q in (quotes.length ? quotes : [{symbol: '000001.SH', name: '上证指数'}, {symbol: '399001.SZ', name: '深证成指'}, {symbol: '000300.SH', name: '沪深300'}])" :key="q.symbol"
+          class="index-tab"
+          :class="{ active: selectedSymbol === q.symbol }"
+          @click="onSelectSymbol(q.symbol)"
+        >
+          {{ q.name || q.symbol }}
+        </button>
       </div>
-      <p v-if="marketError" class="data-error" role="alert">真实行情不可用：{{ marketError }}</p>
-      <p v-else-if="!quotes.length" class="empty-data">正在读取真实行情；不会显示替代价格。</p>
+      <!-- Chart -->
+      <MarketChart
+        :quote="selectedQuote"
+        :bars="bars"
+        :loading="loading"
+        :error="barsError"
+        :on-period-change="onPeriodChange"
+      />
     </section>
 
-    <section class="overview-section facts-section" aria-labelledby="sentiment-title">
-      <header><h2 id="sentiment-title">市场情绪</h2><small>爬虫综合情绪（东方财富+同花顺）</small></header>
-      <template v-if="sentimentFacts">
-        <p class="fact-meta">{{ sentimentFacts.symbol }} · {{ sentimentFacts.requested_at }}</p>
-        <ul class="fact-list compact"><li v-for="(fact, idx) in sentimentFacts.facts.slice(0, 3)" :key="fact.source?.evidence_ref || idx"><strong>{{ fact.source?.data_time || '实时' }}</strong><span v-for="item in fact.fields.slice(0, 4)" :key="item.name">{{ item.name }}：{{ field(item.value) }}</span></li></ul>
-      </template>
-      <p v-else class="empty-data">{{ sentimentError || '正在读取服务端情绪事实。' }}</p>
-    </section>
+    <!-- Sentiment details below chart -->
+    <div v-if="sentimentFacts" class="sentiment-detail-strip">
+      <span v-for="item in sentimentFacts.facts[0]?.fields?.slice(0, 4)" :key="item.name" class="sentiment-detail-item">
+        <span class="sentiment-detail-label">{{ item.name }}</span>
+        <span class="sentiment-detail-value">{{ field(item.value) }}</span>
+      </span>
+    </div>
 
     <section class="overview-section facts-section" aria-labelledby="information-title">
       <header><h2 id="information-title">市场资讯</h2><small>爬虫实时财经要闻与研报（东方财富）</small></header>
@@ -107,7 +151,7 @@ function field(value: string | number | boolean | null): string {
           </li>
         </ul>
       </template>
-      <p v-else class="empty-data">{{ informationError || '正在读取市场资讯。' }}</p>
+      <p v-else class="empty-data">{{ informationError || '' }}</p>
     </section>
   </section>
 </template>

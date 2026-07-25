@@ -189,6 +189,40 @@ def create_agent_routes(
                 )
             except Exception:  # noqa: BLE001 - optional context must not hide the run
                 _LOGGER.exception("verified learning context is unavailable")
+        # Inject crawler news and sentiment as baseline evidence so agents
+        # like news_analyst and sentiment_analyst always have input data.
+        try:
+            from finance_god.crawler.service import CrawlerService
+            _crawler = CrawlerService()
+            news = await _crawler.get_news(limit=10)
+            if news:
+                news_text = "; ".join(
+                    f"[{n.sector}] {n.title}" for n in news[:8]
+                )
+                contextual_evidence.append(
+                    EvidenceRecord(
+                        identifier="E1",
+                        source="Finance-God Crawler (eastmoney real-time news)",
+                        excerpt=f"Latest A-share market news: {news_text}",
+                    )
+                )
+            sentiment = await _crawler.get_sentiment()
+            contextual_evidence.append(
+                EvidenceRecord(
+                    identifier="E2",
+                    source="Finance-God Crawler (eastmoney+ths sentiment)",
+                    excerpt=(
+                        f"Market sentiment score={sentiment.score}/100 "
+                        f"level={sentiment.level.value}; "
+                        f"north_flow={sentiment.north_flow}B CNY; "
+                        f"up_ratio={sentiment.breadth.up_ratio}; "
+                        f"hot_sectors={','.join(sentiment.hot_sectors[:5])}; "
+                        f"risk_sectors={','.join(sentiment.risk_sectors[:5])}"
+                    ),
+                )
+            )
+        except Exception:  # noqa: BLE001 - crawler evidence is best-effort
+            _LOGGER.warning("crawler evidence injection failed")
         evidence = _merge_evidence(evidence, contextual_evidence)
         agent_request = AgentRequest(
             run_id=f"fg-{uuid4().hex}",

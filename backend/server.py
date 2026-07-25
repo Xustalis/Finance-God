@@ -265,6 +265,39 @@ def _json(model: object, *, status_code: int = 200) -> JSONResponse:
     return JSONResponse(payload, status_code=status_code)
 
 
+_NUMERIC_FIELDS = frozenset({
+    "last", "open", "high", "low", "previous_close",
+    "change", "change_percent", "volume", "amount",
+})
+
+
+def _numeric_quote(quote: dict) -> dict:
+    """Convert Decimal-string fields to float for frontend compatibility."""
+    for key in _NUMERIC_FIELDS:
+        value = quote.get(key)
+        if value is not None and isinstance(value, str):
+            try:
+                quote[key] = float(value)
+            except (ValueError, TypeError):
+                pass
+    return quote
+
+
+_BAR_NUMERIC_FIELDS = frozenset({"open", "high", "low", "close", "volume", "amount"})
+
+
+def _numeric_bar(bar: dict) -> dict:
+    """Convert Decimal-string fields in bar data to float."""
+    for key in _BAR_NUMERIC_FIELDS:
+        value = bar.get(key)
+        if value is not None and isinstance(value, str):
+            try:
+                bar[key] = float(value)
+            except (ValueError, TypeError):
+                pass
+    return bar
+
+
 async def live(_: Request) -> JSONResponse:
     return _json({"liveness": "live"}, status_code=200)
 
@@ -339,36 +372,110 @@ async def quotes(request: Request) -> JSONResponse:
 async def market_overview(request: Request) -> JSONResponse:
     symbols = request.query_params.get("symbols", "").split(",")
     try:
-        _, application = _services()
-        batch = await application.quotes(symbols)
-        if not batch.quotes:
-            return _safe_error(
-                code="MARKET_DATA_EMPTY_RESPONSE",
-                message="No market data is available for the overview.",
-                status_code=502,
-            )
-        result = build_market_overview(batch)
+        service, application = _services()
+        # Try the full application path (requires workflow) for equity snapshots
+        batch = None
+        try:
+            batch = await application.quotes(symbols)
+        except MarketDataError:
+            pass
+        # Identify index symbols that need bar-based fallback
+        _INDEX_NAMES = {
+            "000001.SH": "上证指数",
+            "399001.SZ": "深证成指",
+            "000300.SH": "沪深300",
+        }
+        quoted_symbols = {q.symbol for q in (batch.quotes if batch else ())}
+        fallback_quotes = []
+        for sym in symbols:
+            sym_upper = sym.strip().upper()
+            if not sym_upper or sym_upper in quoted_symbols:
+                continue
+            try:
+                instrument = service.resolve(sym_upper)
+            except Exception:  # noqa: BLE001
+                continue
+            if instrument.asset_class.value != "index":
+                continue
+            # Build quote from latest bars
+            try:
+                bar_result = await asyncio.to_thread(
+                    service.read_bars, sym_upper, limit=2
+                )
+                if bar_result.bars:
+                    latest = bar_result.bars[0]
+                    previous_close = (
+                        bar_result.bars[1].close if len(bar_result.bars) > 1 else None
+                    )
+                    change = (
+                        latest.close - previous_close
+                        if previous_close is not None
+                        else None
+                    )
+                    change_pct = (
+                        change / previous_close
+                        if change is not None and previous_close
+                        else None
+                    )
+                    fallback_quotes.append({
+                        "symbol": instrument.symbol,
+                        "name": _INDEX_NAMES.get(instrument.symbol, instrument.symbol),
+                        "asset_type": instrument.asset_class.value,
+                        "market": instrument.market.value,
+                        "currency": instrument.currency,
+                        "last": float(latest.close),
+                        "open": float(latest.open),
+                        "high": float(latest.high),
+                        "low": float(latest.low),
+                        "previous_close": float(previous_close) if previous_close else None,
+                        "change": float(change) if change is not None else None,
+                        "change_percent": float(change_pct) if change_pct is not None else None,
+                        "volume": float(latest.volume),
+                        "amount": float(latest.amount) if latest.amount else None,
+                        "provider": "PandaData",
+                        "provider_time": latest.provider_time,
+                        "frequency": bar_result.frequency,
+                        "freshness": latest.freshness,
+                        "market_status": "closed",
+                        "source_endpoint": latest.source_endpoint,
+                        "capability_version": latest.capability_version,
+                        "instrument_master_identity": latest.instrument_master_identity,
+                        "instrument_master_version": latest.instrument_master_version,
+                        "trade_eligible": False,
+                    })
+            except Exception:  # noqa: BLE001 - fallback must not block
+                continue
+        # Combine results
+        all_quotes = [_numeric_quote(q.model_dump(mode="json")) for q in (batch.quotes if batch else ())] + fallback_quotes
+        if not all_quotes:
+            return _json({"data": {"quotes": []}, "warnings": [{"code": "NO_SNAPSHOT", "message": "行情数据暂不可用"}]})
+        return _json({"data": {"quotes": all_quotes}})
     except (ValueError, ValidationError):
         return _safe_error(
             code="MARKET_DATA_INVALID_REQUEST",
             message="The market overview request is invalid.",
             status_code=400,
         )
-    except MarketDataError as error:
-        return _json({"error": error.public_payload()}, status_code=502)
+    except MarketDataError:
+        return _json({"data": {"quotes": []}, "warnings": [{"code": "MARKET_DATA_UNAVAILABLE", "message": "行情服务暂不可用"}]})
     except Exception:  # noqa: BLE001 - public HTTP error boundary
-        return _internal_error()
-    return _json(result)
+        return _json({"data": {"quotes": []}, "warnings": [{"code": "INTERNAL_ERROR", "message": "内部错误"}]})
 
 
 async def bars(request: Request) -> JSONResponse:
     symbol = request.query_params.get("symbol", "")
+    frequency_param = request.query_params.get("frequency", "")
     try:
         limit = int(request.query_params.get("limit", "80"))
-        _, application = _services()
-        result = await application.bars(
+        service, _application = _services()
+        from finance_god.market_data.contracts import DataFrequency as DF
+        freq_map = {"1m": DF.MINUTE_1, "daily": DF.DAILY, "1d": DF.DAILY}
+        frequency_override = freq_map.get(frequency_param) if frequency_param else None
+        result = await asyncio.to_thread(
+            service.read_bars,
             symbol,
             limit=limit,
+            frequency_override=frequency_override,
         )
     except (ValueError, ValidationError):
         return _safe_error(
@@ -385,7 +492,7 @@ async def bars(request: Request) -> JSONResponse:
             "provider": "PandaData",
             "symbol": symbol.upper(),
             "frequency": result.frequency,
-            "bars": [item.model_dump(mode="json") for item in result.bars],
+            "bars": [_numeric_bar(item.model_dump(mode="json")) for item in result.bars],
             "quality": result.quality.model_dump(mode="json"),
         }
     )
@@ -664,9 +771,11 @@ def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | N
     try:
         universe = _market_poll_universe()
     except Exception as error:  # noqa: BLE001 - poller cannot block API startup
+        detail = getattr(error, 'internal_message', str(error))
         _LOGGER.error(
-            "market poll universe derivation failed: %s",
+            "market poll universe derivation failed: %s: %s",
             type(error).__name__,
+            detail,
         )
         return None, None
     if not universe:

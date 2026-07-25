@@ -46,7 +46,7 @@ function failureText(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请稍后重试。'
 }
 
-async function runWorkspaceAction(action: () => Promise<unknown>) {
+async function runWorkspaceAction(action: () => Promise<unknown>): Promise<void> {
   workspaceError.value = null
   try { await action() } catch (error) { workspaceError.value = failureText(error) }
 }
@@ -84,14 +84,17 @@ function resizeAgentWithKeyboard(event: KeyboardEvent) {
 }
 
 async function createDraft(input: { instrumentId: string; side: 'buy' | 'sell'; orderType: 'market' | 'limit'; quantity: string; limitPrice: string | null }) {
-  const quote = desk.quotes.find((item) => item.symbol === input.instrumentId)
   if (!desk.account) throw new Error('请先建立仿真账户。')
+  const instrumentId = input.instrumentId.trim().toUpperCase()
+  // 行情缓存未覆盖的标的向服务端实时查询真实快照，而不是直接拒绝。
+  const quote = await desk.ensureQuote(instrumentId)
   if (!quote || quote.last === null) throw new Error('该标的没有可用的真实行情，无法创建引用价格明确的订单草稿。')
-  if (quote.freshness !== 'current' || !['in_session', 'released'].includes(quote.market_status)) {
-    throw new Error(`该标的行情状态为 ${quote.freshness}/${quote.market_status}，请等待服务端提供当前且已发布的行情后再创建草稿。`)
+  // 收盘时段的 stale 快照仍是带上游时间的真实行情，可作为仿真引用价；仅在状态不可识别时拒绝。
+  if (!['in_session', 'released', 'closed'].includes(quote.market_status)) {
+    throw new Error(`该标的行情状态为 ${quote.market_status}，请等待服务端提供已发布的行情后再创建草稿。`)
   }
   await desk.createDraft({
-    mode: 'manual', account_id: desk.account.account_id, instrument_id: input.instrumentId,
+    mode: 'manual', account_id: desk.account.account_id, instrument_id: instrumentId,
     side: input.side, order_type: input.orderType, quantity: input.quantity,
     limit_price: input.limitPrice ?? undefined, reference_price: String(quote.last),
     time_in_force: 'day', valid_until: new Date(Date.now() + 15 * 60_000).toISOString(),
@@ -180,10 +183,11 @@ onBeforeUnmount(() => {
         <div class="desk-left-content">
           <OverviewWorkspace
             v-if="desk.section === 'information'"
-            :quotes="desk.quotes ?? []" :selected-symbol="desk.symbol" :loading="desk.loadingMarket" :market-error="desk.marketError"
+            :quotes="desk.quotes ?? []" :bars="desk.bars ?? []" :selected-symbol="desk.symbol" :loading="desk.loadingMarket" :market-error="desk.marketError" :bars-error="desk.barsError ?? null"
             :sentiment-facts="desk.sentimentFacts" :sentiment-error="desk.sentimentFactsError"
             :information-facts="desk.informationFacts" :information-error="desk.informationFactsError"
-            :on-select-symbol="desk.setSymbol" :on-refresh="desk.refreshMarket"
+            :on-select-symbol="desk.setSymbol" :on-refresh="() => desk.refreshMarket({ withBars: true })"
+            :on-period-change="(p: string) => desk.setBarsFrequency(p === 'daily' ? undefined : '1m')"
           />
           <PortfolioWorkspace
             v-else-if="desk.section === 'portfolio'"

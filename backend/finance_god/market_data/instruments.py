@@ -158,6 +158,22 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
             aliases=("CSI300",),
         ),
         InstrumentId(
+            symbol="000001.SH",
+            provider_symbol="000001.SH",
+            market=MarketType.CN,
+            asset_class=AssetClass.INDEX,
+            currency="CNY",
+            aliases=("SHCOMP", "SSE"),
+        ),
+        InstrumentId(
+            symbol="399001.SZ",
+            provider_symbol="399001.SZ",
+            market=MarketType.CN,
+            asset_class=AssetClass.INDEX,
+            currency="CNY",
+            aliases=("SZCOMP", "SZSE"),
+        ),
+        InstrumentId(
             symbol="510300.SH",
             provider_symbol="510300.SH",
             market=MarketType.CN,

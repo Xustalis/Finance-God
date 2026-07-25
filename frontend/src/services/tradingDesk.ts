@@ -351,6 +351,26 @@ export async function fetchMarketOverview(symbols: readonly string[]): Promise<D
   return result.data?.quotes ?? result.quotes ?? []
 }
 
+export interface DeskBar {
+  time: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  amount?: number
+  freshness?: string
+}
+
+export async function fetchBars(symbol: string, limit = 120, frequency?: string): Promise<DeskBar[]> {
+  const params: Record<string, string | number> = { symbol, limit }
+  if (frequency) params.frequency = frequency
+  const result = await request<{ bars?: DeskBar[] }>(() =>
+    client.get('/market/bars', { params })
+  )
+  return result.bars ?? []
+}
+
 export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
   return request(() => client.get('/market/information-facts', {
     params: { symbol, limit: 10 },

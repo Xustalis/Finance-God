@@ -415,6 +415,15 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
 .overview-section h2 { margin: 0; font-size: clamp(1.2rem, 1.75vw, 1.5rem); }
 .overview-section header small, .overview-section .fact-meta { color: var(--muted-ink); font-size: .76rem; }
 .market-overview { padding-top: 14px; }
+.market-header-row { display: flex; align-items: center; gap: 1rem; }
+.sentiment-badge { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .7rem; border-radius: 3px; border: 1px solid var(--rule); font-size: .8rem; line-height: 1; }
+.sentiment-emoji { font-size: 1.2rem; line-height: 1; }
+.sentiment-text { font-weight: 500; color: var(--ink); }
+.sentiment-score { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; color: var(--muted-ink); font-size: .75rem; }
+.sentiment-detail-strip { display: flex; gap: 1.5rem; padding: .6rem 0; margin-top: .25rem; font-size: .78rem; color: var(--muted-ink); }
+.sentiment-detail-item { display: flex; gap: .3rem; align-items: baseline; }
+.sentiment-detail-label { color: var(--muted-ink); }
+.sentiment-detail-value { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 500; }
 .market-scoreboard { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .market-scoreboard tbody { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .market-scoreboard tr { display: grid; grid-template-columns: 1fr; gap: .35rem; min-height: 126px; padding: 0 28px 10px; border-right: 1px solid var(--rule); cursor: pointer; }
@@ -440,6 +449,10 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
 .news-sector { flex-shrink: 0; min-width: 4em; font-size: .72rem; color: var(--muted-ink); font-weight: 500; }
 .news-title { flex: 1; font-size: .82rem; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .news-source { flex-shrink: 0; font-size: .7rem; color: var(--muted-ink); }
+.index-switcher { display: flex; gap: .25rem; margin-bottom: .75rem; }
+.index-tab { padding: .35rem .75rem; font-size: .8rem; border: 1px solid var(--rule); border-radius: 3px; background: transparent; color: var(--ink); cursor: pointer; transition: all .15s; }
+.index-tab:hover { border-color: var(--ink); }
+.index-tab.active { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 500; }
 .overview-footer { display: flex; align-items: center; gap: 1rem; min-height: 52px; padding: 0 10px; border-top: 1px solid var(--rule); color: var(--muted-ink); font-size: .78rem; }
 .overview-footer .refresh-button { min-height: 32px; padding: .1rem 0; border: 0; color: var(--ink); }
 .desk-page .not-connected-workspace { max-width: none; margin-top: 8px; padding: 26px 12px; border-top: 1px solid var(--rule); }

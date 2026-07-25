@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 export interface WatchlistInstrument { instrument_id: string; added_at?: string }
 export interface WatchlistGroup { group_id: string; name: string; description: string | null; revision: number; instruments: readonly WatchlistInstrument[] }
@@ -29,10 +29,33 @@ const groupName = ref('')
 const groupDescription = ref('')
 const instrumentId = ref('')
 
-function selectGroup(group: WatchlistGroup) { selectedGroupId.value = group.group_id; groupName.value = group.name; groupDescription.value = group.description ?? '' }
-async function createGroup() { if (!newGroupName.value.trim()) return; await props.onCreateGroup({ name: newGroupName.value.trim(), description: newGroupDescription.value.trim() || null }); newGroupName.value = ''; newGroupDescription.value = '' }
-async function renameGroup() { if (!selectedGroup.value || !groupName.value.trim()) return; await props.onRenameGroup({ groupId: selectedGroup.value.group_id, name: groupName.value.trim(), description: groupDescription.value.trim() || null, expectedRevision: selectedGroup.value.revision }) }
-async function addInstrument() { if (!selectedGroup.value || !instrumentId.value.trim()) return; await props.onAddInstrument({ groupId: selectedGroup.value.group_id, instrumentId: instrumentId.value.trim() }); instrumentId.value = '' }
+// 当外层选中分组变化（例如刚新建了一个分组）时，同步本地编辑表单字段，
+// 避免“选中了新分组但表单仍显示旧名称”的不一致。
+watch(selectedGroup, (group) => {
+  if (!group) { groupName.value = ''; groupDescription.value = ''; return }
+  if (selectedGroupId.value !== group.group_id) selectedGroupId.value = group.group_id
+  groupName.value = group.name
+  groupDescription.value = group.description ?? ''
+}, { immediate: true })
+
+function selectGroup(group: WatchlistGroup) { selectedGroupId.value = group.group_id }
+async function createGroup() {
+  if (!newGroupName.value.trim()) return
+  const input = { name: newGroupName.value.trim(), description: newGroupDescription.value.trim() || null }
+  await props.onCreateGroup(input)
+  // 新分组由父组件追加到 groups；watch(selectedGroup) 会自动选中新分组并同步表单。
+  newGroupName.value = ''
+  newGroupDescription.value = ''
+}
+async function renameGroup() {
+  if (!selectedGroup.value || !groupName.value.trim()) return
+  await props.onRenameGroup({ groupId: selectedGroup.value.group_id, name: groupName.value.trim(), description: groupDescription.value.trim() || null, expectedRevision: selectedGroup.value.revision })
+}
+async function addInstrument() {
+  if (!selectedGroup.value || !instrumentId.value.trim()) return
+  await props.onAddInstrument({ groupId: selectedGroup.value.group_id, instrumentId: instrumentId.value.trim() })
+  instrumentId.value = ''
+}
 </script>
 
 <template>

@@ -254,6 +254,7 @@ class PandaDataNormalizer:
             "get_hk_daily",
             "get_us_daily",
             "get_index_daily",
+            "get_index_min",
         }
         if any(
             (current >= previous if descending else current <= previous)

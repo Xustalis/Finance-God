@@ -248,22 +248,33 @@ class MarketDataService:
         )
         return envelope
 
-    def read_bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
+    def read_bars(
+        self,
+        symbol: str,
+        *,
+        limit: int = 80,
+        frequency_override: DataFrequency | None = None,
+    ) -> MarketBarsResult:
         """Read normalized bars without starting a durable DQ workflow."""
 
         instrument = self.resolve(symbol)
         now = self._aware_now()
         market_today = now.astimezone(_market_zone(instrument.market))
-        if (
+        if frequency_override is not None:
+            frequency = frequency_override
+        elif (
             instrument.market is MarketType.CN
             and instrument.asset_class.value == "equity"
         ):
             frequency = DataFrequency.MINUTE_1
-            start = end = market_today.strftime("%Y%m%d")
         else:
             frequency = DataFrequency.DAILY
+
+        if frequency is DataFrequency.MINUTE_1:
+            start = end = market_today.strftime("%Y%m%d")
+        else:
             end = market_today.strftime("%Y%m%d")
-            start = (market_today - timedelta(days=120)).strftime("%Y%m%d")
+            start = (market_today - timedelta(days=limit + 60)).strftime("%Y%m%d")
         publication = self._published_state.latest_released(
             instrument=instrument,
             category=DataCategory.BAR,

@@ -942,12 +942,24 @@ class PandaDataAdapter:
         realtime_minute: bool,
     ) -> tuple[str, frozenset[str], dict[str, object]]:
         if instrument.asset_class is AssetClass.INDEX:
-            if (
-                instrument.market is not MarketType.CN
-                or frequency is not DataFrequency.DAILY
-            ):
+            if instrument.market is not MarketType.CN:
                 raise UnsupportedDataCategoryError(
-                    "only CN index daily bars passed capability verification"
+                    "only CN index bars passed capability verification"
+                )
+            if frequency is DataFrequency.MINUTE_1:
+                return (
+                    "get_index_min",
+                    frozenset({"CN_INDEX", "frequency=1m"}),
+                    {
+                        "symbol": instrument.provider_symbol,
+                        "start_date": start,
+                        "end_date": end,
+                        "frequency": "1m",
+                    },
+                )
+            if frequency is not DataFrequency.DAILY:
+                raise UnsupportedDataCategoryError(
+                    "only CN index daily and 1m bars passed capability verification"
                 )
             return (
                 "get_index_daily",
