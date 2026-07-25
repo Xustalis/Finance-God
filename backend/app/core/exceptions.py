@@ -42,8 +42,8 @@ def register_exception_handlers(app) -> None:
     async def request_validation_error_handler(request: Request, exc: RequestValidationError):
         errors = [
             {
-                "location": list(error["loc"]),
-                "message": error["msg"],
+                "loc": list(error["loc"]),
+                "msg": error["msg"],
                 "type": error["type"],
             }
             for error in exc.errors()

@@ -13,6 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.ai_catalog import STEPFUN_PROFILE_MODEL
 from app.config import settings
+from app.core.exceptions import FinanceGodError
 from app.core.response import ApiResponse
 from app.core.security import get_current_user
 from app.db.session import get_db
@@ -478,9 +479,10 @@ async def add_message(
         raise
     except TimeoutError as exc:
         await release_message_claim(db, session_id, user_message.id)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AI provider timed out; retry without losing progress",
+        raise FinanceGodError(
+            code="AI_TIMEOUT",
+            message="AI provider timed out; retry without losing progress",
+            http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from exc
     except AIProviderError as exc:
         await release_message_claim(db, session_id, user_message.id)
@@ -488,27 +490,30 @@ async def add_message(
         logger.warning("AI provider error on session %s: code=%s", session_id, exc.code, exc_info=exc)
         # 适配任意提供方前缀（DEEPSEEK_/ARK_ 等）：瞬时性错误按后缀判定为可重试
         retryable = exc.code.endswith(("_TIMEOUT", "_UNAVAILABLE", "_RATE_LIMITED"))
-        raise HTTPException(
-            status_code=(
+        raise FinanceGodError(
+            code=exc.code,
+            message=user_facing_error_detail(exc),
+            http_status=(
                 status.HTTP_503_SERVICE_UNAVAILABLE
                 if retryable
                 else status.HTTP_502_BAD_GATEWAY
             ),
-            detail=user_facing_error_detail(exc),
         ) from exc
     except Exception as exc:
         await release_message_claim(db, session_id, user_message.id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI provider failed before returning a structured response",
+        raise FinanceGodError(
+            code="AI_PROVIDER_FAILED",
+            message="AI provider failed before returning a structured response",
+            http_status=status.HTTP_502_BAD_GATEWAY,
         ) from exc
     try:
         turn = AITurnResult.model_validate(raw_turn)
     except ValidationError as exc:
         await release_message_claim(db, session_id, user_message.id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="AI provider returned an invalid structured response",
+        raise FinanceGodError(
+            code="AI_INVALID_RESPONSE",
+            message="AI provider returned an invalid structured response",
+            http_status=status.HTTP_502_BAD_GATEWAY,
         ) from exc
     target = turn.target_dimension.value
     expected_sensitive = target in SENSITIVE_DIMENSIONS

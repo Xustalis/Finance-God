@@ -1064,34 +1064,37 @@ export async function streamDeskAgentDecision(
     }
     throw error
   }
-  if (!response.ok) {
-    window.clearTimeout(timeout)
-    const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null
-    if (response.status === 401) expireBrowserSession(USER_SESSION)
-    throw new DeskApiError(
-      payload?.error?.message ?? `Agent 流式请求失败（HTTP ${response.status}）`,
-      payload?.error?.code,
-    )
-  }
-  if (response.headers.get('content-type')?.includes('application/json')) {
-    window.clearTimeout(timeout)
-    return await response.json() as DeskAgentDecision
-  }
-  if (!response.body) {
-    window.clearTimeout(timeout)
-    throw new DeskApiError('Agent 流式响应没有可读取的正文', 'AI_STREAM_EMPTY')
-  }
+  try {
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null
+      if (response.status === 401) expireBrowserSession(USER_SESSION)
+      throw new DeskApiError(
+        payload?.error?.message ?? `Agent 流式请求失败（HTTP ${response.status}）`,
+        payload?.error?.code,
+      )
+    }
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      try {
+        return await response.json() as DeskAgentDecision
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          throw new DeskApiError('Agent 返回了无法解析的 JSON 响应', 'AI_STREAM_INVALID_FRAME')
+        }
+        throw error
+      }
+    }
+    if (!response.body) {
+      throw new DeskApiError('Agent 流式响应没有可读取的正文', 'AI_STREAM_EMPTY')
+    }
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let decision: DeskAgentDecision | null = null
-  let answerText = ''
-  let doneSeen = false
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let decision: DeskAgentDecision | null = null
+    let answerText = ''
+    let doneSeen = false
 
-  function consumeLine(line: string) {
-    if (!line.trim()) return
-    const event = JSON.parse(line) as {
+    type StreamEvent = {
       type: 'start' | 'delta' | 'done' | 'error'
       decision?: DeskAgentDecision
       text?: string
@@ -1099,19 +1102,27 @@ export async function streamDeskAgentDecision(
       message?: string
       code?: string
     }
-    if (event.type === 'start' && event.decision) decision = event.decision
-    if (event.type === 'delta' && event.text) {
-      answerText += event.text
-      onDelta(event.text)
-    }
-    if (event.type === 'done') {
-      doneSeen = true
-      answerText = event.answer_text ?? answerText
-    }
-    if (event.type === 'error') throw new DeskApiError(event.message ?? 'Agent 流式生成失败', event.code)
-  }
 
-  try {
+    function consumeLine(line: string) {
+      if (!line.trim()) return
+      let event: StreamEvent
+      try {
+        event = JSON.parse(line) as StreamEvent
+      } catch {
+        throw new DeskApiError('Agent 流式响应包含无法解析的数据帧', 'AI_STREAM_INVALID_FRAME')
+      }
+      if (event.type === 'start' && event.decision) decision = event.decision
+      if (event.type === 'delta' && event.text) {
+        answerText += event.text
+        onDelta(event.text)
+      }
+      if (event.type === 'done') {
+        doneSeen = true
+        answerText = event.answer_text ?? answerText
+      }
+      if (event.type === 'error') throw new DeskApiError(event.message ?? 'Agent 流式生成失败', event.code)
+    }
+
     while (true) {
       const { value, done } = await reader.read()
       buffer += decoder.decode(value, { stream: !done })
@@ -1121,6 +1132,10 @@ export async function streamDeskAgentDecision(
       if (done) break
     }
     consumeLine(buffer)
+    if (!doneSeen || !decision || !answerText.trim()) {
+      throw new DeskApiError('Agent 流式响应未正常结束', 'AI_STREAM_INCOMPLETE')
+    }
+    return { ...(decision as DeskAgentDecision), answer_text: answerText.trim() }
   } catch (error) {
     if (controller.signal.aborted) {
       throw new DeskApiError('Agent 服务响应超时，请重新连接', 'AI_STREAM_TIMEOUT')
@@ -1129,10 +1144,6 @@ export async function streamDeskAgentDecision(
   } finally {
     window.clearTimeout(timeout)
   }
-  if (!doneSeen || !decision || !answerText.trim()) {
-    throw new DeskApiError('Agent 流式响应未正常结束', 'AI_STREAM_INCOMPLETE')
-  }
-  return { ...(decision as DeskAgentDecision), answer_text: answerText.trim() }
 }
 
 export function fetchDeskQuickCommands(input: {
