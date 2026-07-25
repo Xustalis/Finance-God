@@ -24,7 +24,7 @@ git push "$DEPLOY_REMOTE" "HEAD:${DEPLOY_BRANCH}"
 run_id=""
 for _ in {1..30}; do
   run_id="$(gh run list \
-    --workflow CI/CD \
+    --workflow "Fast Deploy" \
     --commit "$COMMIT_SHA" \
     --limit 1 \
     --json databaseId \
@@ -34,12 +34,23 @@ for _ in {1..30}; do
 done
 
 if [[ -z "$run_id" ]]; then
-  echo "未找到提交 ${COMMIT_SHA} 对应的 CI/CD 任务。" >&2
+  echo "未找到提交 ${COMMIT_SHA} 对应的快速部署任务。" >&2
   exit 1
 fi
 
-echo "等待 CI/CD 任务 ${run_id}"
-gh run watch "$run_id" --exit-status
+echo "等待快速部署任务 ${run_id}"
+watch_succeeded=false
+for _ in {1..3}; do
+  if gh run watch "$run_id" --exit-status; then
+    watch_succeeded=true
+    break
+  fi
+  sleep 2
+done
+if [[ "$watch_succeeded" != true ]]; then
+  echo "快速部署任务 ${run_id} 未成功完成。" >&2
+  exit 1
+fi
 
 echo "执行公网 API 验证"
 python3 deploy/verify-public-api.py "$PUBLIC_BASE_URL"

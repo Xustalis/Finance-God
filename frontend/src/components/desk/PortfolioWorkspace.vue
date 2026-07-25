@@ -41,7 +41,9 @@ const props = defineProps<{
   quotes: readonly QuoteSnapshot[]
   loading: boolean
   error: string | null
+  historicalModeActive?: boolean
   onLoad: () => void | Promise<void>
+  onEnterHistoricalMode?: () => void | Promise<void>
   onCreateAccount: (input: { initialCash: string; simulationStartAt: string }) => void | Promise<void>
 }>()
 
@@ -116,7 +118,11 @@ function asShanghaiIso(value: string): string {
 
     <template v-else-if="account">
       <section class="overview-section" aria-labelledby="account-summary-title">
-        <header><h2 id="account-summary-title">模拟账户</h2><small>修订 {{ account.revision }}</small></header>
+        <header>
+          <h2 id="account-summary-title">模拟账户</h2>
+          <small v-if="historicalModeActive">历史演示已启用 · 修订 {{ account.revision }}</small>
+          <button v-else class="refresh-button" type="button" :disabled="loading" @click="onEnterHistoricalMode?.()">进入历史演示</button>
+        </header>
         <dl class="market-sheet"><div><dt>现金总额</dt><dd>{{ money(account.cash_total_rmb) }}</dd></div><div><dt>可用现金</dt><dd>{{ money(account.cash_available_rmb) }}</dd></div><div><dt>冻结资金</dt><dd>{{ money(account.cash_frozen_rmb) }}</dd></div></dl>
       </section>
       <section class="overview-section" aria-labelledby="position-title">

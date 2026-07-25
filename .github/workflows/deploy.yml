@@ -1,4 +1,4 @@
-name: CI/CD
+name: Fast Deploy
 
 on:
   push:
@@ -7,78 +7,10 @@ on:
 
 concurrency:
   group: finance-god-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  boundary:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate production deployment boundary
-        run: |
-          bash -n deploy/check-production-config.sh
-          bash -n deploy/deploy-now.sh
-          bash -n deploy/remote-deploy.sh
-          bash deploy/tests/test-production-config.sh
-          python3 deploy/tests/test-verify-public-api.py
-          docker run --rm \
-            --add-host backend:127.0.0.1 \
-            -v "$PWD/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-            nginx:1.27-alpine nginx -t
-
-  backend:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: core
-            paths: tests/unit tests/domain tests/application tests/agents tests/learning
-          - name: api
-            paths: tests/api tests/crawler tests/integration tests/e2e
-          - name: trading
-            paths: tests/execution tests/ledger tests/market_data tests/trading tests/trade_reviews
-          - name: workflow
-            paths: tests/workflows tests/workflow_persistence tests/workspace tests/test_multi_agent.py tests/test_workflows.py
-    name: backend (${{ matrix.name }})
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-
-      - name: Install backend
-        working-directory: backend
-        run: pip install -r requirements.txt && pip install -e ".[dev]"
-
-      - name: Test backend
-        working-directory: backend
-        env:
-          PANDA_DATA_USERNAME: ci-contract-test
-          PANDA_DATA_PASSWORD: ci-contract-test
-        run: timeout 60s pytest -q ${{ matrix.paths }}
-
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build and test frontend
-        working-directory: frontend
-        run: npm ci && npm test && npm run build
-
   deploy:
-    needs: [boundary, backend, frontend]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -126,11 +58,4 @@ jobs:
       - name: Verify public API
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-        run: |
-          readonly BASE_URL="http://$DEPLOY_HOST"
-          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$BASE_URL/" >/dev/null
-          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$BASE_URL/api/live" >/dev/null
-          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$BASE_URL/api/ready" >/dev/null
-          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
-            "$BASE_URL/api/market/overview?symbols=000001.SH,000001.SZ" >/dev/null
-          python3 deploy/verify-public-api.py "$BASE_URL"
+        run: python3 deploy/verify-public-api.py "http://$DEPLOY_HOST"

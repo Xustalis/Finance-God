@@ -145,6 +145,7 @@ onBeforeUnmount(() => {
             :account="desk.account ?? null" :account-state="desk.accountState" :portfolio="desk.portfolio ?? null" :quotes="desk.quotes ?? []"
             :loading="desk.loadingSimulation || desk.loadingMarket"
             :error="workspaceError || desk.simulationError || desk.marketError" :on-load="desk.refreshPortfolioWorkspace"
+            :historical-mode-active="Boolean(desk.simulationClock)" :on-enter-historical-mode="desk.enterHistoricalMode"
             :on-create-account="(input) => runWorkspaceAction(() => desk.createAccount(input.initialCash, input.simulationStartAt))"
           />
           <WatchlistWorkspace

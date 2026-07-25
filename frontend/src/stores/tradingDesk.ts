@@ -345,7 +345,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       ...watchlistSymbols.value,
       ...extraQuoteSymbols.value,
     ].filter(Boolean))]
-    if (!hasSimulationAccount.value) return symbols
+    if (!simulationClock.value) return symbols
     return [...new Set([
       DEFAULT_SYMBOL,
       ...symbols.filter(instrumentId => !INDEX_SYMBOLS.has(instrumentId)),
@@ -672,7 +672,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     loadingMarket.value = true
     marketError.value = null
     try {
-      const result = hasSimulationAccount.value
+      const result = simulationClock.value
         ? await fetchSimulationMarketOverview(quoteSymbols.value)
         : await fetchMarketOverview(quoteSymbols.value)
       quotes.value = result.quotes
@@ -692,7 +692,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   async function ensureQuote(instrumentId: string): Promise<DeskQuote | null> {
     const cached = quotes.value.find((item) => item.symbol === instrumentId)
     if (cached) return cached
-    const result = hasSimulationAccount.value
+    const result = simulationClock.value
       ? await fetchSimulationMarketOverview([instrumentId])
       : await fetchMarketOverview([instrumentId])
     const fetched = result.quotes
@@ -715,7 +715,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     const freq = barsFrequency.value
     bars.value = []
     try {
-      const result = hasSimulationAccount.value
+      const result = simulationClock.value
         ? await fetchSimulationBars(requestedSymbol, freq ?? '1m')
         : await fetchBars(requestedSymbol, freq)
       if (requestId === barsRequestId && symbol.value === requestedSymbol && barsFrequency.value === freq) {
@@ -762,7 +762,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     const requestedSymbol = symbol.value
     informationFactsError.value = null
     sentimentFactsError.value = null
-    if (hasSimulationAccount.value || marketFactsNotice.value) {
+    if (simulationClock.value || marketFactsNotice.value) {
       informationFacts.value = null
       sentimentFacts.value = null
       return
@@ -793,16 +793,16 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   async function loadMarketNews() {
     const requestId = ++marketNewsRequestId
     marketNewsError.value = null
-    if (hasSimulationAccount.value) {
+    if (simulationClock.value) {
       marketNews.value = null
       return
     }
     try {
       const result = await fetchMarketNews(8)
-      if (requestId !== marketNewsRequestId || hasSimulationAccount.value) return
+      if (requestId !== marketNewsRequestId || simulationClock.value) return
       marketNews.value = result
     } catch (error) {
-      if (requestId !== marketNewsRequestId || hasSimulationAccount.value) return
+      if (requestId !== marketNewsRequestId || simulationClock.value) return
       marketNews.value = null
       marketNewsError.value = failureText(error, '市场资讯抓取不可用')
     }
@@ -1088,7 +1088,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   async function loadCandidates() {
     loadingCandidates.value = true
     candidateError.value = null
-    if (hasSimulationAccount.value) {
+    if (simulationClock.value) {
       candidates.value = null
       loadingCandidates.value = false
       return
@@ -1109,16 +1109,15 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       hasSimulationAccount.value = true
       accountState.value = 'available'
       await loadSimulationData()
+      simulationClock.value = await fetchSimulationClock()
+      await refreshMarket({ withBars: true })
       return account.value
     } catch (error) { simulationError.value = failureText(error, '建立模拟账户失败'); throw error }
   }
 
   async function refreshSimulationClock() {
     if (simulationClockRefreshing) return
-    if (!hasSimulationAccount.value) {
-      simulationClock.value = null
-      return
-    }
+    if (!simulationClock.value) return
     simulationClockRefreshing = true
     try {
       simulationClock.value = await fetchSimulationClock()
@@ -1142,7 +1141,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       account.value = current
       hasSimulationAccount.value = current !== null
       accountState.value = current ? 'available' : 'absent'
-      if (current) simulationClock.value = await fetchSimulationClock()
+      simulationClock.value = null
     } catch (error) {
       const message = failureText(error, '模拟账户不可用')
       if (isMissingSimulationAccount(message)) {
@@ -1155,6 +1154,17 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       accountState.value = 'error'
       accountError.value = message
     }
+  }
+
+  async function enterHistoricalMode() {
+    if (!hasSimulationAccount.value) throw new Error('请先建立模拟账户')
+    simulationClock.value = await fetchSimulationClock()
+    marketNewsRequestId += 1
+    marketNews.value = null
+    informationFacts.value = null
+    sentimentFacts.value = null
+    candidates.value = null
+    await Promise.all([refreshMarket({ withBars: true }), loadSimulationData()])
   }
 
   async function resumeClock() {
@@ -1812,7 +1822,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     stopPolling()
     pollTimer = setInterval(() => { if (!document.hidden) void refreshMarket() }, POLL_INTERVAL_MS)
     simulationClockTimer = setInterval(() => {
-      if (!document.hidden && hasSimulationAccount.value) void refreshSimulationClock()
+      if (!document.hidden && simulationClock.value) void refreshSimulationClock()
     }, 1_000)
   }
 
@@ -1887,7 +1897,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     deskCapabilities, profileProjection, bootstrapStatus, bootstrapError, notificationHistory, uiActionError, lastUiActionReceipt,
     workspaceControl, openedRecord, candidateLocation, tradeDraftPrefill, requestedArtifactId, requestedReminderId,
     selectedQuote, unreadCount, profileSummary, quickCommands,
-    setSection, setSymbol, setBarsFrequency, refreshMarket, refreshOverviewWorkspace, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace, refreshSimulationClock, resumeClock,
+    setSection, setSymbol, setBarsFrequency, refreshMarket, refreshOverviewWorkspace, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace, refreshSimulationClock, enterHistoricalMode, resumeClock,
     loadProfile, loadMarketFacts, loadMarketNews, loadNotifications, loadNotificationHistory,
     dismissNotification, applyUiAction,
     loadSimulationData, loadTradeEpisodes, loadAgentLearningSummary, loadReviewWorkspace, selectTradeEpisode, retrySelectedTradeReview, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,

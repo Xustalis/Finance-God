@@ -61,6 +61,7 @@ vi.mock('@/services/tradingDesk', () => ({
   fetchWorkflowEvidence: vi.fn(),
   applyDeskUiAction: vi.fn(),
   fetchSimulationAccount: vi.fn().mockRejectedValue(new Error('账户不存在')),
+  fetchSimulationClock: vi.fn(),
   fetchSimulationPortfolio: vi.fn().mockResolvedValue({ positions: [] }),
   fetchSimulationOrders: vi.fn().mockResolvedValue([]),
   fetchSimulationFills: vi.fn().mockResolvedValue([]),
@@ -169,6 +170,15 @@ beforeEach(() => {
   vi.mocked(tradingDeskApi.fetchInformationFacts).mockRejectedValue(new Error('市场资讯不可用'))
   vi.mocked(tradingDeskApi.fetchSentimentFacts).mockRejectedValue(new Error('市场情绪不可用'))
   vi.mocked(tradingDeskApi.fetchSimulationAccount).mockResolvedValue(null)
+  vi.mocked(tradingDeskApi.fetchSimulationClock).mockResolvedValue({
+    account_id: 'account-1',
+    current_time: '2026-07-24T09:31:00+08:00',
+    speed: 1,
+    status: 'running',
+    session_close_at: '2026-07-24T15:00:00+08:00',
+    next_session_open_at: '2026-07-25T09:30:00+08:00',
+    revision: 1,
+  })
   vi.mocked(tradingDeskApi.fetchSimulationPortfolio).mockResolvedValue({ account_id: '', owner_id: '', as_of: '', rule_version: '', positions: [], realized_pnl_rmb: '0' })
   vi.mocked(tradingDeskApi.fetchSimulationOrders).mockResolvedValue([])
   vi.mocked(tradingDeskApi.fetchSimulationFills).mockResolvedValue([])
@@ -798,8 +808,13 @@ describe('trading workspace routing', () => {
 
     store.hasSimulationAccount = true
     await store.loadMarketNews()
+    expect(store.marketNews).not.toBeNull()
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(3)
+
+    store.simulationClock = await tradingDeskApi.fetchSimulationClock()
+    await store.loadMarketNews()
     expect(store.marketNews).toBeNull()
-    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(2)
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(3)
   })
 
   it('requests real daily bars on first load', async () => {
@@ -808,6 +823,29 @@ describe('trading workspace routing', () => {
     await store.initialize()
 
     expect(tradingDeskApi.fetchBars).toHaveBeenCalledWith('000001.SZ', 'daily')
+  })
+
+  it('starts in live mode even when a historical simulation account exists', async () => {
+    vi.mocked(tradingDeskApi.fetchSimulationAccount).mockResolvedValue({
+      account_id: 'account-1',
+      owner_id: 'user-1',
+      status: 'active',
+      cash_total_rmb: '100000',
+      cash_available_rmb: '100000',
+      cash_frozen_rmb: '0',
+      margin_rmb: '0',
+      revision: 1,
+      simulation_time: '2026-07-24T09:31:00+08:00',
+    })
+    const store = useTradingDeskStore(createPinia())
+
+    await store.initialize()
+
+    expect(store.hasSimulationAccount).toBe(true)
+    expect(store.simulationClock).toBeNull()
+    expect(tradingDeskApi.fetchSimulationClock).not.toHaveBeenCalled()
+    expect(tradingDeskApi.fetchMarketOverview).toHaveBeenCalled()
+    expect(tradingDeskApi.fetchSimulationMarketOverview).not.toHaveBeenCalled()
   })
 
   it('keeps unsupported index minute bars out of chart and historical quote requests', async () => {
@@ -822,6 +860,7 @@ describe('trading workspace routing', () => {
     expect(store.minuteBarsSupported).toBe(false)
     expect(tradingDeskApi.fetchBars).toHaveBeenLastCalledWith('000001.SH', 'daily')
     store.hasSimulationAccount = true
+    store.simulationClock = await tradingDeskApi.fetchSimulationClock()
     expect(store.quoteSymbols).not.toContain('000001.SH')
     expect(store.quoteSymbols).not.toContain('399001.SZ')
     expect(store.quoteSymbols).not.toContain('000300.SH')
@@ -834,6 +873,7 @@ describe('trading workspace routing', () => {
     store.setSymbol('000300.SH')
     await flushPromises()
     store.hasSimulationAccount = true
+    store.simulationClock = await tradingDeskApi.fetchSimulationClock()
 
     store.setSection('trading')
     await flushPromises()
