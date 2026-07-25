@@ -468,6 +468,9 @@ class OpenAICompatibleStructuredChat(AIOrchestrator):
         self.invalid_response_retries = invalid_response_retries
         self.transport = transport
 
+    def response_format(self, current_dimension: str) -> dict[str, Any]:
+        return {"type": "json_object"}
+
     async def respond(
         self,
         *,
@@ -516,7 +519,7 @@ class OpenAICompatibleStructuredChat(AIOrchestrator):
         ][-10:]
         body = {
             "model": self.model_name,
-            "response_format": {"type": "json_object"},
+            "response_format": self.response_format(current_dimension),
             "messages": [
                 {
                     "role": "system",
@@ -674,6 +677,65 @@ class StepFunOrchestrator(OpenAICompatibleStructuredChat):
             invalid_response_retries=1,
             transport=transport,
         )
+
+    def response_format(self, current_dimension: str) -> dict[str, Any]:
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "onboarding_turn",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "reply": {"type": "string", "minLength": 1, "maxLength": 1200},
+                        "target_dimension": {
+                            "type": "string",
+                            "const": current_dimension,
+                        },
+                        "profile_value": {
+                            "type": ["number", "null"],
+                            "minimum": -1,
+                            "maximum": 1,
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                        },
+                        "should_continue": {"type": "boolean"},
+                        "end_reason": {
+                            "anyOf": [
+                                {"type": "string", "maxLength": 200},
+                                {"type": "null"},
+                            ]
+                        },
+                        "next_question": {
+                            "anyOf": [
+                                {"type": "string", "maxLength": 500},
+                                {"type": "null"},
+                            ]
+                        },
+                        "next_question_dimension": {
+                            "anyOf": [
+                                {"type": "string", "enum": list(PROFILE_DIMENSIONS)},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                    "required": [
+                        "reply",
+                        "target_dimension",
+                        "profile_value",
+                        "confidence",
+                        "should_continue",
+                        "end_reason",
+                        "next_question",
+                        "next_question_dimension",
+                    ],
+                },
+            },
+        }
 
 
 class ArkOrchestrator(OpenAICompatibleStructuredChat):

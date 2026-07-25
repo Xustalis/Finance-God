@@ -657,7 +657,16 @@ async def test_stepfun_provider_uses_benchmarked_profile_configuration() -> None
     assert captured["url"] == "https://api.stepfun.com/v1/chat/completions"
     assert captured["authorization"] == "Bearer stepfun-secret"
     assert captured["body"]["model"] == "step-3.5-flash-2603"
-    assert captured["body"]["response_format"] == {"type": "json_object"}
+    response_format = captured["body"]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    schema = response_format["json_schema"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["target_dimension"] == {
+        "type": "string",
+        "const": "risk_tolerance",
+    }
+    assert set(schema["required"]) == set(schema["properties"])
     assert captured["body"]["reasoning_effort"] == "low"
     assert captured["body"]["max_tokens"] == 2048
     assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.6}
@@ -679,7 +688,9 @@ async def test_stepfun_retries_one_invalid_structured_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         bodies.append(json.loads(request.content))
         if len(bodies) == 1:
-            return deepseek_raw_response("")
+            return deepseek_raw_response(
+                '{"reply":"这是一段被截断的回答","target_dimension":"risk_tolerance"'
+            )
         return deepseek_response(valid)
 
     orchestrator = ai.StepFunTextProvider(
