@@ -12,11 +12,22 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 function detailText(details: unknown): string | null {
   if (typeof details === 'string') return details
   if (details && typeof details === 'object' && 'reason' in details && typeof details.reason === 'string') return details.reason
+  if (details && typeof details === 'object' && 'errors' in details && Array.isArray(details.errors)) {
+    const first = details.errors[0]
+    if (first && typeof first === 'object') {
+      const location = 'loc' in first && Array.isArray(first.loc) ? String(first.loc.at(-1) ?? '请求参数') : '请求参数'
+      const type = 'type' in first && typeof first.type === 'string' ? first.type : ''
+      if (type.includes('uuid')) return `${location} 必须是有效 UUID`
+      if ('msg' in first && typeof first.msg === 'string') return `${location}：${first.msg}`
+    }
+  }
   return null
 }
 
 export function errorMessageFromEnvelope(body: ApiEnvelope<unknown> | undefined): string {
-  const base = body?.error?.message || '请求失败'
+  const base = body?.error?.code === 'VALIDATION_ERROR'
+    ? '提交内容格式不符合接口要求'
+    : body?.error?.message || '请求失败'
   const detail = detailText(body?.error?.details)
   return detail ? `${base}：${detail}` : base
 }

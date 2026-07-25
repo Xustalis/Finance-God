@@ -97,6 +97,8 @@ async function openSession() {
   const started = voice.start({ surface: 'desk', contextVersion: 'desk:user-1:information' })
   const socket = await pendingSocket()
   socket.open()
+  await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+  socket.message({ type: 'session.ready' })
   await started
   return { voice, socket }
 }
@@ -139,7 +141,6 @@ describe('useRealtimeVoice connection lifecycle', () => {
     })
     expect(voice.active.value).toBe(true)
 
-    socket.message({ type: 'session.ready' })
     expect(voice.phase.value).toBe('listening')
   })
 
@@ -217,6 +218,8 @@ describe('useRealtimeVoice connection lifecycle', () => {
     const retried = voice.start({ surface: 'onboarding', sessionId: 'session-1' })
     await vi.waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
     MockWebSocket.instances[1].open()
+    await vi.waitFor(() => expect(MockWebSocket.instances[1].sent).toHaveLength(1))
+    MockWebSocket.instances[1].message({ type: 'session.ready' })
     await retried
 
     expect(voice.active.value).toBe(true)

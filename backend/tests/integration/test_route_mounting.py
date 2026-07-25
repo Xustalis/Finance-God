@@ -48,6 +48,25 @@ def test_fastapi_entrypoint_exposes_request_diagnostics_and_compression(
     assert response.headers["Content-Encoding"] == "gzip"
 
 
+def test_cors_preflight_allows_idempotent_finance_commands(
+    client: TestClient,
+) -> None:
+    response = client.options(
+        "/api/simulation/accounts",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "authorization,content-type,idempotency-key"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    allowed = response.headers["Access-Control-Allow-Headers"].lower()
+    assert "idempotency-key" in allowed
+
+
 def test_simulation_current_account_requires_bearer_token(
     client: TestClient,
 ) -> None:

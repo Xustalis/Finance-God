@@ -236,7 +236,10 @@ class DataDiagnostic(BaseModel):
     empty_meaning: EmptyMeaning = EmptyMeaning.NOT_EMPTY
     retryable: bool = False
     endpoint: str | None = Field(
-        default=None, min_length=5, max_length=96, pattern=r"^get_[a-z0-9_]+$"
+        default=None,
+        min_length=5,
+        max_length=96,
+        pattern=r"^(?:get_[a-z0-9_]+|init_token)$",
     )
     details: tuple[tuple[str, str], ...] = ()
 

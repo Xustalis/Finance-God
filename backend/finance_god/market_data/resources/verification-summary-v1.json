@@ -8,7 +8,7 @@
   "contains_full_urls": false,
   "contains_raw_market_rows": false,
   "instrument_master_identity": "finance-god-instrument-master",
-  "instrument_master_version": "823da7d3ebe3a8a57db1f6a466e9710dbb448335078e81fa332519ed4caa768c",
+  "instrument_master_version": "7b299e62cfce83f92e7513644e34a2fd6935db4067f972bf900e2181ec7eb8f1",
   "limitations": [
     "The prior probe retained success classification but not exact row counts, field names, or time-of-day; missing evidence is never reconstructed.",
     "VERIFIED_ONCE_RESEARCH is not a production stability guarantee and cannot be extrapolated to other symbols, frequencies, sessions, categories, or parameter shapes.",
@@ -38,7 +38,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "5415ffa51d5f94522fbddd3193bcb45b7a536a9f59b290e738b0b33ca744fca3"
+        "edea9c9f682bf74619b387fc60f19ded4c7989cb134846ebbb34bcd957dc5987"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -68,7 +68,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "48693e082a04dbc87e22deadc5a679ddbaa2156009c4c67f31a6be19abf5187d"
+        "9b418cbc1f9d55c792dd140c38879fcb1db63a8150193b8ed6d0695d5df38c92"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -98,7 +98,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "c5d2d3207f9c4f5016522294882aff6e735bb7fac4694f6458b652806c08abb0"
+        "a130ac6e0751feab9daf73312a731f361e25720eda157d1da7c0578277d14b0d"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -128,7 +128,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "c56c9628cd22d489315aacf309b1cd3c178fd4e1aa35f2dcac501df323b089c1"
+        "545d64eeb0e263aea11eb8d6773b87627ceb5a6036af5653f6ddf969f7a47baf"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -158,7 +158,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "dd5614eb183f4c295291ec49d07a13ecb4a52b852aa47fc18628a120eae78d92"
+        "b4dd09b7955ef0e4590f845aed39725708ec00943f04badc1f412d93247aafed"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -188,7 +188,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "1e50ddebe14987829ef5faf8f45b58f2c037713a361160e6b71b797cdd34c4f3"
+        "16ef896aa7484188189f35f10bd6d55d4b66ed905288792db1a1ca999a68ad5a"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -218,7 +218,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "28b5a7160558907a144d0fd89ac63e5d1599caf914ed1e82a1e7b41f2b56dae0"
+        "e80fe546b568db8de619f2725857546ecffa9b0ab3f153da441c7a9359129336"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -248,7 +248,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "316854f01e03efdf94d513dfe65d8fe62eebe3af037495422bc8757a7523a642"
+        "0fc47ead95413395601493410bece91f7443d5bde14e92c2deb04f1534cd0518"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -278,7 +278,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "c9ac40d6c81222774f02269829af79f6bd4d995b44a9f0b136d6e15ec9fde73a"
+        "f27b5d03118c308aaf8be1d45e83a94c02a2b78176062d2246fe350bf8cfe606"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -308,7 +308,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "fedab806ca89e529a9219ccf9ce54ab4e288da27b8568319cbbd7de8c7bf951f"
+        "847f254b75c13f33602b253fbb61b064f1c61233d1a2a14646dcc051df84b8f8"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -338,7 +338,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "3d4833e10fc2e0d56a62bf8cebd78ed95013d1d876387b77e5006c95bd1fc711"
+        "9ed1fb9f3bcf2aa8a2f534fd55937fc35fd40ded3901fa919b41c765dbf50781"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -368,7 +368,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "a51224cd1ed63c175bd8ea10a427f049a08555f029cd8a0add0b9342f78e96d0"
+        "6760cd7f9dcab47590aca5512e8267d51c2858e6827ffa59844d2abf5a10813b"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -398,7 +398,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "e2c5ef2641241f18ee5a391cd5edd05a512f0d9d740b4edeae8f6378ea8b833c"
+        "928aa6b93b0d25535e21b181b34f9205f6b9dfd2dd426fea7679bff698c6e659"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -434,9 +434,9 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "5b36ed2d46e85e3b08fa288ea801e57272d230d38523fff5ba70dd682b38c4c4",
-        "ac52a78e61f8159cfe25fe1df93bbed2d1c8076366c30f79014d6541db703bba",
-        "18fdd956ad177319ab2462c10271c0828a047899280e9c4673cc9eba1ee2a8ce"
+        "cd0a38e4c31b27f0b2a7db4d216646421fa5e64c0a6f3d9294c8c80d91af58b0",
+        "1302f1d0e5399905f1d1ef6073a23cc4fd304ee81b0af6a1b1424ffafba60e48",
+        "d8f6e7ec79b94820e4ab948e82ae73699f61e47c4a2785198580f8ec5fa5c082"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -466,7 +466,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "7ab8c3fac08846f6ac3a05eb9ae9d85b53d449efe3d80779743549540f5fa722"
+        "1dc0b75bf96240dbb638cc3858a32d0dc9d4c189f923fab7a610441af0ea0644"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -497,7 +497,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "701d9f7584d1bc0c0b28ea3a1cfbaf7f8c36fd24d0eda68c609ad194e847469b"
+        "409bcdb231bbd3533e9a1e95aaff7b3bd419b238af1fbbdde762ef79917cb450"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -527,7 +527,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "d3e6658958f0682becea1efa217a9e127ac02b00a3b9e5a20791c35d32d992ce"
+        "c1e2c4d21cbea6d552df9e4cea950865ab73cc4f890de364a932fc4296e15880"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -557,7 +557,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "dd4a7e4a60826bbecbd3c0cec553a9c1b29be8c848d1003499dd6cf95d894a43"
+        "c271688da5846506597ec832e311670779e0ef081c7af741563649012690fa8e"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -587,7 +587,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "2f0a78cdddec16fd6adff91e46b44005cddef1a942937c7a6d3fd5f6d37187dd"
+        "4a1d5b97930f57f4cdc383c43485b30d729d4f9dab32ea3fc7978e33ebc008fb"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -617,7 +617,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "0165df477da05046c2c5d48b0e8b6d3dc7ce2d669b6f90f9c65d61462ae757d1"
+        "4648c035a4b06684b6301addc13abbcfb8785d35bc32e63e2cc02a522ef1bc68"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -647,7 +647,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "c3134a1499250c5c8f14a6e0661061c4d572d7ec586ac85bbf87f462a8772811"
+        "d7d2fa77cd46148acdf58da40f6180c6ecf6715d68bfde726a3c1c1f55478624"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -677,7 +677,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "2416b4b5efbf3956f0e916b88e6f6f284f784a615b2a733d99076ad00482415f"
+        "9e4949fbf3cc23d1dd634ab463b38e279542dfdda263db67601e89257cbee426"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -707,7 +707,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "be0a22efb57a78396375c8f6e2f39068db6a05a54927f489ba44b55017b5467a"
+        "5c1279de13617643998f8802bbc0e4311139187bf08b77bb9e0825a1ed3f3df3"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -737,7 +737,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "fc080af7ea47749650eefab444b7962371412324f2d70fb06666191563a1d024"
+        "5173c1bd1f1a9c8016b7b4b30bd5827d32c195aab9132a27b9fbc7ba482e9ecc"
       ],
       "trade_eligible": false,
       "availability": "verified_research_only",
@@ -768,7 +768,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "7e3626d9aafe0487b58c318a2a561bbbb4511688b9c92f330b662c8beabd9954"
+        "157c49c4b02fdd02c2232321402af71b7299cdd53cfa6e2ecccc00f5d4078103"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -798,7 +798,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "e1fc12ef4caf5656b1fcf93b3bc5d87bd90a7df5b493ba0793a67eefdc2a60bf"
+        "ae9951cdb305b79804db9af5997a65655525a2823f119cb62966f32196055b0c"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -829,7 +829,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "dd902373a1349472f0d34fce9e761e39feb55ce7fce136ccfc15d86c57d010c2"
+        "f644dbdea84d79fc0e28beb20ebc13f7b6aea2e6f18fc110e5aa1eff36bd7b71"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -865,9 +865,9 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "ddc2989b42a94c51b60bf36116a8faf0e7be69d0bb17020e21bc3d3f6f356fdf",
-        "ebd0ce474f860fe9ee3ee83091e685e22e531bc3a2307cacc3741543e7b601e7",
-        "3dfeda0119a1bc1169a844f0cfd79526d1f88fc927526fdbc3cf4a7d9bdcb1d3"
+        "b10059628cd91340bd417ab11b565405b51abba8cf205d23924a57df832e1071",
+        "9494fb4cacd16de77b452b64a050378f3e72e7584cae38cc35285cbf79df6c71",
+        "b64eed8cda408fff57ba950c610c45b8fca5c69af27cd26fa69f119e21f88752"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -898,7 +898,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "3c0225a9c2eb4b05ba29b4adef64a5d4f51359d54bb300cef757b0508b319c34"
+        "fd1a5c25ccca75122806a664cbc453d4d4d25c7f36f86eeedb64a01f4b48f834"
       ],
       "trade_eligible": false,
       "availability": "production_available",
@@ -928,7 +928,7 @@
       },
       "sdk_version": "0.0.12",
       "request_shape_sha256s": [
-        "a18d824a71f1d7a2b8d0f44f8b501a2389a9e1b18bf5897aa3b84f2a2e148725"
+        "913764c9c93060c1a179c8abee4cab80caa818d2230efda81da5895c316bd04a"
       ],
       "trade_eligible": false,
       "availability": "production_available",

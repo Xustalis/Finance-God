@@ -28,12 +28,15 @@ services:
       APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
       DATABASE_URL_SYNC: postgresql+psycopg2://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
-      FINANCE_GOD_DATABASE_URL: postgresql+psycopg2://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
+      FINANCE_GOD_DATABASE_URL: postgresql+asyncpg://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
+      FINANCE_GOD_MARKET_BAR_CACHE_PATH: /app/data/market-bars.sqlite3
+      FINANCE_GOD_PANDA_AUTH_STATE_DIR: /app/data/panda-auth
       PANDA_DATA_USERNAME: ${PANDA_DATA_USERNAME:?PANDA_DATA_USERNAME is required}
       PANDA_DATA_PASSWORD: ${PANDA_DATA_PASSWORD:?PANDA_DATA_PASSWORD is required}
       FINANCE_GOD_KNOWLEDGE_DIR: /app/artifacts/knowledge
     volumes:
       - learning_data:/app/artifacts/knowledge:ro
+      - market_data:/app/data
     depends_on:
       db:
         condition: service_healthy
@@ -105,3 +108,4 @@ services:
 volumes:
   postgres_data:
   learning_data:
+  market_data:

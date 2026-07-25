@@ -20,7 +20,21 @@ export const objectiveSteps:ObjectiveStep[]=[
   {key:'fund_horizon',eyebrow:'第九章 · 时间',title:'这笔资金预计多久不会使用？',choices:[['under_1_year','1年以内'],['1_3_years','1–3年'],['3_5_years','3–5年'],['5_plus_years','5年以上']].map(([value,label])=>({value,label}))},
   {key:'loss_reaction',eyebrow:'第十章 · 波动',title:'如果短期亏损 15%，你更可能？',choices:[['sell_all','全部卖出'],['reduce','减少仓位'],['hold','保持不动'],['buy_more','分批增加']].map(([value,label])=>({value,label}))},
 ]
-const makeId=()=>globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`
+interface RequestIdCrypto {
+  randomUUID?: () => string
+  getRandomValues?: (values: Uint8Array) => Uint8Array
+}
+
+export function makeRequestId(source: RequestIdCrypto | undefined = globalThis.crypto): string {
+  if (source?.randomUUID) return source.randomUUID()
+  const bytes = new Uint8Array(16)
+  if (source?.getRandomValues) source.getRandomValues(bytes)
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 export const useOnboardingStore=defineStore('onboarding',()=>{
   const session=ref<Session|null>(null), objectiveIndex=ref(0), objective=ref<Partial<ObjectiveProfile>>({}), messages=ref<{role:'user'|'assistant';content:string}[]>([]), busy=ref(false), error=ref(''), profileReady=ref(false)
   let client=onboardingApi
@@ -44,7 +58,7 @@ export const useOnboardingStore=defineStore('onboarding',()=>{
   function selectObjective(value:string|number){const step=currentObjective.value;if(!step)return;(objective.value as Record<string,unknown>)[step.key]=value;if(objectiveIndex.value<objectiveSteps.length-1)objectiveIndex.value++;persistDraft()}
   function previousObjective(){objectiveIndex.value=Math.max(0,objectiveIndex.value-1);persistDraft()}
   async function submitObjective(){if(!session.value||!objectiveComplete.value)throw new Error('请完成全部客观信息');busy.value=true;try{const key=draftKey();session.value=await client.saveObjective(session.value.id,objective.value as ObjectiveProfile);if(key)localStorage.removeItem(key)}finally{busy.value=false}}
-  async function sendContent(content:string,input_mode:InputMode='text'){if(!session.value)throw new Error('会话尚未建立');busy.value=true;error.value='';const retry=pendingContent?.content===content&&pendingContent.inputMode===input_mode?pendingContent:{content,inputMode:input_mode,requestId:makeId()};pendingContent=retry;try{const result=await client.sendMessage(session.value.id,{request_id:retry.requestId,content,input_mode});pendingContent=null;session.value=result.session;messages.value.push({role:'user',content:result.user_message.content},{role:'assistant',content:result.assistant_message.content});persistMessages();return result}catch(e){error.value=e instanceof Error?e.message:'对话暂时不可用';throw e}finally{busy.value=false}}
+  async function sendContent(content:string,input_mode:InputMode='text'){if(!session.value)throw new Error('会话尚未建立');busy.value=true;error.value='';const retry=pendingContent?.content===content&&pendingContent.inputMode===input_mode?pendingContent:{content,inputMode:input_mode,requestId:makeRequestId()};pendingContent=retry;try{const result=await client.sendMessage(session.value.id,{request_id:retry.requestId,content,input_mode});pendingContent=null;session.value=result.session;messages.value.push({role:'user',content:result.user_message.content},{role:'assistant',content:result.assistant_message.content});persistMessages();return result}catch(e){error.value=e instanceof Error?e.message:'对话暂时不可用';throw e}finally{busy.value=false}}
   async function skipCurrent(){if(session.value?.current_dimension!=='income_stability')throw new Error('当前问题不能跳过');busy.value=true;try{session.value=await client.skip(session.value.id,'income_stability')}finally{busy.value=false}}
   async function complete(){if(!session.value)throw new Error('会话尚未建立');busy.value=true;try{return await client.complete(session.value.id)}finally{busy.value=false}}
   return{session,objectiveIndex,objective,messages,busy,error,profileReady,currentObjective,objectiveComplete,configureApi,restore,reset,persistMessages,selectObjective,previousObjective,submitObjective,sendContent,skipCurrent,complete}

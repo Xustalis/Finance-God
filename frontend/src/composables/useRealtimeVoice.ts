@@ -110,6 +110,43 @@ function waitForOpen(socket: WebSocket): Promise<void> {
   })
 }
 
+function waitForSessionReady(
+  socket: WebSocket,
+  onEvent: (event: MessageEvent<string>) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      window.clearTimeout(timer)
+      socket.removeEventListener('error', handleFailure)
+      socket.removeEventListener('close', handleFailure)
+      socket.onmessage = onEvent
+    }
+    const settle = (callback: () => void) => {
+      cleanup()
+      callback()
+    }
+    const handleFailure = () => settle(
+      () => reject(new Error(CONNECTION_FAILED_MESSAGE)),
+    )
+    const timer = window.setTimeout(
+      () => settle(
+        () => reject(new Error('实时语音认证超时，请使用文字输入。')),
+      ),
+      CONNECTION_TIMEOUT_MS,
+    )
+    socket.addEventListener('error', handleFailure)
+    socket.addEventListener('close', handleFailure)
+    socket.onmessage = (event) => {
+      onEvent(event)
+      const payload = JSON.parse(event.data) as RealtimeEvent
+      if (payload.type === 'session.ready') settle(resolve)
+      if (payload.type === 'session.error' || payload.type === 'session.closed') {
+        settle(() => reject(new Error(serverError(payload))))
+      }
+    }
+  })
+}
+
 function serverError(payload: RealtimeEvent): string {
   const message = payload.message || '实时语音连接已结束，请使用文字输入。'
   return payload.code ? `${message}（${payload.code}）` : message
@@ -231,8 +268,15 @@ export function useRealtimeVoice() {
     try {
       await setupMicrophone()
       socket = new WebSocket(websocketUrl())
-      socket.onmessage = handleEvent
       await waitForOpen(socket)
+      socket.onerror = () => {
+        if (!error.value) error.value = CONNECTION_FAILED_MESSAGE
+      }
+      socket.onclose = () => {
+        if (stopping) return
+        if (!error.value) error.value = '实时语音连接已中断，请使用文字输入。'
+        void stop('error')
+      }
       const token = localStorage.getItem('finance-god-token')
       if (!token) throw new Error('登录状态已失效')
       socket.send(JSON.stringify({
@@ -242,15 +286,8 @@ export function useRealtimeVoice() {
         session_id: options.sessionId,
         context_version: options.contextVersion,
       }))
+      await waitForSessionReady(socket, handleEvent)
       active.value = true
-      socket.onerror = () => {
-        if (!error.value) error.value = CONNECTION_FAILED_MESSAGE
-      }
-      socket.onclose = () => {
-        if (stopping) return
-        if (!error.value) error.value = '实时语音连接已中断，请使用文字输入。'
-        void stop('error')
-      }
     } catch (cause) {
       if (!error.value) {
         error.value = cause instanceof DOMException && cause.name === 'NotAllowedError'

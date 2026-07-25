@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory } from 'vue-router'
 import { createAppRouter } from '@/router'
 import { useAdminAuthStore } from '@/stores/adminAuth'
-import { objectiveSteps, useOnboardingStore } from '@/stores/onboarding'
+import { makeRequestId, objectiveSteps, useOnboardingStore } from '@/stores/onboarding'
 import { createSpeechController } from '@/composables/useSpeech'
 import { emitProfileCompleted, saveAndEmitProfileCompleted } from '@/services/workbench'
 import { ApiClientError, errorMessageFromEnvelope, unwrapEnvelope } from '@/api/client'
@@ -153,6 +153,17 @@ describe('objective profile state', () => {
 })
 
 describe('direct conversation updates', () => {
+  it('generates an RFC 4122 request id when randomUUID is unavailable', () => {
+    const requestId = makeRequestId({
+      getRandomValues(values) {
+        values.set(Array.from({ length: 16 }, (_, index) => index))
+        return values
+      },
+    })
+
+    expect(requestId).toBe('00010203-0405-4607-8809-0a0b0c0d0e0f')
+  })
+
   it('keeps the browser timeout above the backend AI request budget', () => {
     expect(ONBOARDING_MESSAGE_TIMEOUT_MS).toBe(70_000)
   })
@@ -228,6 +239,7 @@ describe('admin settings privacy', () => {
 describe('application contract',()=>{
   it('provides the DOM mount target used by main',()=>{const html=readFileSync('index.html','utf8');expect(html).toContain('id="app"')})
   it('reads request ids from meta and error details',()=>{expect(errorMessageFromEnvelope({success:false,data:null,error:{code:'bad',message:'failed',details:{reason:'具体原因'}},meta:{request_id:'req-1'}})).toBe('failed：具体原因')})
+  it('explains UUID validation failures with the affected field',()=>{expect(errorMessageFromEnvelope({success:false,data:null,error:{code:'VALIDATION_ERROR',message:'Request validation failed',details:{errors:[{type:'uuid_parsing',loc:['body','request_id'],msg:'Input should be a valid UUID'}]}},meta:{request_id:null}})).toBe('提交内容格式不符合接口要求：request_id 必须是有效 UUID')})
   it('unwraps successful envelopes when request id is null',()=>{expect(unwrapEnvelope({success:true,data:{ok:true},error:null,meta:{request_id:null}})).toEqual({ok:true})})
   it('mounts immediately, hydrates an existing token in the background, and contains hydrate failures',async()=>{const order:string[]=[];let release!:()=>void;const pending=new Promise<void>(resolve=>{release=resolve});const boot=bootstrapApplication({hasToken:true,hydrate:async()=>{order.push('hydrate');await pending;throw new Error('expired')},mount:()=>{order.push('mount')},afterHydrate:()=>{order.push('validated')}});expect(order).toEqual(['mount','hydrate']);release();await boot;expect(order).toEqual(['mount','hydrate','validated'])})
   it('resolves the workbench origin from either supported build variable',()=>{expect(resolveWorkbenchOrigin({VITE_WORKBENCH_ORIGIN:'https://vite.example',WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://vite.example');expect(resolveWorkbenchOrigin({WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://alias.example')})

@@ -143,18 +143,24 @@ class FactService(StubService):
         )
 
 
-class FailingCrawlerService:
-    async def get_news(self, **_: object):
-        raise RuntimeError("upstream news unavailable")
+class FailingFactService(StubService):
+    def read_information_facts(self, symbol: str, **kwargs: object):
+        del symbol, kwargs
+        raise MarketDataError(ErrorKind.TRANSIENT, "facts unavailable")
 
-    async def get_sentiment(self):
-        raise RuntimeError("upstream sentiment unavailable")
+    def read_sentiment_facts(self, symbol: str, **kwargs: object):
+        del symbol, kwargs
+        raise MarketDataError(ErrorKind.TRANSIENT, "facts unavailable")
 
 
 def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "_crawler_service_instance", FailingCrawlerService)
+    monkeypatch.setattr(
+        server,
+        "_services",
+        lambda: (FailingFactService(), FailingApplication()),
+    )
     monkeypatch.setattr(
         server.settings,
         "market_reference_mock_fallback",
@@ -162,10 +168,19 @@ def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
     )
 
     information = asyncio.run(
-        server.information_facts(_request(b"symbol=600519.SH&limit=3"))
+        server.information_facts(
+            _request(
+                b"symbol=600519.SH&start_quarter=2026q1"
+                b"&end_quarter=2026q2&limit=3"
+            )
+        )
     )
     sentiment = asyncio.run(
-        server.sentiment_facts(_request(b"symbol=600519.SH"))
+        server.sentiment_facts(
+            _request(
+                b"symbol=600519.SH&start_date=20260701&end_date=20260723"
+            )
+        )
     )
     information_payload = _payload(information)
     sentiment_payload = _payload(sentiment)
@@ -197,7 +212,11 @@ def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
 def test_reference_fact_endpoints_keep_explicit_error_when_mock_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "_crawler_service_instance", FailingCrawlerService)
+    monkeypatch.setattr(
+        server,
+        "_services",
+        lambda: (FailingFactService(), FailingApplication()),
+    )
     monkeypatch.setattr(
         server.settings,
         "market_reference_mock_fallback",
@@ -205,16 +224,19 @@ def test_reference_fact_endpoints_keep_explicit_error_when_mock_is_disabled(
     )
 
     information = asyncio.run(
-        server.information_facts(_request(b"symbol=600519.SH"))
+        server.information_facts(
+            _request(
+                b"symbol=600519.SH&start_quarter=2026q1"
+                b"&end_quarter=2026q2"
+            )
+        )
     )
-    sentiment = asyncio.run(
-        server.sentiment_facts(_request(b"symbol=600519.SH"))
-    )
+    sentiment = asyncio.run(server.sentiment_facts(_request(b"symbol=600519.SH")))
 
-    assert information.status_code == 500
-    assert sentiment.status_code == 500
-    assert _payload(information)["error"]["code"] == "MARKET_DATA_INTERNAL_ERROR"
-    assert _payload(sentiment)["error"]["code"] == "MARKET_DATA_INTERNAL_ERROR"
+    assert information.status_code == 502
+    assert sentiment.status_code == 502
+    assert _payload(information)["error"]["code"] == "MARKET_DATA_UPSTREAM_TEMPORARY"
+    assert _payload(sentiment)["error"]["code"] == "MARKET_DATA_UPSTREAM_TEMPORARY"
 
 
 def test_market_api_returns_stable_safe_errors_without_raw_exception_text(

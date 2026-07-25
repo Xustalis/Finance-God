@@ -1,4 +1,5 @@
 import axios, { type AxiosError } from 'axios'
+import { profileApi } from '@/api'
 import type { ProfileWithRecommendations } from '@/types/api'
 import { financeApiBase } from '@/services/apiBase'
 import { expireBrowserSession, USER_SESSION } from '@/services/authSession'
@@ -26,18 +27,6 @@ client.interceptors.request.use((config) => {
 })
 client.interceptors.response.use(undefined, (error: AxiosError) => {
   if (error.response?.status === 401) expireBrowserSession(USER_SESSION)
-  return Promise.reject(error)
-})
-
-client.interceptors.response.use(undefined, (error: unknown) => {
-  // 会话过期时与 /api/v1 客户端保持同一行为：清凭据与画像完成缓存并回登录页，
-  // 避免 /desk 各面板散落展示原始鉴权错误。
-  if (axios.isAxiosError(error) && error.response?.status === 401) {
-    localStorage.removeItem('finance-god-token')
-    localStorage.removeItem('finance-god-user')
-    localStorage.removeItem('finance-god-profile-completed')
-    if (location.pathname !== '/login') location.assign('/login')
-  }
   return Promise.reject(error)
 })
 
@@ -326,32 +315,9 @@ export interface DeskFact {
   fields: Array<{ name: string; value: string | number | boolean | null }>
 }
 
-export interface CrawlerSentiment {
-  score: number
-  level: 'extreme_fear' | 'fear' | 'neutral' | 'greed' | 'extreme_greed'
-  breadth: {
-    up_count: number
-    down_count: number
-    flat_count: number
-    limit_up: number
-    limit_down: number
-    up_ratio: number
-  }
-  north_flow: number
-  sector_flows: Array<{
-    sector_name: string
-    change_percent: number
-    net_inflow: number
-  }>
-  hot_sectors: string[]
-  risk_sectors: string[]
-  retrieved_at: string
-  data_source: string
-}
-
 export interface DeskFactBatch {
   provider: string
-  fact_kind: 'company_disclosure' | 'margin_balance' | 'market_sentiment' | 'industry_news'
+  fact_kind: 'company_disclosure' | 'margin_balance'
   symbol: string
   requested_at: string
   generated_at?: string
@@ -359,16 +325,6 @@ export interface DeskFactBatch {
   fallback_reason?: string | null
   trade_eligible?: false
   facts: DeskFact[]
-  sentiment?: CrawlerSentiment
-  news?: Array<{
-    title: string
-    summary: string
-    source: string
-    url: string
-    publish_time: string | null
-    sector: string
-    tags: string[]
-  }>
 }
 
 export type IdempotencyKey = string
@@ -849,8 +805,8 @@ export function normalizeDeskBars(rawBars: readonly Record<string, unknown>[]): 
     .map(([, bar]) => bar)
 }
 
-export async function fetchBars(symbol: string, limit = 120, frequency?: string): Promise<DeskBar[]> {
-  const params: Record<string, string | number> = { symbol, limit }
+export async function fetchBars(symbol: string, frequency?: string): Promise<DeskBar[]> {
+  const params: Record<string, string> = { symbol }
   if (frequency) params.frequency = frequency
   const result = await request<{ bars?: Array<Record<string, unknown>> }>(() =>
     client.get('/market/bars', { params })
@@ -878,22 +834,23 @@ export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
 }
 
 export function fetchSentimentFacts(symbol: string): Promise<DeskFactBatch> {
-  return request(() => client.get('/market/sentiment-facts', { params: { symbol, limit: 8 } }))
+  const end = new Date()
+  const start = new Date(end)
+  start.setUTCDate(start.getUTCDate() - 30)
+  const compactDate = (value: Date) => value.toISOString().slice(0, 10).replace(/-/g, '')
+  return request(() => client.get('/market/sentiment-facts', {
+    params: {
+      symbol,
+      start_date: compactDate(start),
+      end_date: compactDate(end),
+      limit: 8,
+    },
+  }))
 }
 
 export async function fetchProfile(): Promise<ProfileWithRecommendations> {
   try {
-    const result = await request<{ success: boolean; data: ProfileWithRecommendations | null; error?: { message?: string; code?: string } }>(
-      () => client.get('/v1/profiles/me/latest'),
-    )
-    if (!result.success || !result.data) {
-      const code = result.error?.code
-      if (code === 'HTTP_404' || /not found/i.test(result.error?.message || '')) {
-        throw new Error('PROFILE_NOT_FOUND')
-      }
-      throw new Error(result.error?.message || '画像数据不可用')
-    }
-    return result.data
+    return await profileApi.latest()
   } catch (error) {
     if (error instanceof Error && (error.message === 'PROFILE_NOT_FOUND' || /not found|404|Investment profile/i.test(error.message))) {
       throw new Error('PROFILE_NOT_FOUND')
@@ -1025,28 +982,44 @@ export async function streamDeskAgentDecision(
 ): Promise<DeskAgentDecision> {
   const token = localStorage.getItem('finance-god-token')
   const baseUrl = financeApiBase()
-  const response = await fetch(`${baseUrl}/agent/desk/decision/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/x-ndjson, application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      message: input.message,
-      section: input.section,
-      symbol: input.symbol,
-      context_version: input.contextVersion,
-      active_workflow: input.activeWorkflow,
-      ...(input.orderDraft
-        ? {
-            order_draft_id: input.orderDraft.id,
-            order_draft_version: input.orderDraft.version,
-          }
-        : {}),
-    }),
-  })
+  const controller = new AbortController()
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    DESK_AGENT_REQUEST_TIMEOUT_MS,
+  )
+  let response: Response
+  try {
+    response = await fetch(`${baseUrl}/agent/desk/decision/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/x-ndjson, application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        message: input.message,
+        section: input.section,
+        symbol: input.symbol,
+        context_version: input.contextVersion,
+        active_workflow: input.activeWorkflow,
+        ...(input.orderDraft
+          ? {
+              order_draft_id: input.orderDraft.id,
+              order_draft_version: input.orderDraft.version,
+            }
+          : {}),
+      }),
+    })
+  } catch (error) {
+    window.clearTimeout(timeout)
+    if (controller.signal.aborted) {
+      throw new DeskApiError('Agent 服务响应超时，请重新连接', 'AI_STREAM_TIMEOUT')
+    }
+    throw error
+  }
   if (!response.ok) {
+    window.clearTimeout(timeout)
     const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null
     if (response.status === 401) expireBrowserSession(USER_SESSION)
     throw new DeskApiError(
@@ -1055,15 +1028,20 @@ export async function streamDeskAgentDecision(
     )
   }
   if (response.headers.get('content-type')?.includes('application/json')) {
+    window.clearTimeout(timeout)
     return await response.json() as DeskAgentDecision
   }
-  if (!response.body) throw new DeskApiError('Agent 流式响应没有可读取的正文', 'AI_STREAM_EMPTY')
+  if (!response.body) {
+    window.clearTimeout(timeout)
+    throw new DeskApiError('Agent 流式响应没有可读取的正文', 'AI_STREAM_EMPTY')
+  }
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let decision: DeskAgentDecision | null = null
   let answerText = ''
+  let doneSeen = false
 
   function consumeLine(line: string) {
     if (!line.trim()) return
@@ -1080,20 +1058,32 @@ export async function streamDeskAgentDecision(
       answerText += event.text
       onDelta(event.text)
     }
-    if (event.type === 'done') answerText = event.answer_text ?? answerText
+    if (event.type === 'done') {
+      doneSeen = true
+      answerText = event.answer_text ?? answerText
+    }
     if (event.type === 'error') throw new DeskApiError(event.message ?? 'Agent 流式生成失败', event.code)
   }
 
-  while (true) {
-    const { value, done } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    lines.forEach(consumeLine)
-    if (done) break
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      lines.forEach(consumeLine)
+      if (done) break
+    }
+    consumeLine(buffer)
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new DeskApiError('Agent 服务响应超时，请重新连接', 'AI_STREAM_TIMEOUT')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
   }
-  consumeLine(buffer)
-  if (!decision || !answerText.trim()) {
+  if (!doneSeen || !decision || !answerText.trim()) {
     throw new DeskApiError('Agent 流式响应未正常结束', 'AI_STREAM_INCOMPLETE')
   }
   return { ...(decision as DeskAgentDecision), answer_text: answerText.trim() }

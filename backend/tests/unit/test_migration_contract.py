@@ -1,5 +1,21 @@
 from pathlib import Path
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
+
+def test_revision_ids_fit_alembic_version_column() -> None:
+    backend = Path(__file__).resolve().parents[2]
+    scripts = ScriptDirectory.from_config(Config(str(backend / "alembic.ini")))
+
+    oversized = [
+        revision.revision
+        for revision in scripts.walk_revisions()
+        if len(revision.revision) > 32
+    ]
+
+    assert oversized == []
+
 
 def test_initial_migration_uses_explicit_operations() -> None:
     migration = (

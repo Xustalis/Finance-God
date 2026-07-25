@@ -5,7 +5,7 @@ Revises: 20260725_0018
 """
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision = "20260725_0019"
 down_revision = "20260725_0018"
@@ -14,21 +14,45 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("investment_profiles") as batch:
-        batch.alter_column("session_id", existing_type=sa.String(36), nullable=True)
-        batch.add_column(sa.Column("parent_profile_id", sa.String(36), nullable=True))
-        batch.add_column(
-            sa.Column(
-                "source_type",
-                sa.String(32),
-                nullable=False,
-                server_default="onboarding",
+    profile_columns = (
+        sa.Column("parent_profile_id", sa.String(36), nullable=True),
+        sa.Column(
+            "source_type",
+            sa.String(32),
+            nullable=False,
+            server_default="onboarding",
+        ),
+        sa.Column("source_id", sa.String(160), nullable=True),
+    )
+    if context.is_offline_mode():
+        op.alter_column(
+            "investment_profiles",
+            "session_id",
+            existing_type=sa.String(36),
+            nullable=True,
+        )
+        for column in profile_columns:
+            op.add_column("investment_profiles", column)
+        op.create_foreign_key(
+            "fk_profile_parent",
+            "investment_profiles",
+            "investment_profiles",
+            ["parent_profile_id"],
+            ["id"],
+        )
+    else:
+        with op.batch_alter_table("investment_profiles") as batch:
+            batch.alter_column(
+                "session_id", existing_type=sa.String(36), nullable=True
             )
-        )
-        batch.add_column(sa.Column("source_id", sa.String(160), nullable=True))
-        batch.create_foreign_key(
-            "fk_profile_parent", "investment_profiles", ["parent_profile_id"], ["id"]
-        )
+            for column in profile_columns:
+                batch.add_column(column)
+            batch.create_foreign_key(
+                "fk_profile_parent",
+                "investment_profiles",
+                ["parent_profile_id"],
+                ["id"],
+            )
 
     op.create_table(
         "trade_episodes",

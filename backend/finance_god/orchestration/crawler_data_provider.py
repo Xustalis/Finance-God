@@ -11,7 +11,12 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from research_runtime.models import DataArtifact, DataQuery, EvidenceRecord, PandaDataDataset
+from research_runtime.models import (
+    DataArtifact,
+    DataQuery,
+    EvidenceRecord,
+    PandaDataDataset,
+)
 
 from finance_god.crawler.service import CrawlerService
 

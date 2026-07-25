@@ -1,6 +1,6 @@
 """Add owner-scoped market alert delivery and SSE event storage.
 
-Revision ID: 20260725_0019_market_alert_events
+Revision ID: 20260725_0019_alert_events
 Revises: 20260725_0018
 Create Date: 2026-07-25
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260725_0019_market_alert_events"
+revision = "20260725_0019_alert_events"
 down_revision = "20260725_0018"
 branch_labels = None
 depends_on = None

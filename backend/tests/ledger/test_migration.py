@@ -85,11 +85,14 @@ class MigrationSmokeTest(unittest.TestCase):
     def test_offline_sql_is_renderable(self) -> None:
         output = io.StringIO()
         config = Config(str(BACKEND / "alembic.ini"), output_buffer=output)
-        config.set_main_option("sqlalchemy.url", "sqlite+aiosqlite:///:memory:")
+        config.set_main_option(
+            "sqlalchemy.url",
+            "postgresql+asyncpg://finance_god:test@localhost/finance_god_test",
+        )
         command.upgrade(config, "head", sql=True)
         rendered = output.getvalue()
         self.assertIn("CREATE TABLE account_events", rendered)
-        self.assertIn("account_events_no_update", rendered)
+        self.assertIn("account_events_no_mutation", rendered)
 
 
 def _require_test_database(database_url: str) -> None:

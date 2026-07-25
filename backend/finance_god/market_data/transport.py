@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, is_dataclass, replace
 from importlib import import_module
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 from .errors import MarketDataConfigurationError
@@ -66,6 +68,12 @@ class PandaData012TransportPolicy:
             raise MarketDataConfigurationError(
                 "panda_data login transport layout drifted"
             ) from error
+
+        auth_state_dir = os.environ.get("FINANCE_GOD_PANDA_AUTH_STATE_DIR")
+        if auth_state_dir:
+            state_path = Path(auth_state_dir)
+            state_path.mkdir(mode=0o700, parents=True, exist_ok=True)
+            auth_module._user_json_dir = str(state_path)
 
         def bounded_login_config(*args: object, **kwargs: object) -> object:
             kwargs["timeout"] = min(timeout_seconds, budget.request_timeout_seconds)

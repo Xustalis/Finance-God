@@ -29,7 +29,7 @@ export interface MarketFact {
 
 interface FactBatch {
   provider?: string
-  fact_kind?: 'company_disclosure' | 'margin_balance' | 'market_sentiment' | 'industry_news'
+  fact_kind?: 'company_disclosure' | 'margin_balance'
   symbol: string
   requested_at: string
   generated_at?: string
@@ -74,33 +74,13 @@ function field(value: string | number | boolean | null): string {
   return value === null ? '—' : String(value)
 }
 
-/** Map sentiment level to a representative emoji. */
-const sentimentEmoji = computed(() => {
-  if (!currentSentimentFacts.value?.facts?.length) return ''
-  const levelField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'level')
-  const level = String(levelField?.value ?? '').toLowerCase()
-  const scoreField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'score')
-  const score = Number(scoreField?.value ?? 50)
-  if (level === 'bullish' || level === 'very_bullish' || score >= 70) return '😄'
-  if (level === 'bearish' || level === 'very_bearish' || score <= 30) return '😢'
-  if (level === 'neutral' && score >= 55) return '🙂'
-  if (level === 'neutral' && score <= 45) return '😐'
-  return '🙂'
-})
+function factSummary(fact: MarketFact): string {
+  return fact.fields
+    .slice(0, 5)
+    .map(item => `${item.name}：${field(item.value)}`)
+    .join('；')
+}
 
-const sentimentLabel = computed(() => {
-  if (!currentSentimentFacts.value?.facts?.length) return ''
-  const levelField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'level')
-  const level = String(levelField?.value ?? '')
-  const map: Record<string, string> = { very_bullish: '极度乐观', bullish: '乐观', neutral: '中性', bearish: '悲观', very_bearish: '极度悲观' }
-  return map[level] || level
-})
-
-const sentimentScore = computed(() => {
-  if (!currentSentimentFacts.value?.facts?.length) return null
-  const scoreField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'score')
-  return scoreField?.value ?? null
-})
 function time(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
@@ -127,11 +107,6 @@ function time(value: string): string {
     <section class="overview-section market-overview" aria-labelledby="market-title">
       <header class="market-header-row">
         <h2 id="market-title">大盘指数</h2>
-        <div v-if="currentSentimentFacts" class="sentiment-badge" :class="sentimentLabel">
-          <span class="sentiment-emoji">{{ sentimentEmoji }}</span>
-          <span class="sentiment-text">{{ sentimentLabel }}</span>
-          <span v-if="sentimentScore !== null" class="sentiment-score">{{ sentimentScore }}</span>
-        </div>
       </header>
       <!-- Index switcher: always visible -->
       <div class="index-switcher">
@@ -159,7 +134,7 @@ function time(value: string): string {
       <p v-else-if="marketLoadedAt" class="data-footnote">客户端最后成功读取于 {{ time(marketLoadedAt) }}。</p>
     </section>
 
-    <!-- Sentiment details below chart -->
+    <h2 class="reference-section-title">融资余额事实</h2>
     <div v-if="currentSentimentFacts" class="sentiment-detail-strip">
       <span v-for="item in currentSentimentFacts.facts[0]?.fields?.slice(0, 4)" :key="item.name" class="sentiment-detail-item">
         <span class="sentiment-detail-label">{{ item.name }}</span>
@@ -172,13 +147,13 @@ function time(value: string): string {
       生成于 {{ time(currentSentimentFacts.generated_at || currentSentimentFacts.requested_at) }}；
       来源：{{ currentSentimentFacts.provider || 'Finance-God Mock' }}。刷新可重试真实数据。
     </p>
-    <p v-if="sentimentError" class="data-error" role="alert">市场情绪事实刷新失败：{{ sentimentError }}</p>
+    <p v-if="sentimentError" class="data-error" role="alert">融资余额事实刷新失败：{{ sentimentError }}</p>
     <p v-else-if="sentimentNotice" class="empty-data" role="status">{{ sentimentNotice }}</p>
 
     <section class="overview-section facts-section" aria-labelledby="information-title">
       <header>
-        <h2 id="information-title">市场资讯 <span v-if="informationIsMock" class="mock-data-label">模拟数据</span></h2>
-        <small>{{ informationIsMock ? 'Finance-God 模拟参考内容' : '爬虫实时财经要闻与研报（东方财富）' }}</small>
+        <h2 id="information-title">公司披露事实 <span v-if="informationIsMock" class="mock-data-label">模拟数据</span></h2>
+        <small>{{ informationIsMock ? 'Finance-God 模拟参考内容' : 'PandaData 公司财报披露原始字段' }}</small>
       </header>
       <template v-if="currentInformationFacts">
         <p v-if="informationIsMock" class="mock-data-disclosure" role="status">
@@ -188,28 +163,17 @@ function time(value: string): string {
         </p>
         <ul class="news-list">
           <li v-for="(fact, idx) in currentInformationFacts.facts.slice(0, 8)" :key="idx" class="news-item">
-            <a
-              v-if="fact.fields.find(f => f.name === 'url')?.value"
-              :href="String(fact.fields.find(f => f.name === 'url')?.value || '#')"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="news-link"
-            >
-              <span class="news-sector">{{ fact.fields.find(f => f.name === 'sector')?.value || '综合' }}</span>
-              <span class="news-title">{{ fact.fields.find(f => f.name === 'title')?.value }}</span>
-              <small class="news-source">{{ fact.fields.find(f => f.name === 'source')?.value }}</small>
-            </a>
-            <div v-else class="news-link">
-              <span class="news-sector">{{ fact.fields.find(f => f.name === 'sector')?.value || '综合' }}</span>
-              <span class="news-title">{{ fact.fields.find(f => f.name === 'title')?.value }}</span>
-              <small class="news-source">{{ fact.fields.find(f => f.name === 'source')?.value }}</small>
+            <div class="news-link">
+              <span class="news-sector">{{ fact.source?.data_time ? time(fact.source.data_time) : `记录 ${idx + 1}` }}</span>
+              <span class="news-title">{{ factSummary(fact) }}</span>
+              <small class="news-source">{{ currentInformationFacts.provider }}</small>
             </div>
           </li>
         </ul>
       </template>
-      <p v-else-if="informationError" class="data-error" role="alert">市场资讯刷新失败：{{ informationError }}</p>
+      <p v-else-if="informationError" class="data-error" role="alert">公司披露事实刷新失败：{{ informationError }}</p>
       <p v-else-if="informationNotice" class="empty-data" role="status">{{ informationNotice }}</p>
-      <p v-else class="empty-data">正在读取服务端市场资讯。</p>
+      <p v-else class="empty-data">正在读取服务端公司披露事实。</p>
     </section>
   </section>
 </template>

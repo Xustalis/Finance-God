@@ -681,12 +681,11 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     const requestedSymbol = symbol.value
     barsError.value = null
     const freq = barsFrequency.value
-    const limit = freq === '1m' ? 500 : 250
     bars.value = []
     try {
       const result = hasSimulationAccount.value
         ? await fetchSimulationBars(requestedSymbol)
-        : await fetchBars(requestedSymbol, limit, freq)
+        : await fetchBars(requestedSymbol, freq)
       if (requestId === barsRequestId && symbol.value === requestedSymbol && barsFrequency.value === freq) {
         bars.value = result
       }

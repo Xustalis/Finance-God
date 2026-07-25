@@ -26,6 +26,8 @@ COPY alembic ./alembic
 
 # 依赖已在上层满足，仅注册可编辑包本体。
 RUN pip install --no-deps -e .
+RUN mkdir -p /app/data /app/artifacts/knowledge \
+    && chown -R appuser:appuser /app/data /app/artifacts
 
 USER appuser
 

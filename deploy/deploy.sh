@@ -25,6 +25,8 @@ SSH_COMMAND=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-
 rsync -az --delete \
   --exclude='.git/' \
   --exclude='.env' \
+  --exclude='.claude/' \
+  --exclude='.codex/' \
   --exclude='.deploy/private/' \
   --exclude='backend/.venv/' \
   --exclude='backend/user*.json' \

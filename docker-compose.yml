@@ -25,7 +25,9 @@ services:
       # 全环境统一使用 PostgreSQL。容器内指向 db 服务；生产见 deploy/docker-compose.prod.yml。
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/finance_god
       DATABASE_URL_SYNC: postgresql+psycopg2://postgres:postgres@db:5432/finance_god
-      FINANCE_GOD_DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/finance_god
+      FINANCE_GOD_DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/finance_god
+      FINANCE_GOD_MARKET_BAR_CACHE_PATH: /app/data/market-bars.sqlite3
+      FINANCE_GOD_PANDA_AUTH_STATE_DIR: /app/data/panda-auth
       APP_ENV: ${APP_ENV:-development}
       DEV_ADMIN_EMAIL: ${DEV_ADMIN_EMAIL:-admin@finance-god.local}
     depends_on:
@@ -34,6 +36,7 @@ services:
     volumes:
       - ./backend:/app
       - learning_data:/app/artifacts/knowledge:ro
+      - market_data:/app/data
     command: >
       sh -c "alembic upgrade head &&
       python -m app.startup"
@@ -43,7 +46,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3)",
         ]
       interval: 10s
       timeout: 5s
@@ -97,3 +100,4 @@ services:
 volumes:
   pgdata:
   learning_data:
+  market_data:

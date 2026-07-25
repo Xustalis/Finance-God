@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 
 import pytest
+from panda_data import auth_manager
+
 from finance_god.market_data import (
     EXPECTED_SDK_VERSION,
     ErrorKind,
@@ -21,6 +24,24 @@ from finance_god.market_data.errors import classify_upstream_error
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
 from .conftest import NOW, FakeSDK, stock_snapshot
+
+
+def test_production_transport_places_auth_state_in_configured_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    auth_state_dir = tmp_path / "panda-auth"
+    monkeypatch.setenv("FINANCE_GOD_PANDA_AUTH_STATE_DIR", str(auth_state_dir))
+    monkeypatch.setattr(auth_manager, "_user_json_dir", None)
+
+    PandaData012TransportPolicy().configure_auth(
+        object(),
+        OperationBudget(),
+        timeout_seconds=2.0,
+    )
+
+    assert auth_manager._user_json_dir == str(auth_state_dir)
+    assert auth_state_dir.is_dir()
 
 
 def test_adapter_configures_one_attempt_budget_once_after_authentication() -> None:

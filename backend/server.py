@@ -102,7 +102,6 @@ from finance_god.orchestration.workflows import (
 from finance_god.trade_review import TradeReviewService
 
 if TYPE_CHECKING:
-    from finance_god.crawler.service import CrawlerService
     from finance_god.learning.context import VerifiedKnowledgeReader
 
 _LOGGER = logging.getLogger(__name__)
@@ -125,21 +124,11 @@ workflow_worker_wakeup: asyncio.Event | None = None
 _agent_lock = Lock()
 _learning_lock = Lock()
 _service_lock = Lock()
-_crawler_service: "CrawlerService | None" = None
 _desk_decision_contexts: dict[str, tuple[str, str, float]] = {}
 _DESK_DECISION_CONTEXT_TTL_SECONDS = 1_800.0
 _readiness_cache: tuple[float, bool, str] | None = None
 _readiness_lock = asyncio.Lock()
 _simulation_next_session_cache: dict[str, datetime] = {}
-
-
-def _crawler_service_instance() -> "CrawlerService":
-    """Lazily create the shared CrawlerService singleton."""
-    global _crawler_service
-    if _crawler_service is None:
-        from finance_god.crawler.service import CrawlerService
-        _crawler_service = CrawlerService()
-    return _crawler_service
 
 
 class WorkflowCommandDQAdapter:
@@ -331,39 +320,6 @@ def _json(model: object, *, status_code: int = 200) -> JSONResponse:
     return JSONResponse(payload, status_code=status_code)
 
 
-_NUMERIC_FIELDS = frozenset({
-    "last", "open", "high", "low", "previous_close",
-    "change", "change_percent", "volume", "amount",
-})
-
-
-def _numeric_quote(quote: dict) -> dict:
-    """Convert Decimal-string fields to float for frontend compatibility."""
-    for key in _NUMERIC_FIELDS:
-        value = quote.get(key)
-        if value is not None and isinstance(value, str):
-            try:
-                quote[key] = float(value)
-            except (ValueError, TypeError):
-                pass
-    return quote
-
-
-_BAR_NUMERIC_FIELDS = frozenset({"open", "high", "low", "close", "volume", "amount"})
-
-
-def _numeric_bar(bar: dict) -> dict:
-    """Convert Decimal-string fields in bar data to float."""
-    for key in _BAR_NUMERIC_FIELDS:
-        value = bar.get(key)
-        if value is not None and isinstance(value, str):
-            try:
-                bar[key] = float(value)
-            except (ValueError, TypeError):
-                pass
-    return bar
-
-
 async def live(_: Request) -> JSONResponse:
     return _json({"liveness": "live"}, status_code=200)
 
@@ -503,13 +459,12 @@ async def market_overview(request: Request) -> JSONResponse:
     symbols = request.query_params.get("symbols", "").split(",")
     try:
         service, application = _services()
-        # Try the full application path (requires workflow) for equity snapshots
         batch = None
+        batch_error: MarketDataError | None = None
         try:
             batch = await application.quotes(symbols)
-        except MarketDataError:
-            pass
-        # Identify index symbols that need bar-based fallback
+        except MarketDataError as error:
+            batch_error = error
         _INDEX_NAMES = {
             "000001.SH": "上证指数",
             "399001.SZ": "深证成指",
@@ -527,7 +482,6 @@ async def market_overview(request: Request) -> JSONResponse:
                 continue
             if instrument.asset_class.value != "index":
                 continue
-            # Build quote from latest bars
             try:
                 bar_result = await asyncio.to_thread(
                     service.read_bars, sym_upper, limit=2
@@ -547,62 +501,103 @@ async def market_overview(request: Request) -> JSONResponse:
                         if change is not None and previous_close
                         else None
                     )
-                    fallback_quotes.append({
-                        "symbol": instrument.symbol,
-                        "name": _INDEX_NAMES.get(instrument.symbol, instrument.symbol),
-                        "asset_type": instrument.asset_class.value,
-                        "market": instrument.market.value,
-                        "currency": instrument.currency,
-                        "last": float(latest.close),
-                        "open": float(latest.open),
-                        "high": float(latest.high),
-                        "low": float(latest.low),
-                        "previous_close": float(previous_close) if previous_close else None,
-                        "change": float(change) if change is not None else None,
-                        "change_percent": float(change_pct) if change_pct is not None else None,
-                        "volume": float(latest.volume),
-                        "amount": float(latest.amount) if latest.amount else None,
-                        "provider": "PandaData",
-                        "provider_time": latest.provider_time,
-                        "frequency": bar_result.frequency,
-                        "freshness": latest.freshness,
-                        "market_status": "closed",
-                        "source_endpoint": latest.source_endpoint,
-                        "capability_version": latest.capability_version,
-                        "instrument_master_identity": latest.instrument_master_identity,
-                        "instrument_master_version": latest.instrument_master_version,
-                        "trade_eligible": False,
-                    })
+                    fallback_quotes.append(
+                        {
+                            "symbol": instrument.symbol,
+                            "name": _INDEX_NAMES.get(
+                                instrument.symbol, instrument.symbol
+                            ),
+                            "asset_type": instrument.asset_class.value,
+                            "market": instrument.market.value,
+                            "currency": instrument.currency,
+                            "last": str(latest.close),
+                            "open": str(latest.open),
+                            "high": str(latest.high),
+                            "low": str(latest.low),
+                            "previous_close": (
+                                str(previous_close)
+                                if previous_close is not None
+                                else None
+                            ),
+                            "change": str(change) if change is not None else None,
+                            "change_percent": (
+                                str(change_pct) if change_pct is not None else None
+                            ),
+                            "volume": str(latest.volume),
+                            "amount": (
+                                str(latest.amount)
+                                if latest.amount is not None
+                                else None
+                            ),
+                            "provider": "PandaData",
+                            "provider_time": latest.provider_time,
+                            "retrieved_at": datetime.now(UTC).isoformat(),
+                            "frequency": bar_result.frequency,
+                            "freshness": latest.freshness,
+                            "market_status": "released",
+                            "session_alignment": "latest_released_session",
+                            "source_endpoint": latest.source_endpoint,
+                            "capability_version": latest.capability_version,
+                            "instrument_master_identity": (
+                                latest.instrument_master_identity
+                            ),
+                            "instrument_master_version": (
+                                latest.instrument_master_version
+                            ),
+                            "trade_eligible": False,
+                        }
+                    )
             except Exception:  # noqa: BLE001 - fallback must not block
                 continue
-        # Combine results
-        all_quotes = [_numeric_quote(q.model_dump(mode="json")) for q in (batch.quotes if batch else ())] + fallback_quotes
+        all_quotes = [
+            quote.model_dump(mode="json") for quote in (batch.quotes if batch else ())
+        ] + fallback_quotes
         if not all_quotes:
-            return _json({"data": {"quotes": []}, "warnings": [{"code": "NO_SNAPSHOT", "message": "行情数据暂不可用"}]})
-        return _json({"data": {"quotes": all_quotes}})
+            if batch_error is not None:
+                return _json(
+                    {"error": batch_error.public_payload()},
+                    status_code=502,
+                )
+            return _safe_error(
+                code="MARKET_DATA_UNAVAILABLE",
+                message="No usable market snapshots were returned.",
+                status_code=502,
+            )
+        warnings = []
+        if batch_error is not None:
+            warnings.append(
+                {
+                    "code": batch_error.public_payload()["code"],
+                    "message": "部分标的实时快照不可用，已保留可验证的指数日线。",
+                }
+            )
+        return _json({"data": {"quotes": all_quotes}, "warnings": warnings})
     except (ValueError, ValidationError):
         return _safe_error(
             code="MARKET_DATA_INVALID_REQUEST",
             message="The market overview request is invalid.",
             status_code=400,
         )
-    except MarketDataError:
-        return _json({"data": {"quotes": []}, "warnings": [{"code": "MARKET_DATA_UNAVAILABLE", "message": "行情服务暂不可用"}]})
+    except MarketDataError as error:
+        return _json({"error": error.public_payload()}, status_code=502)
     except Exception:  # noqa: BLE001 - public HTTP error boundary
-        return _json({"data": {"quotes": []}, "warnings": [{"code": "INTERNAL_ERROR", "message": "内部错误"}]})
+        return _internal_error()
 
 
 async def bars(request: Request) -> JSONResponse:
     symbol = request.query_params.get("symbol", "")
     frequency_param = request.query_params.get("frequency", "")
     try:
-        limit = int(request.query_params.get("limit", "80"))
+        if "limit" in request.query_params:
+            raise ValueError("client-defined bar limits are not supported")
         service, _application = _services()
         from finance_god.market_data.contracts import DataFrequency as DF
+
         freq_map = {"1m": DF.MINUTE_1, "daily": DF.DAILY, "1d": DF.DAILY}
         if frequency_param and frequency_param not in freq_map:
             raise ValueError("unsupported bar frequency")
         frequency_override = freq_map.get(frequency_param) if frequency_param else None
+        limit = 5_000 if frequency_override is DF.DAILY else 500
         result = await asyncio.to_thread(
             service.read_bars,
             symbol,
@@ -624,119 +619,89 @@ async def bars(request: Request) -> JSONResponse:
             "provider": "PandaData",
             "symbol": symbol.upper(),
             "frequency": result.frequency,
-            "bars": [_numeric_bar(item.model_dump(mode="json")) for item in result.bars],
+            "bars": [item.model_dump(mode="json") for item in result.bars],
             "quality": result.quality.model_dump(mode="json"),
         }
     )
 
 
 async def information_facts(request: Request) -> JSONResponse:
-    """Return market news/research sourced from the crawler (eastmoney).
-
-    Replaces PandaData financial-report disclosures with real-time industry
-    news and broker research reports crawled from public sources.
-    """
     symbol = request.query_params.get("symbol", "")
-    limit = min(int(request.query_params.get("limit", "10")), 30)
-
-    # Map stock symbol to a sector hint for the crawler
-    sector = request.query_params.get("sector", "")
-
+    start_quarter = request.query_params.get("start_quarter")
+    end_quarter = request.query_params.get("end_quarter")
     try:
-        news = await _crawler_service_instance().get_news(
-            sector=sector, limit=limit
+        limit = int(request.query_params.get("limit", "20"))
+        service, _application = _services()
+        result = await asyncio.to_thread(
+            service.read_information_facts,
+            symbol,
+            start_quarter=start_quarter or "",
+            end_quarter=end_quarter or "",
+            limit=limit,
         )
-        facts = [
-            {
-                "scope": f"news:{item.sector or 'general'}",
-                "fields": [
-                    {"name": "title", "value": item.title},
-                    {"name": "summary", "value": item.summary},
-                    {"name": "source", "value": item.source},
-                    {"name": "url", "value": item.url},
-                    {"name": "sector", "value": item.sector},
-                ],
-            }
-            for item in news
-        ]
-        return _json({
-            "provider": "Finance-God/Crawler",
-            "fact_kind": "industry_news",
-            "symbol": symbol.upper() if symbol else "A_SHARE_MARKET",
-            "requested_at": news[0].publish_time.isoformat() if news and news[0].publish_time else None,
-            "generated_at": datetime.now(UTC).isoformat(),
-            "facts": facts,
-            "news": [item.model_dump(mode="json") for item in news],
-            "trade_eligible": False,
-            "data_mode": "real",
-            "fallback_reason": None,
-        })
-    except Exception as error:  # noqa: BLE001 - public HTTP error boundary
+    except (ValueError, ValidationError):
+        return _safe_error(
+            code="MARKET_DATA_INVALID_REQUEST",
+            message="The information-fact request is invalid.",
+            status_code=400,
+        )
+    except MarketDataError as error:
         if settings.market_reference_mock_fallback:
             _LOGGER.warning(
                 "Information reference source failed; serving labeled mock: %s",
                 type(error).__name__,
             )
             return _mock_information_facts(symbol)
+        return _json({"error": error.public_payload()}, status_code=502)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
         return _internal_error()
+    return _json(result)
 
 
 async def sentiment_facts(request: Request) -> JSONResponse:
-    """Return market sentiment sourced from the crawler (eastmoney+ths).
-
-    Replaces PandaData margin-balance facts with richer multi-dimensional
-    sentiment data: score, level, breadth, north_flow, sector_flows.
-    """
+    symbol = request.query_params.get("symbol", "")
+    start_date = request.query_params.get("start_date")
+    end_date = request.query_params.get("end_date")
     try:
-        sentiment = await _crawler_service_instance().get_sentiment()
-        data = sentiment.model_dump(mode="json")
-        return _json({
-            "provider": "Finance-God/Crawler",
-            "fact_kind": "market_sentiment",
-            "symbol": request.query_params.get("symbol", "A_SHARE_MARKET"),
-            "requested_at": data["retrieved_at"],
-            "generated_at": datetime.now(UTC).isoformat(),
-            "sentiment": data,
-            "facts": [
-                {
-                    "scope": "market_sentiment_score",
-                    "fields": [
-                        {"name": "score", "value": sentiment.score},
-                        {"name": "level", "value": sentiment.level.value},
-                        {"name": "north_flow", "value": sentiment.north_flow},
-                        {"name": "up_ratio", "value": sentiment.breadth.up_ratio},
-                        {"name": "limit_up", "value": sentiment.breadth.limit_up},
-                        {"name": "limit_down", "value": sentiment.breadth.limit_down},
-                    ],
-                },
-            ],
-            "trade_eligible": False,
-            "data_mode": "real",
-            "fallback_reason": None,
-        })
-    except Exception as error:  # noqa: BLE001 - public HTTP error boundary
+        limit = int(request.query_params.get("limit", "60"))
+        service, _application = _services()
+        result = await asyncio.to_thread(
+            service.read_sentiment_facts,
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    except (ValueError, ValidationError):
+        return _safe_error(
+            code="MARKET_DATA_INVALID_REQUEST",
+            message="The sentiment-fact request is invalid.",
+            status_code=400,
+        )
+    except MarketDataError as error:
         if settings.market_reference_mock_fallback:
             _LOGGER.warning(
                 "Sentiment reference source failed; serving labeled mock: %s",
                 type(error).__name__,
             )
-            return _mock_sentiment_facts(
-                request.query_params.get("symbol", "A_SHARE_MARKET")
-            )
+            return _mock_sentiment_facts(symbol)
+        return _json({"error": error.public_payload()}, status_code=502)
+    except Exception:  # noqa: BLE001 - public HTTP error boundary
         return _internal_error()
+    return _json(result)
 
 
 def _mock_information_facts(symbol: str) -> JSONResponse:
     generated_at = datetime.now(UTC).isoformat()
     normalized_symbol = symbol.upper() if symbol else "A_SHARE_MARKET"
     items = (
-        ("市场公告示例：上市公司披露定期报告安排", "公告"),
-        ("行业资讯示例：主要指数成分调整进入观察期", "市场"),
-        ("研究资料示例：关注公开数据更新时间与口径差异", "研究"),
+        ("模拟披露事实：上市公司定期报告安排", "公告"),
+        ("模拟披露事实：主要指数成分调整进入观察期", "市场"),
+        ("模拟披露事实：公开数据更新时间与口径差异", "研究"),
     )
     facts = [
         {
-            "scope": f"mock-news:{index}",
+            "scope": f"mock-disclosure:{index}",
             "fields": [
                 {"name": "title", "value": title},
                 {
@@ -752,7 +717,7 @@ def _mock_information_facts(symbol: str) -> JSONResponse:
     ]
     return _json({
         "provider": "Finance-God Mock",
-        "fact_kind": "industry_news",
+        "fact_kind": "company_disclosure",
         "symbol": normalized_symbol,
         "requested_at": generated_at,
         "generated_at": generated_at,
@@ -768,19 +733,16 @@ def _mock_sentiment_facts(symbol: str) -> JSONResponse:
     generated_at = datetime.now(UTC).isoformat()
     return _json({
         "provider": "Finance-God Mock",
-        "fact_kind": "market_sentiment",
-        "symbol": symbol or "A_SHARE_MARKET",
+        "fact_kind": "margin_balance",
+        "symbol": symbol.upper() if symbol else "A_SHARE_MARKET",
         "requested_at": generated_at,
         "generated_at": generated_at,
-        "sentiment": None,
         "facts": [
             {
-                "scope": "mock-market-sentiment",
+                "scope": "mock-margin-balance",
                 "fields": [
-                    {"name": "score", "value": 50},
-                    {"name": "level", "value": "neutral"},
-                    {"name": "north_flow", "value": None},
-                    {"name": "up_ratio", "value": None},
+                    {"name": "融资余额", "value": None},
+                    {"name": "来源", "value": "Finance-God Mock"},
                 ],
             },
         ],
@@ -1775,13 +1737,9 @@ def _simulation_routes() -> list:
             ),
         )
         _LOGGER.info("simulation services initialized successfully")
-    except Exception as error:  # noqa: BLE001
-        _LOGGER.error(
-            "simulation service initialization failed: %s: %s",
-            type(error).__name__,
-            error,
-        )
-        return []
+    except Exception:
+        _LOGGER.exception("simulation service initialization failed")
+        raise
     return _assemble_simulation_routes()
 
 

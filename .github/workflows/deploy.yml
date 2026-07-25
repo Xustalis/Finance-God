@@ -37,13 +37,7 @@ jobs:
 
       - name: Test backend
         working-directory: backend
-        run: >-
-          timeout 60s pytest
-          tests/unit
-          tests/learning
-          tests/api/test_agent_routes.py
-          tests/market_data/test_service.py
-          -q
+        run: timeout 60s pytest -q
 
       - uses: actions/setup-node@v4
         with:
@@ -81,6 +75,14 @@ jobs:
             "sudo mkdir -p /opt/finance-god && sudo chown '$DEPLOY_USER:$DEPLOY_USER' /opt/finance-god"
           rsync -az --delete \
             --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='.claude/' \
+            --exclude='.codex/' \
+            --exclude='.deploy/private/' \
+            --exclude='backend/.venv/' \
+            --exclude='backend/user*.json' \
+            --exclude='frontend/node_modules/' \
+            --exclude='frontend/dist/' \
             --exclude='deploy/.env.production' \
             -e "ssh -i ~/.ssh/deploy_key" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/finance-god/"
@@ -92,3 +94,16 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
             "chmod +x /opt/finance-god/deploy/remote-deploy.sh && /opt/finance-god/deploy/remote-deploy.sh"
+
+      - name: Verify public API
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          readonly BASE_URL="http://$DEPLOY_HOST"
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$BASE_URL/" >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$BASE_URL/api/live" >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 "$BASE_URL/api/ready" >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
+            "$BASE_URL/api/market/overview?symbols=000001.SH,000001.SZ" >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
+            "$BASE_URL/api/market/bars?symbol=000001.SZ&frequency=1m" >/dev/null

@@ -8,9 +8,11 @@ from pydantic import ValidationError
 from finance_god.market_data import (
     AssetClass,
     DataCategory,
+    DataDiagnostic,
     DataEnvelope,
     DataFrequency,
     DiagnosticCode,
+    DiagnosticSeverity,
     EmptyMeaning,
     FreshnessPolicy,
     FreshnessStatus,
@@ -23,6 +25,19 @@ from finance_god.market_data import (
 from finance_god.market_data.normalization import PandaDataNormalizer
 
 from .conftest import NOW, bar
+
+
+def test_data_diagnostic_accepts_authentication_endpoint() -> None:
+    issue = DataDiagnostic(
+        code=DiagnosticCode.REFRESH_FAILED,
+        severity=DiagnosticSeverity.ERROR,
+        scope="snapshot:000001.SZ",
+        message="PandaData authentication failed.",
+        fingerprint="a" * 64,
+        endpoint="init_token",
+    )
+
+    assert issue.endpoint == "init_token"
 
 
 def test_instrument_master_resolves_canonical_and_alias_without_guessing() -> None:
