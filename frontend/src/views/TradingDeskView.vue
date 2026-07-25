@@ -117,10 +117,7 @@ onBeforeUnmount(() => {
             :quotes="desk.quotes ?? []" :bars="desk.bars ?? []" :selected-symbol="desk.symbol" :loading="desk.loadingMarket" :market-error="desk.marketError" :bars-error="desk.barsError ?? null"
             :minute-periods-available="desk.minuteBarsSupported"
             :market-loaded-at="desk.marketLoadedAt"
-            :sentiment-facts="desk.simulationClock ? null : desk.sentimentFacts" :sentiment-error="desk.simulationClock ? null : desk.sentimentFactsError"
-            :sentiment-notice="desk.simulationClock ? '历史演示不提供时点还原的市场情绪事实。' : desk.marketFactsNotice"
-            :information-facts="desk.simulationClock ? null : desk.informationFacts" :information-error="desk.simulationClock ? null : desk.informationFactsError"
-            :information-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : desk.marketFactsNotice"
+
             :market-news="desk.simulationClock ? null : desk.marketNews" :market-news-error="desk.simulationClock ? null : desk.marketNewsError"
             :market-news-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : null"
             :on-select-symbol="desk.setSymbol" :on-refresh="desk.refreshOverviewWorkspace"
@@ -131,6 +128,8 @@ onBeforeUnmount(() => {
             :account="desk.account ?? null" :account-state="desk.accountState" :portfolio="desk.portfolio ?? null" :quotes="desk.quotes ?? []"
             :loading="desk.loadingSimulation || desk.loadingMarket"
             :error="workspaceError || desk.simulationError || desk.marketError" :on-load="desk.refreshPortfolioWorkspace"
+            :on-open-position="(position) => desk.openPositionTrading(position.instrument_id)"
+            :on-sell-position="(position) => desk.preparePositionSell(position.instrument_id, position.available_quantity)"
             :on-create-account="(input) => runWorkspaceAction(() => desk.createAccount(input.initialCash, input.simulationStartAt))"
           />
           <WatchlistWorkspace
@@ -177,7 +176,6 @@ onBeforeUnmount(() => {
             :learning-summary="desk.agentLearningSummary"
             :learning-loading="desk.agentLearningLoading"
             :learning-error="desk.agentLearningError"
-            :demo-mode="false"
             :on-load="desk.loadReviewWorkspace"
             :on-retry-learning="desk.loadAgentLearningSummary"
             :on-select="desk.selectTradeEpisode"

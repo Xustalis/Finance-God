@@ -56,6 +56,7 @@ cd backend
 .venv/bin/alembic upgrade head
 cd ..
 make seed-dev-accounts
+make seed-dev-workspace
 
 # 7. 启动服务（本机进程方式，开三个终端）
 # 终端1：后端

@@ -16,14 +16,13 @@ from finance_god.application.ports import (
 )
 from finance_god.domain import (
     AuditReference,
-    DomainInvariantViolation,
     ExchangeOrder,
     ExchangeOrderStatus,
+    IdempotencyConflict,
     OrderDraft,
     OrderDraftStatus,
     OrderSide,
     OrderType,
-    IdempotencyConflict,
     RiskCheckResult,
     RiskCheckStatus,
     TimeInForce,
@@ -569,11 +568,12 @@ class SimulationExecutionService:
         if order_id is not None:
             await self._owned_order(owner_id, order_id)
             return await self._repository.list_fills(order_id)
-        owned_ids = {
+        owned_ids = frozenset(
             order.order_id for order in await self.list_orders(owner_id=owner_id)
-        }
-        fills = await self._repository.list_fills()
-        return tuple(fill for fill in fills if fill.order_id in owned_ids)
+        )
+        if not owned_ids:
+            return ()
+        return await self._repository.list_fills(order_ids=owned_ids)
 
     @_transactional(commit=False)
     async def list_order_views(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from inspect import isawaitable
@@ -108,6 +109,12 @@ SAFE_UI_ACTIONS: tuple[dict[str, str], ...] = (
         "id": "locate_candidate",
         "object": "research_candidate",
         "mutation": "ui_only",
+        "descriptor_version": "1",
+    },
+    {
+        "id": "add_to_watchlist",
+        "object": "watchlist_instrument",
+        "mutation": "workspace_write",
         "descriptor_version": "1",
     },
     {
@@ -481,6 +488,7 @@ _CANDIDATE_TARGETS = frozenset({"watchlist", "research"})
 _RECORD_TYPES = frozenset(
     {"position", "watchlist", "candidate", "draft", "order", "fill"}
 )
+_A_SHARE_SYMBOL = re.compile(r"^\d{6}\.(?:SZ|SH)$")
 
 
 def validate_action_parameters(
@@ -518,6 +526,9 @@ def validate_action_parameters(
             and parameters.get("target") in _CANDIDATE_TARGETS
             else "invalid_candidate_target"
         )
+    if action_id == "add_to_watchlist":
+        symbol = parameters.get("symbol", "").strip().upper()
+        return None if _A_SHARE_SYMBOL.fullmatch(symbol) else "invalid_symbol"
     if action_id == "fill_trade_draft":
         side = parameters.get("side")
         price_type = parameters.get("price_type")

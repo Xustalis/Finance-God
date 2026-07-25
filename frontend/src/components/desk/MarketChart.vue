@@ -173,8 +173,8 @@ function initChart() {
   chart = createChart(chartContainer.value, {
     layout: {
       background: { type: ColorType.Solid, color: 'transparent' },
-      textColor: '#5c4a3a',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
+      textColor: '#625541',
+      fontFamily: '"Noto Serif SC", "Songti SC", Georgia, serif',
       attributionLogo: false,
     },
     grid: {
@@ -192,12 +192,12 @@ function initChart() {
   })
 
   candleSeries = chart.addSeries(CandlestickSeries, {
-    upColor: '#c0392b',
-    downColor: '#27ae60',
-    borderUpColor: '#c0392b',
-    borderDownColor: '#27ae60',
-    wickUpColor: '#c0392b',
-    wickDownColor: '#27ae60',
+    upColor: '#294f3e',
+    downColor: '#8f3027',
+    borderUpColor: '#294f3e',
+    borderDownColor: '#8f3027',
+    wickUpColor: '#294f3e',
+    wickDownColor: '#8f3027',
   })
 
   volumeSeries = chart.addSeries(HistogramSeries, {
@@ -208,10 +208,10 @@ function initChart() {
     scaleMargins: { top: 0.85, bottom: 0 },
   })
 
-  ma5Series = chart.addSeries(LineSeries, { color: '#e67e22', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
-  ma10Series = chart.addSeries(LineSeries, { color: '#3498db', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
-  ma20Series = chart.addSeries(LineSeries, { color: '#9b59b6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
-  ma60Series = chart.addSeries(LineSeries, { color: '#1abc9c', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
+  ma5Series = chart.addSeries(LineSeries, { color: '#211a12', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
+  ma10Series = chart.addSeries(LineSeries, { color: '#625541', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
+  ma20Series = chart.addSeries(LineSeries, { color: '#8f6d4b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
+  ma60Series = chart.addSeries(LineSeries, { color: '#aa987a', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
 
   updateData()
 }
@@ -250,7 +250,7 @@ function updateData() {
     volumes.push({
       time,
       value: bar.volume,
-      color: bar.close >= bar.open ? 'rgba(192, 57, 43, 0.4)' : 'rgba(39, 174, 96, 0.4)',
+      color: bar.close >= bar.open ? 'rgba(41, 79, 62, 0.38)' : 'rgba(143, 48, 39, 0.38)',
     })
     for (const period of MOVING_AVERAGE_PERIODS) {
       rollingSums[period] += bar.close
@@ -356,10 +356,10 @@ watch(() => props.minutePeriodsAvailable, (available) => {
       <button type="button" class="period-tab" :class="{ active: activePeriod === 'weekly' }" :aria-pressed="activePeriod === 'weekly'" @click="setPeriod('weekly')">周线</button>
       <button type="button" class="period-tab" :class="{ active: activePeriod === 'monthly' }" :aria-pressed="activePeriod === 'monthly'" @click="setPeriod('monthly')">月线</button>
       <span class="chart-ma-legend">
-        <i style="background:#e67e22"></i>MA5
-        <i style="background:#3498db"></i>MA10
-        <i style="background:#9b59b6"></i>MA20
-        <i style="background:#1abc9c"></i>MA60
+        <i class="ma5"></i>MA5
+        <i class="ma10"></i>MA10
+        <i class="ma20"></i>MA20
+        <i class="ma60"></i>MA60
       </span>
     </div>
 
@@ -371,7 +371,7 @@ watch(() => props.minutePeriodsAvailable, (available) => {
 </template>
 
 <style scoped>
-.market-chart { border: 1px solid var(--faint-rule, rgba(139,115,85,0.12)); border-radius: 4px; padding: 1rem; background: var(--paper, #faf8f5); }
+.market-chart { padding: 1rem 0; border-top: 3px double var(--ink); border-bottom: 1px solid var(--rule); background: transparent; }
 .chart-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; margin-bottom: .75rem; }
 .chart-price-block { flex: 1; }
 .chart-symbol { margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--ink, #2c1810); }
@@ -385,13 +385,24 @@ watch(() => props.minutePeriodsAvailable, (available) => {
 .chart-mini-stats dt { color: var(--muted-ink, #8b7355); }
 .chart-mini-stats dd { margin: 0; font-variant-numeric: tabular-nums; }
 .chart-period-bar { display: flex; align-items: center; gap: .1rem; margin-bottom: .5rem; border-bottom: 1px solid var(--faint-rule, rgba(139,115,85,0.12)); padding-bottom: .4rem; }
-.period-tab { padding: .25rem .6rem; font-size: .76rem; color: var(--muted-ink, #8b7355); cursor: pointer; border: 0; background: transparent; border-radius: 3px; user-select: none; transition: background .15s, color .15s; font-family: inherit; }
-.period-tab:hover:not(.active) { background: rgba(139,115,85,0.08); color: var(--ink, #2c1810); }
-.period-tab.active { background: var(--ink, #2c1810); color: var(--paper, #faf8f5); font-weight: 500; cursor: default; }
-.period-tab:focus-visible { outline: 2px solid var(--ink, #2c1810); outline-offset: 2px; }
+.period-tab { padding: .3rem .6rem; font-size: .76rem; color: var(--muted-ink); cursor: pointer; border: 0; border-bottom: 2px solid transparent; background: transparent; border-radius: 0; user-select: none; transition: border-color .15s, color .15s; font-family: inherit; }
+.period-tab:hover:not(.active) { border-bottom-color: var(--rule); color: var(--ink); }
+.period-tab.active { border-bottom-color: var(--ink); color: var(--ink); font-weight: 700; cursor: default; }
+.period-tab:focus-visible { outline: 2px solid var(--risk); outline-offset: 2px; }
+.period-tab:disabled { color: var(--muted-ink); cursor: not-allowed; opacity: .45; }
 .chart-ma-legend { margin-left: auto; font-size: .7rem; color: var(--muted-ink); display: flex; align-items: center; gap: .5rem; }
 .chart-ma-legend i { display: inline-block; width: 12px; height: 2px; border-radius: 1px; margin-right: 2px; vertical-align: middle; }
+.chart-ma-legend .ma5 { background: #211a12; }
+.chart-ma-legend .ma10 { background: #625541; }
+.chart-ma-legend .ma20 { background: #8f6d4b; }
+.chart-ma-legend .ma60 { background: #aa987a; }
 .chart-canvas { width: 100%; min-height: 340px; }
 .chart-error { color: var(--risk, #c0392b); font-size: .82rem; margin-top: .5rem; }
 .chart-loading { color: var(--muted-ink); font-size: .82rem; margin-top: .5rem; }
+
+@media (max-width: 680px) {
+  .chart-header { display: grid; gap: .75rem; }
+  .chart-period-bar { align-items: flex-start; flex-wrap: wrap; }
+  .chart-ma-legend { width: 100%; margin-left: 0; padding-top: .25rem; }
+}
 </style>

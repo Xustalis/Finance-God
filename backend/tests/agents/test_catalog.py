@@ -751,7 +751,7 @@ class AgentGovernanceCatalogTest(unittest.TestCase):
 
     def test_timeouts_and_retry_policy_match_se_defaults(self) -> None:
         expected = {
-            ExecutionType.PROMPT: 60,
+            ExecutionType.PROMPT: 120,
             ExecutionType.DETERMINISTIC: 15,
             ExecutionType.SANDBOX: 120,
             ExecutionType.PLANNER: 15,

@@ -1157,6 +1157,7 @@ class RealWorkflowNodeRunner:
             artifact_reference=reference,
             evidence_references=(reference,),
             permissions_used=tuple(sorted(node.tool_allowlist)),
+            quality_gate_passed=True,
             pending_actions=("review_trade_plan",),
         )
 

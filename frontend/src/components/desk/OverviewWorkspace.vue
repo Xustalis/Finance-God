@@ -22,21 +22,7 @@ export interface OverviewQuote {
   session_alignment?: string
 }
 
-export interface MarketFact {
-  source?: { data_time: string; evidence_ref: string }
-  fields: Array<{ name: string; value: string | number | boolean | null }>
-}
 
-interface FactBatch {
-  provider?: string
-  fact_kind?: 'company_disclosure' | 'margin_balance'
-  symbol: string
-  requested_at: string
-  generated_at?: string
-  data_mode?: 'real' | 'mock'
-  fallback_reason?: string | null
-  facts: MarketFact[]
-}
 
 const props = withDefaults(defineProps<{
   quotes: readonly OverviewQuote[]
@@ -47,12 +33,7 @@ const props = withDefaults(defineProps<{
   barsError?: string | null
   minutePeriodsAvailable?: boolean
   marketLoadedAt: string | null
-  sentimentFacts: FactBatch | null
-  sentimentError: string | null
-  sentimentNotice?: string | null
-  informationFacts: FactBatch | null
-  informationError: string | null
-  informationNotice?: string | null
+
   marketNews?: DeskMarketNewsBatch | null
   marketNewsError?: string | null
   marketNewsNotice?: string | null
@@ -67,18 +48,7 @@ const selectedQuote = computed<ChartQuote | null>(() => {
   const q = props.quotes.find(q => q.symbol === props.selectedSymbol)
   return q ? { ...q } as ChartQuote : null
 })
-const currentSentimentFacts = computed(() => (
-  props.sentimentFacts?.symbol === props.selectedSymbol ? props.sentimentFacts : null
-))
-const currentInformationFacts = computed(() => (
-  props.informationFacts?.symbol === props.selectedSymbol ? props.informationFacts : null
-))
-const sentimentIsMock = computed(() => currentSentimentFacts.value?.data_mode === 'mock')
-const informationIsMock = computed(() => currentInformationFacts.value?.data_mode === 'mock')
 
-function field(value: string | number | boolean | null): string {
-  return value === null ? '—' : String(value)
-}
 
 function safeNewsUrl(raw: string | null): string | null {
   if (!raw) return null
@@ -88,13 +58,6 @@ function safeNewsUrl(raw: string | null): string | null {
   } catch {
     return null
   }
-}
-
-function factSummary(fact: MarketFact): string {
-  return fact.fields
-    .slice(0, 5)
-    .map(item => `${item.name}：${field(item.value)}`)
-    .join('；')
 }
 
 function time(value: string): string {
@@ -151,47 +114,7 @@ function time(value: string): string {
       <p v-else-if="marketLoadedAt" class="data-footnote">客户端最后成功读取于 {{ time(marketLoadedAt) }}。</p>
     </section>
 
-    <h2 class="reference-section-title">融资余额事实</h2>
-    <div v-if="currentSentimentFacts" class="sentiment-detail-strip">
-      <span v-for="item in currentSentimentFacts.facts[0]?.fields?.slice(0, 4)" :key="item.name" class="sentiment-detail-item">
-        <span class="sentiment-detail-label">{{ item.name }}</span>
-        <span class="sentiment-detail-value">{{ field(item.value) }}</span>
-      </span>
-    </div>
-    <p v-if="sentimentIsMock && currentSentimentFacts" class="mock-data-disclosure" role="status">
-      <strong>模拟数据</strong>
-      {{ currentSentimentFacts.fallback_reason }}
-      生成于 {{ time(currentSentimentFacts.generated_at || currentSentimentFacts.requested_at) }}；
-      来源：{{ currentSentimentFacts.provider || 'Finance-God Mock' }}。刷新可重试真实数据。
-    </p>
-    <p v-if="sentimentError" class="data-error" role="alert">融资余额事实刷新失败：{{ sentimentError }}</p>
-    <p v-else-if="sentimentNotice" class="empty-data" role="status">{{ sentimentNotice }}</p>
 
-    <section class="overview-section facts-section" aria-labelledby="information-title">
-      <header>
-        <h2 id="information-title">公司披露事实 <span v-if="informationIsMock" class="mock-data-label">模拟数据</span></h2>
-        <small>{{ informationIsMock ? 'Finance-God 模拟参考内容' : 'PandaData 公司财报披露原始字段' }}</small>
-      </header>
-      <template v-if="currentInformationFacts">
-        <p v-if="informationIsMock" class="mock-data-disclosure" role="status">
-          {{ currentInformationFacts.fallback_reason }}
-          生成于 {{ time(currentInformationFacts.generated_at || currentInformationFacts.requested_at) }}；
-          来源：{{ currentInformationFacts.provider || 'Finance-God Mock' }}。刷新可重试真实数据。
-        </p>
-        <ul class="news-list">
-          <li v-for="(fact, idx) in currentInformationFacts.facts.slice(0, 8)" :key="idx" class="news-item">
-            <div class="news-link">
-              <span class="news-sector">{{ fact.source?.data_time ? time(fact.source.data_time) : `记录 ${idx + 1}` }}</span>
-              <span class="news-title">{{ factSummary(fact) }}</span>
-              <small class="news-source">{{ currentInformationFacts.provider }}</small>
-            </div>
-          </li>
-        </ul>
-      </template>
-      <p v-else-if="informationError" class="data-error" role="alert">公司披露事实刷新失败：{{ informationError }}</p>
-      <p v-else-if="informationNotice" class="empty-data" role="status">{{ informationNotice }}</p>
-      <p v-else class="empty-data">正在读取服务端公司披露事实。</p>
-    </section>
 
     <section class="overview-section facts-section" aria-labelledby="market-news-title">
       <header>

@@ -594,6 +594,36 @@ def test_desk_decision_returns_server_validated_ui_actions() -> None:
     ]
 
 
+def test_desk_decision_allows_explicit_add_to_watchlist_action() -> None:
+    runtime = _CapturingRuntime()
+    runtime.proposed_ui_actions = [
+        {"action_id": "add_to_watchlist", "parameters": {"symbol": "600519.SH"}},
+    ]
+    client = _client(runtime, None)
+    context_version = "desk:owner:information:600519.SH:1"
+
+    response = client.post(
+        "/agent/desk/decision",
+        json={
+            "message": "把贵州茅台加入自选",
+            "section": "information",
+            "symbol": "600519.SH",
+            "context_version": context_version,
+            "active_workflow": False,
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ui_actions"] == [
+        {
+            "action_id": "add_to_watchlist",
+            "parameters": {"symbol": "600519.SH"},
+            "context_version": context_version,
+        }
+    ]
+
+
 def test_desk_decision_rejects_agent_action_outside_catalog() -> None:
     runtime = _CapturingRuntime()
     runtime.proposed_ui_actions = [
@@ -693,6 +723,30 @@ def test_desk_workflow_skips_model_turn_when_no_ui_action_was_requested() -> Non
     assert response.json()["mode"] == "workflow"
     assert response.json()["routing_reason"].startswith("该任务需要启动")
     assert response.json()["ui_actions"] == []
+    assert runtime.desk_turn_calls == 0
+
+
+def test_trade_strategy_defers_form_prefill_until_versioned_plan_completes() -> None:
+    runtime = _CapturingRuntime()
+    client = _client(runtime, None)
+
+    response = client.post(
+        "/agent/desk/decision",
+        json={
+            "message": "制定平安银行交易策略并填写交易单",
+            "section": "information",
+            "symbol": "000001.SZ",
+            "context_version": "desk:owner:information:000001.SZ:1",
+            "active_workflow": False,
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "workflow"
+    assert response.json()["workflow_key"] == "trade_plan_generation"
+    assert response.json()["ui_actions"] == []
+    assert "完成后" in response.json()["routing_reason"]
     assert runtime.desk_turn_calls == 0
 
 

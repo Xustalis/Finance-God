@@ -205,9 +205,7 @@ async function refreshExpandedWorkflow(event: Event, runId: string) {
     return
   }
   if (desk.selectedHistoricalWorkflow?.run_id === runId) return
-  await desk.loadWorkflowHistory(true, historyStatus.value as never)
-  const run = desk.workflowHistory.find((item) => item.run_id === runId)
-  if (run) await desk.openHistoricalWorkflow(run)
+  await desk.openHistoricalWorkflow(runId)
 }
 
 watch(() => desk.agentMessages.length, async () => {

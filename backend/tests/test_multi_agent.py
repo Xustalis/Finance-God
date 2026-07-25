@@ -207,6 +207,7 @@ class MultiAgentIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.calls, 2)
 
     def test_environment_factory_injects_finance_god_market_data_provider(self) -> None:
+        provider = MonitorDataProvider()
         with (
             patch.dict(
                 os.environ,
@@ -220,7 +221,7 @@ class MultiAgentIntegrationTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch(
                 "finance_god.orchestration.multi_agent.FinanceGodMarketDataProvider.from_environment",
-                return_value=MonitorDataProvider(),
+                return_value=provider,
             ) as provider_factory,
         ):
             runtime = MultiAgentRuntime.from_environment(
@@ -232,6 +233,7 @@ class MultiAgentIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("workspace", runtime.available_resources)
         self.assertNotIn("fmp", runtime.available_resources)
         provider_factory.assert_called_once_with()
+        self.assertIs(runtime._runner._adapters._monitor._provider, provider)
 
     def test_runtime_exposes_the_complete_agent_catalog(self) -> None:
         runtime = MultiAgentRuntime(AgentRunner())

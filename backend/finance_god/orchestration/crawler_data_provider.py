@@ -8,6 +8,7 @@ without depending on PandaData's NOT_VERIFIED endpoints.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 from datetime import datetime, timezone
 
@@ -55,15 +56,15 @@ class CrawlerDataProvider:
     def _fetch_sentiment(self, query: DataQuery) -> DataArtifact:
         """Convert crawler MarketSentiment into a DataArtifact for agents."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                sentiment = asyncio.run(self._crawler.get_sentiment())
+            else:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     sentiment = pool.submit(
                         lambda: asyncio.run(self._crawler.get_sentiment())
                     ).result(timeout=20)
-            else:
-                sentiment = asyncio.run(self._crawler.get_sentiment())
         except Exception as exc:
             _LOGGER.warning("CrawlerDataProvider sentiment fetch failed: %s", exc)
             # If crawler fails and fallback exists, try PandaData margin

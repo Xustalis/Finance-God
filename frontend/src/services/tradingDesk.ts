@@ -709,7 +709,10 @@ export interface TradePlan {
       action_id: string
       instrument_id: string
       side: string
+      order_type?: 'market' | 'limit'
       quantity: string | null
+      limit_price?: string | null
+      rationale?: string
       included: boolean
     }>
   }

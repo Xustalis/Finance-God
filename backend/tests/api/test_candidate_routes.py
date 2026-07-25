@@ -99,12 +99,11 @@ def test_candidate_dimensions_are_independent_with_no_total_score() -> None:
         assert dims == {"portfolio_fit", "risk", "cost", "liquidity", "evidence"}
 
     scored = {c.symbol: c for c in response.candidates}
-    # A symbol with a real quote is tradable; a quote-less symbol is not.
+    # “可研究候选”只包含具备真实 PandaData 快照的标的。
     assert scored["000001.SZ"].tradable is True
-    missing = scored["600519.SH"]
-    assert missing.tradable is False
-    evidence = next(d for d in missing.dimensions if d.dimension == "evidence")
-    assert evidence.rating == "missing"
+    assert set(scored) == {"000001.SZ"}
+    assert scored["000001.SZ"].provider == "PandaData"
+    assert scored["000001.SZ"].as_of
 
 
 def test_market_data_failure_degrades_explicitly() -> None:
@@ -119,7 +118,28 @@ def test_market_data_failure_degrades_explicitly() -> None:
         service.candidates(owner_id="user-1", now=datetime.now(UTC))
     )
     assert response.unavailable_reason == "MARKET_DATA_UNAVAILABLE"
-    assert all(not c.tradable for c in response.candidates)
+    assert response.candidates == ()
+
+
+def test_empty_quote_batch_returns_no_placeholder_candidates() -> None:
+    async def empty_quotes(symbols: list[str]) -> QuoteBatch:
+        return QuoteBatch(
+            requested_at=datetime(2026, 7, 24, 2, 31, tzinfo=UTC),
+            cache_hit=False,
+            quotes=(),
+            errors={symbol: "UPSTREAM_EMPTY" for symbol in symbols},
+        )
+
+    service = CandidateScoringService(
+        portfolio=_FakePortfolio(()),
+        quotes_provider=empty_quotes,
+    )
+    response = asyncio.run(
+        service.candidates(owner_id="user-1", now=datetime.now(UTC))
+    )
+
+    assert response.candidates == ()
+    assert response.unavailable_reason == "MARKET_DATA_UNAVAILABLE"
 
 
 def test_profile_selected_direction_filters_candidate_universe() -> None:
@@ -338,6 +358,7 @@ def test_ignore_feedback_persists_without_deleting_evidence(tmp_path) -> None:
             ignored = client.post(
                 "/api/v1/candidates/000001.SZ/ignore",
                 json={"reason": "already_covered", "note": "已通过基金覆盖"},
+                headers={"Idempotency-Key": "candidate-ignore-000001"},
             )
             assert ignored.status_code == 201
             assert ignored.json()["reason"] == "already_covered"
@@ -347,7 +368,10 @@ def test_ignore_feedback_persists_without_deleting_evidence(tmp_path) -> None:
             assert body["000001.SZ"]["ignored"] is True
             assert body["000001.SZ"]["ignore_reason"] == "already_covered"
 
-            undo = client.delete("/api/v1/candidates/000001.SZ/ignore")
+            undo = client.delete(
+                "/api/v1/candidates/000001.SZ/ignore",
+                headers={"Idempotency-Key": "candidate-unignore-000001"},
+            )
             assert undo.status_code == 200
             restored = client.get("/api/v1/candidates")
             restored_body = {c["symbol"]: c for c in restored.json()["candidates"]}

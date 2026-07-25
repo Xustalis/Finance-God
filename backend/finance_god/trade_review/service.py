@@ -210,6 +210,9 @@ class TradeReviewService:
                         updated_at=now,
                     )
                     session.add(episode_row)
+                    # The row models intentionally do not expose ORM relationships.
+                    # Flush the parent so PostgreSQL never inserts the snapshot first.
+                    await session.flush()
                 else:
                     episode = TradeEpisode.model_validate(episode_row.payload_json)
 

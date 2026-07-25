@@ -33,9 +33,41 @@ async def _owner(_request) -> str:
     return OWNER
 
 
-def _commands() -> tuple[WorkflowCommandService, FormalWorkflowRegistry]:
+class _MemoryWorkflowRuntime(WorkflowCommandService):
+    """HTTP-test adapter that owns command-boundary idempotency like production."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._cancel_responses: dict[tuple[str, str], tuple[str, object]] = {}
+
+    async def cancel(
+        self,
+        run_id: str,
+        *,
+        actor_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        cancelled_at: datetime,
+    ):
+        key = (actor_id, idempotency_key)
+        prior = self._cancel_responses.get(key)
+        if prior is not None:
+            prior_hash, prior_run = prior
+            if prior_hash != request_hash:
+                raise ValueError("idempotency key was reused with another request")
+            return prior_run
+        run = await super().cancel(
+            run_id,
+            actor_id=actor_id,
+            cancelled_at=cancelled_at,
+        )
+        self._cancel_responses[key] = (request_hash, run)
+        return run
+
+
+def _commands() -> tuple[_MemoryWorkflowRuntime, FormalWorkflowRegistry]:
     registry = FormalWorkflowRegistry.build_default()
-    commands = WorkflowCommandService(
+    commands = _MemoryWorkflowRuntime(
         registry=registry,
         repository=AsyncMemoryWorkflowRepository(),
         run_ids=SequenceRunIds(),
@@ -44,7 +76,7 @@ def _commands() -> tuple[WorkflowCommandService, FormalWorkflowRegistry]:
 
 
 def _client(
-    commands: WorkflowCommandService,
+    commands: _MemoryWorkflowRuntime,
     registry: FormalWorkflowRegistry,
     *,
     owner=_owner,
@@ -285,6 +317,29 @@ def test_connected_trade_plan_workflow_is_accepted_for_queueing() -> None:
     assert response.json()["workflow_key"] == "trade_plan_generation"
 
 
+def test_trade_strategy_can_request_form_prefill_after_plan_completion() -> None:
+    commands, registry = _commands()
+    client = _client(commands, registry)
+    response = client.post(
+        "/workflows/desk",
+        json={
+            "request_intent": "制定平安银行交易策略并填写交易单",
+            "section": "information",
+            "symbol": "000001.SZ",
+            "context_version": "desk:user:information:000001.SZ:1",
+        },
+        headers=_headers("desk-strategy-prefill-0001"),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["workflow_key"] == "trade_plan_generation"
+    assert client.get("/workflows?limit=20").json()["items"][0]["scope"] == {
+        "section": "information",
+        "symbol": "000001.SZ",
+        "requested_ui_action": "fill_trade_draft",
+    }
+
+
 def test_review_workspace_creates_post_trade_review_workflow() -> None:
     commands, registry = _commands()
     client = _client(commands, registry)
@@ -338,6 +393,8 @@ def test_desk_workflow_selection_covers_operating_intents() -> None:
     scenarios = (
         ("推荐几只股票", "information", WorkflowKey.RESEARCH_CANDIDATES),
         ("研究公司基本面", "watchlist", WorkflowKey.COMPANY_RESEARCH),
+        ("梳理平安银行当前可得的全部基础信息", "information", WorkflowKey.COMPANY_RESEARCH),
+        ("帮我制定交易策略", "portfolio", WorkflowKey.TRADE_PLAN_GENERATION),
         ("解释当前行情", "information", WorkflowKey.MARKET_CONTEXT),
         ("检查持仓集中度", "portfolio", WorkflowKey.PORTFOLIO_STRESS),
         ("回测这个策略", "information", WorkflowKey.STRATEGY_VALIDATION),

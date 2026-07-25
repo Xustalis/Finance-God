@@ -414,6 +414,52 @@ describe('trading workspace routing', () => {
     expect(store.symbol).toBe('600519.SH')
   })
 
+  it('adds a symbol to the current watchlist only after an approved Agent action', async () => {
+    const pinia = createPinia()
+    const store = useTradingDeskStore(pinia)
+    store.serverContextVersion = 'desk:user-1:information:600519.SH:1'
+    store.uiActionCatalog = [
+      { id: 'add_to_watchlist', object: 'watchlist_instrument', mutation: 'workspace_write', descriptor_version: '1' },
+    ]
+    store.watchlistGroups = [{
+      group_id: 'group-1',
+      owner_user_id: 'user-1',
+      name: '重点观察',
+      description: null,
+      revision: 1,
+      created_at: '2026-07-25T01:00:00Z',
+      updated_at: '2026-07-25T01:00:00Z',
+    }]
+    store.selectedWatchlistId = 'group-1'
+    store.watchlistInstruments = { 'group-1': [] }
+    vi.mocked(tradingDeskApi.applyDeskUiAction).mockResolvedValue({
+      receipt: 'applied',
+      action_id: 'add_to_watchlist',
+      reason: null,
+      owner_id: 'user-1',
+      parameters: { symbol: '600519.SH' },
+      applied_at: '2026-07-25T01:00:00Z',
+    })
+    vi.mocked(tradingDeskApi.addWatchlistInstrument).mockResolvedValue({
+      group_id: 'group-1',
+      instrument_id: '600519.SH',
+      added_by: 'user-1',
+      added_at: '2026-07-25T01:00:00Z',
+    })
+
+    const receipt = await store.applyUiAction('add_to_watchlist', { symbol: '600519.SH' })
+
+    expect(receipt.receipt).toBe('applied')
+    expect(tradingDeskApi.addWatchlistInstrument).toHaveBeenCalledWith(
+      'group-1',
+      '600519.SH',
+      expect.stringMatching(/^watchlist-add-/),
+    )
+    expect(store.watchlistInstruments['group-1']).toHaveLength(1)
+    expect(store.section).toBe('watchlist')
+    expect(store.symbol).toBe('600519.SH')
+  })
+
   it('redirects every legacy trading URL to the protected desk', async () => {
     authenticate()
     const router = createAppRouter(createMemoryHistory())
@@ -818,6 +864,35 @@ describe('trading workspace routing', () => {
     expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(3)
   })
 
+  it('prepares a position sell in the trading workspace without submitting an order', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+
+    store.preparePositionSell('000001.sz', '100')
+
+    expect(store.section).toBe('trading')
+    expect(store.symbol).toBe('000001.SZ')
+    expect(store.tradeDraftPrefill).toEqual({
+      side: 'sell',
+      quantity: '100',
+      priceType: 'market',
+      limitPrice: null,
+    })
+    expect(tradingDeskApi.submitSimulationMarketOrder).not.toHaveBeenCalled()
+  })
+
+  it('opens a position instrument in trading without prefilling an order', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+
+    store.openPositionTrading('600519.sh')
+
+    expect(store.section).toBe('trading')
+    expect(store.symbol).toBe('600519.SH')
+    expect(store.tradeDraftPrefill).toBeNull()
+    expect(tradingDeskApi.submitSimulationMarketOrder).not.toHaveBeenCalled()
+  })
+
   it('requests real daily bars on first load', async () => {
     const store = useTradingDeskStore(createPinia())
 
@@ -946,7 +1021,7 @@ describe('trading workspace routing', () => {
       },
     })
 
-    const status = wrapper.get('[role="status"]')
+    const status = wrapper.get('[data-test="candidate-status"]')
     expect(wrapper.text()).toContain('现金与固收')
     expect(status.text()).toContain('当前画像方向不生成股票候选')
     expect(status.classes()).toContain('empty-data')
@@ -962,7 +1037,7 @@ describe('trading workspace routing', () => {
         unavailable_reason: 'MARKET_DATA_UNAVAILABLE',
       },
     })
-    expect(wrapper.get('[role="status"]').classes()).toContain('data-error')
+    expect(wrapper.get('[data-test="candidate-status"]').classes()).toContain('data-error')
   })
 
   it('queues a second formal task while the current workflow remains active', async () => {
@@ -1111,6 +1186,114 @@ describe('trading workspace routing', () => {
     expect(wrapper.get('[aria-label="工作流产物"]').text()).toContain(
       '已生成 3 个可继续研究的候选',
     )
+  })
+
+  it('fills but never submits the trade form after an explicitly requested strategy completes', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+    const scope = {
+      section: 'information',
+      symbol: '000001.SZ',
+      requested_ui_action: 'fill_trade_draft',
+    }
+    store.activeWorkflow = {
+      run_id: 'strategy-prefill-run',
+      status: 'running',
+      workflow_key: 'trade_plan_generation',
+      workflow_version: 'finance-god-workflows-v2',
+      revision: 2,
+      final_artifact: null,
+      scope,
+    }
+    vi.mocked(tradingDeskApi.fetchWorkflow).mockResolvedValue({
+      run_id: 'strategy-prefill-run',
+      status: 'completed',
+      workflow_key: 'trade_plan_generation',
+      workflow_version: 'finance-god-workflows-v2',
+      revision: 8,
+      scope,
+      final_artifact: {
+        object_type: 'ResearchMemo',
+        object_id: 'strategy-prefill-run',
+        version: 'report-v1',
+      },
+      completed_node_artifacts: [{
+        object_type: 'trade_plan',
+        object_id: 'plan-ai-1',
+        version: '1',
+      }],
+    })
+    vi.mocked(tradingDeskApi.fetchWorkflowProgress).mockResolvedValue({
+      run_id: 'strategy-prefill-run',
+      status: 'completed',
+      workflow_key: 'trade_plan_generation',
+      workflow_version: 'finance-god-workflows-v2',
+      revision: 8,
+      updated_at: '2026-07-25T08:01:00Z',
+      total_node_count: 5,
+      completed_node_artifact_count: 5,
+      completed_node_artifacts: [{
+        object_type: 'trade_plan',
+        object_id: 'plan-ai-1',
+        version: '1',
+      }],
+      errors: [],
+      is_terminal: true,
+    })
+    vi.mocked(tradingDeskApi.fetchWorkflowEvidence).mockResolvedValue({
+      object_type: 'ResearchMemo',
+      object_id: 'strategy-prefill-run',
+      version: 'report-v1',
+      subject: '制定平安银行交易策略并填写交易单',
+      conclusion: '交易计划已生成。',
+      provider: 'multi-agent-runtime',
+      generated_at: '2026-07-25T08:00:59Z',
+      facts: [],
+      inferences: [],
+      counterpoints: [],
+      unknowns: [],
+      invalidation_conditions: [],
+      sources: [],
+      agent_nodes: [],
+      notices: [],
+    })
+    vi.mocked(tradingDeskApi.fetchTradePlan).mockResolvedValue({
+      object: {
+        plan_id: 'plan-ai-1',
+        status: 'pending_review',
+        revision: 1,
+        actions: [{
+          action_id: 'action-ai-1',
+          instrument_id: '000001.SZ',
+          side: 'buy',
+          order_type: 'market',
+          quantity: '100',
+          limit_price: null,
+          included: true,
+        }],
+      },
+      source_type: 'candidate',
+      source_id: '000001.SZ',
+      capabilities: [],
+      history: [{ revision: 1 }],
+    })
+
+    await store.refreshWorkflow()
+
+    expect(store.section).toBe('trading')
+    expect(store.symbol).toBe('000001.SZ')
+    expect(store.tradeDraftPrefill).toEqual({
+      side: 'buy',
+      quantity: '100',
+      priceType: 'market',
+      limitPrice: null,
+      source: 'agent_strategy',
+      planId: 'plan-ai-1',
+    })
+    expect(tradingDeskApi.submitSimulationMarketOrder).not.toHaveBeenCalled()
+    expect(store.agentMessages.some(
+      (item) => item.kind === 'text' && item.text.includes('手动提交'),
+    )).toBe(true)
   })
 
   it('hides a reminder toast without marking the reminder as read', async () => {
@@ -1356,7 +1539,7 @@ describe('trading workspace routing', () => {
       },
     })
 
-    expect(wrapper.get('[role="status"]').text()).toBe('历史演示不提供研究候选，避免引入未来信息。')
+    expect(wrapper.get('[data-test="candidate-status"]').text()).toBe('历史演示不提供研究候选，避免引入未来信息。')
     expect(wrapper.text()).not.toContain('候选读取失败')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
@@ -1638,7 +1821,9 @@ describe('trading workspace routing', () => {
     expect(blocked.get('button.ink-button').attributes('disabled')).toBeDefined()
   })
 
-  it('keeps portfolio cost basis when market value is unavailable and never invents last prices', () => {
+  it('keeps portfolio cost basis when market value is unavailable and never invents last prices', async () => {
+    const onOpenPosition = vi.fn()
+    const onSellPosition = vi.fn()
     const wrapper = mount(PortfolioWorkspace, {
       props: {
         account: {
@@ -1673,6 +1858,8 @@ describe('trading workspace routing', () => {
         loading: false,
         error: null,
         onLoad: vi.fn(),
+        onOpenPosition,
+        onSellPosition,
         onCreateAccount: vi.fn(),
       },
     })
@@ -1683,7 +1870,16 @@ describe('trading workspace routing', () => {
     expect(wrapper.text()).not.toMatch(/市值[\s\S]*¥1,1/)
     expect(wrapper.text()).not.toContain('自动卖出策略')
     expect(wrapper.text()).not.toContain('设止盈止损')
-    expect(wrapper.find('th[scope="col"]:last-child').text()).toBe('已实现')
+    expect(wrapper.find('th[scope="col"]:last-child').text()).toBe('操作')
+    await wrapper.get('button[aria-label="查看 000001.SZ 的交易页面"]').trigger('click')
+    expect(onOpenPosition).toHaveBeenCalledWith(expect.objectContaining({
+      instrument_id: '000001.SZ',
+    }))
+    await wrapper.get('button[aria-label="卖出 000001.SZ"]').trigger('click')
+    expect(onSellPosition).toHaveBeenCalledWith(expect.objectContaining({
+      instrument_id: '000001.SZ',
+      available_quantity: '100',
+    }))
   })
 
   it('treats only explicit true capabilities as enabled', () => {

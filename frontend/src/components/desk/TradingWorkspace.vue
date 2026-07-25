@@ -22,7 +22,12 @@ const props = withDefaults(defineProps<{
   minutePeriodsAvailable?: boolean
   receipt: SimulationOrder | null
   fills: readonly SimulationFill[]
-  prefill?: { side: 'buy' | 'sell'; quantity: string } | null
+  prefill?: {
+    side: 'buy' | 'sell'
+    quantity: string
+    source?: 'agent_strategy'
+    planId?: string
+  } | null
   loading: boolean
   error: string | null
   onLoad: () => void | Promise<void>
@@ -154,6 +159,10 @@ async function submit() {
       </section>
 
       <form class="form-workspace" aria-label="模拟市价交易" @submit.prevent="submit">
+        <p v-if="prefill?.source === 'agent_strategy'" class="empty-data" role="status">
+          AI 已根据交易计划填写模拟交易单{{ prefill.planId ? `（${prefill.planId}）` : '' }}。
+          {{ prefill.quantity ? '请核对真实行情、方向和数量后手动提交。' : '计划未确定数量，请补充数量后手动提交。' }}
+        </p>
         <label>标的<input v-model="instrumentId" required @change="selectTradingSymbol"></label>
         <label>方向<select v-model="side"><option value="buy">买入</option><option value="sell">卖出</option></select></label>
         <label>数量<input v-model="quantity" type="number" min="1" step="1" required></label>

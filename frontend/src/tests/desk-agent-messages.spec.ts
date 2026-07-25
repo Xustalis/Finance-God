@@ -175,6 +175,31 @@ describe('DeskAgentPanel message bubbles', () => {
     expect(receipt.get<HTMLDetailsElement>('.workflow-message-detail').element.open).toBe(true)
   })
 
+  it('reads an expanded archived task directly by its run id', async () => {
+    const { store, wrapper } = mountAgent()
+    store.agentMessages = [{
+      id: 'workflow-run-archived',
+      role: 'assistant',
+      kind: 'workflow',
+      createdAt: '2026-07-25T00:00:00Z',
+      runId: 'run-outside-current-history-page',
+      intent: '帮我制定交易策略',
+      status: 'failed',
+    }]
+    const openHistoricalWorkflow = vi
+      .spyOn(store, 'openHistoricalWorkflow')
+      .mockResolvedValue()
+    await wrapper.vm.$nextTick()
+
+    const details = wrapper.get<HTMLDetailsElement>('.workflow-message-detail')
+    details.element.open = true
+    await details.trigger('toggle')
+
+    expect(openHistoricalWorkflow).toHaveBeenCalledWith(
+      'run-outside-current-history-page',
+    )
+  })
+
   it('explains a known quality-gate error instead of exposing its internal code', async () => {
     const { store, wrapper } = mountAgent()
     store.activeWorkflow = {

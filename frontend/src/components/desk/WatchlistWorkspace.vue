@@ -118,7 +118,14 @@ watch(
         <div class="market-table-wrap"><table class="market-table"><thead><tr><th scope="col">标的</th><th scope="col">加入时间</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="instrument in selectedGroup.instruments" :key="instrument.instrument_id"><th scope="row">{{ instrument.instrument_id }}</th><td>{{ instrument.added_at ?? '—' }}</td><td><button class="refresh-button" type="button" @click="onRemoveInstrument({ groupId: selectedGroup!.group_id, instrumentId: instrument.instrument_id })">移除</button></td></tr></tbody></table></div>
         <form class="form-workspace" @submit.prevent="addInstrument"><label>标的代码<input v-model="instrumentId" placeholder="例如：000001.SZ" required></label><button class="ink-button" type="submit">加入当前分组</button></form>
       </template>
-      <p v-else class="empty-data">尚无自选分组，请先创建一个分组。</p>
+      <div v-else class="workspace-empty-ledger" role="status">
+        <header><strong>尚无自选分组</strong><span>先建立服务端分组，再加入标的</span></header>
+        <dl>
+          <div><dt>第一步</dt><dd>填写分组名称，例如“重点跟踪”或“等待估值”。</dd></div>
+          <div><dt>第二步</dt><dd>使用六位证券代码与交易所后缀加入当前分组。</dd></div>
+          <div><dt>数据边界</dt><dd>自选只保存关注关系，不生成价格、评级或交易建议。</dd></div>
+        </dl>
+      </div>
       <p v-if="watchlistError" class="data-error" role="alert">自选读取失败：{{ watchlistError }}</p>
     </section>
     <section class="overview-section" aria-labelledby="candidate-title">
@@ -134,14 +141,22 @@ watch(
       <div v-if="candidates.length" class="market-table-wrap candidate-table"><table class="market-table"><thead><tr><th scope="col">标的</th><th scope="col">用途</th><th scope="col">五项解释维度</th><th scope="col">反方证据 / 未知项</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="candidate in candidates" :key="candidate.instrument_id"><th scope="row">{{ candidate.name || candidate.symbol }}<small>{{ candidate.symbol }} · {{ candidate.direction_label }}</small></th><td>{{ candidate.purpose }}<small>{{ candidate.provider || '—' }} · {{ candidate.as_of || '—' }}</small></td><td><ul class="fact-list"><li v-for="dimension in candidate.dimensions.slice(0, 5)" :key="dimension.dimension"><strong>{{ dimension.label }} · {{ dimension.rating }}</strong><span>{{ dimension.detail }}</span></li></ul></td><td><p v-for="exclusion in candidate.exclusions" :key="exclusion.reason_code">{{ exclusion.detail }}</p><p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">未知：{{ dimension.missing_fields.join('、') }}</p><span v-if="!candidate.exclusions.length && !candidate.dimensions.some((item) => item.missing_fields.length)">未返回反方证据或未知项。</span></td><td class="candidate-actions"><template v-if="candidate.ignored"><small>已忽略：{{ candidate.ignore_reason || '—' }}</small></template><template v-else><button class="refresh-button" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button><button v-if="onCreateTradePlan" class="refresh-button" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划，不是直接下单'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button></template></td></tr></tbody></table></div>
       <p
         v-else-if="candidateUnavailableText"
+        data-test="candidate-status"
         :class="candidateUnavailableIsError ? 'data-error' : 'empty-data'"
         role="status"
       >
         {{ candidateUnavailableText }}
         <a v-if="!candidateUnavailableIsError" href="/app/profile-report">调整画像方向</a>
       </p>
-      <p v-else-if="candidateNotice" class="empty-data" role="status">{{ candidateNotice }}</p>
-      <p v-else-if="!candidateError" class="empty-data">暂无可研究候选。</p>
+      <p v-else-if="candidateNotice" data-test="candidate-status" class="empty-data" role="status">{{ candidateNotice }}</p>
+      <div v-else-if="!candidateError" data-test="candidate-status" class="workspace-empty-ledger" role="status">
+        <header><strong>暂无可研究候选</strong><span>候选必须同时具备画像投影与真实行情快照</span></header>
+        <dl>
+          <div><dt>适配依据</dt><dd>服务端读取风险等级、投资方向与当前模拟持仓的脱敏投影。</dd></div>
+          <div><dt>市场依据</dt><dd>缺少 PandaData 上游时间的标的不会进入候选列表。</dd></div>
+          <div><dt>后续动作</dt><dd>候选仅用于继续研究，可申请交易计划，但不会直接下单。</dd></div>
+        </dl>
+      </div>
       <p v-if="candidateError" class="data-error" role="alert">候选读取失败：{{ candidateError }}</p>
       <p v-if="planError" class="data-error" role="alert">交易计划：{{ planError }}</p>
     </section>

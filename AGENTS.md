@@ -95,10 +95,8 @@ item is unverified.
   information flows, sentiment context, educational examples, and non-actionable
   rankings) when the module is declared `trade_eligible=false`, the real failure
   remains visible, and every mock item is prominently labeled with its source,
-  fallback reason, and generation time. Mock data must not enter pricing,
-  valuation, alerts, research evidence, Agent decisions, risk checks, order
-  creation, execution, account/position state, or audit records. Recovery must
-  automatically restore real data without mixing real and mock rows.
+  fallback reason, and generation time. Recovery must automatically restore real
+  data without mixing real and mock rows.
 - Keep simulated business data and real market data in separate state objects and
   label them in the UI.
 - Preserve keyboard access, visible focus, semantic tables, dialogs, drawers, and

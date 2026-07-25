@@ -532,6 +532,41 @@ class WorkflowWorkerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.status, WorkflowRunStatus.COMPLETED, run.errors)
         self.assertNotIn("deterministic_quality_gate_failed", run.errors)
 
+    async def test_trade_plan_calculation_passes_its_quality_gate(self) -> None:
+        async def trade_plan_provider(owner_id, symbol, idempotency_key):
+            self.assertEqual(owner_id, "user-1")
+            self.assertEqual(symbol, "000001.SZ")
+            self.assertTrue(idempotency_key.startswith("workflow-plan:"))
+            plan = SimpleNamespace(plan_id="plan-workflow-1", revision=1)
+            return SimpleNamespace(
+                object=plan,
+                generated_at=NOW,
+                model_dump=lambda **_: {
+                    "object": {
+                        "plan_id": plan.plan_id,
+                        "revision": plan.revision,
+                    },
+                    "generated_at": NOW.isoformat(),
+                },
+            )
+
+        self.worker._trade_plan_provider = trade_plan_provider
+        run_id = await self._queue(
+            key=WorkflowKey.TRADE_PLAN_GENERATION,
+            suffix="trade-plan-quality-gate",
+            input_versions=CONTEXT_INPUT,
+        )
+
+        self.assertEqual(await self.worker.process_once(), 1)
+        run = await self.repository.get(run_id)
+
+        assert run is not None
+        self.assertEqual(run.status, WorkflowRunStatus.COMPLETED, run.errors)
+        self.assertNotIn("deterministic_quality_gate_failed", run.errors)
+        self.assertTrue(
+            any(item["object_type"] == "trade_plan" for item in self.recorded)
+        )
+
     async def test_strategy_monitoring_compares_versions_and_records_evidence(
         self,
     ) -> None:

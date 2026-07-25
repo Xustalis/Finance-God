@@ -15,7 +15,10 @@ from starlette.routing import Route
 
 from finance_god.agents.contracts import WorkflowKey
 from finance_god.api.auth import AuthenticationError, OwnerResolver
-from finance_god.api.desk_intent import select_desk_workflow
+from finance_god.api.desk_intent import (
+    requests_trade_form_prefill,
+    select_desk_workflow,
+)
 from finance_god.application.workflow_worker import (
     CONNECTED_DETERMINISTIC_SERVICES,
     worker_supports,
@@ -220,6 +223,11 @@ def create_workflow_routes(
                 )
             ]
             scope = {"section": payload.section, "symbol": symbol}
+            if (
+                workflow_key is WorkflowKey.TRADE_PLAN_GENERATION
+                and requests_trade_form_prefill(payload.request_intent)
+            ):
+                scope["requested_ui_action"] = "fill_trade_draft"
             if payload.order_draft_id is not None:
                 input_versions.append(
                     VersionReference(

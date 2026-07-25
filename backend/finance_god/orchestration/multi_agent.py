@@ -23,7 +23,6 @@ from research_runtime.models import PandaDataDataset
 
 from finance_god.agents.language_policy import NATURAL_CHINESE_POLICY
 
-from .crawler_data_provider import CrawlerDataProvider
 from .market_data_provider import FinanceGodMarketDataProvider
 
 _PROJECT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -80,22 +79,17 @@ class MultiAgentRuntime:
     ) -> MultiAgentRuntime:
         """Build a fully configured runtime with Finance-God owned adapters.
 
-        The data provider uses CrawlerDataProvider as the primary source for
-        sentiment (MARGIN dataset), falling back to PandaData for market bars
-        and other quantitative datasets.
+        Deterministic monitor datasets use the Finance-God-owned normalized
+        PandaData provider. Crawler sentiment is a different domain object and
+        must not be substituted for the MARGIN schema expected by the runtime.
         """
         load_dotenv(_PROJECT_ENV_FILE, override=False)
         settings = Settings.from_environment()
-        # Build PandaData provider as fallback for market bars and derivatives
-        panda_provider = (
+        data_provider = (
             FinanceGodMarketDataProvider.from_environment()
             if enable_panda_data
             else None
         )
-
-        # CrawlerDataProvider handles MARGIN via crawler sentiment,
-        # delegates everything else to the PandaData fallback
-        data_provider = CrawlerDataProvider(fallback=panda_provider)
 
         chat_client = OpenAICompatibleChat(settings)
         runner = AgentRunner(
@@ -149,6 +143,8 @@ class MultiAgentRuntime:
             "DOM、CSS、坐标或任意点击。交易意图最多只能切到交易页并预填仿真草稿，不得描述为"
             "已下单。fill_trade_draft 只能使用 side、quantity、price_type，side 仅 buy/sell，"
             "price_type 仅 market/limit，只有 limit 可增加 limit_price；未指定价格时使用 market。"
+            "add_to_watchlist 只使用 symbol，必须是六位数字加 .SZ 或 .SH；它只加入当前自选分组，"
+            "不能创建、删除分组或移除已有标的。"
             "用户画像投影是服务端提供的可信脱敏上下文。available=true 时必须使用其中已有的"
             "风险等级、损失容忍、投资方向等字段，不得声称这些字段缺失；available=false 时才可"
             "明确说明画像不可用。仿真持仓投影同样是可信只读上下文；available=true 时不得声称"

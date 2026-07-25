@@ -114,6 +114,7 @@ def test_bootstrap_returns_shell_state_with_safe_action_catalog() -> None:
     assert "select_symbol" in ids
     assert "fill_trade_draft" in ids
     assert "locate_candidate" in ids
+    assert "add_to_watchlist" in ids
     assert "open_trade_plan" in ids
     assert all(item["descriptor_version"] == "1" for item in body["ui_action_catalog"])
     projection = body["profile_projection"]
@@ -461,6 +462,27 @@ def test_ui_action_validates_semantic_parameters_and_rejects_selectors() -> None
     ).json()
     assert selector["receipt"] == "rejected"
     assert selector["reason"] == "selector_parameters_forbidden"
+
+    add_to_watchlist = client.post(
+        "/desk/ui-actions",
+        json={
+            "action_id": "add_to_watchlist",
+            "context_version": context,
+            "parameters": {"symbol": "600519.SH"},
+        },
+    ).json()
+    assert add_to_watchlist["receipt"] == "applied"
+
+    invalid_watchlist_symbol = client.post(
+        "/desk/ui-actions",
+        json={
+            "action_id": "add_to_watchlist",
+            "context_version": context,
+            "parameters": {"symbol": "not-a-symbol"},
+        },
+    ).json()
+    assert invalid_watchlist_symbol["receipt"] == "rejected"
+    assert invalid_watchlist_symbol["reason"] == "invalid_symbol"
 
 
 def test_ui_action_supports_workspace_records_candidates_and_artifacts() -> None:

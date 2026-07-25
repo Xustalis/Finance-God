@@ -442,16 +442,25 @@ class WorkflowExecutor:
                 )
                 self._validate_deterministic_outcome(node, outcome, context)
             except TimeoutError:
+                retry_counts[FailureKind.TRANSIENT] += 1
                 audits.append(
                     self._node_audit(
-                    event_type="node_attempt_timed_out",
-                    payload={
-                        "node_id": node.node_id,
-                        "attempt": attempts,
-                    },
+                        event_type="node_attempt_timed_out",
+                        payload={
+                            "node_id": node.node_id,
+                            "attempt": attempts,
+                            "retryable": bool(node.agent_ids),
+                        },
                     )
                 )
                 await self._append_execution_audit(run_id, audits[-1])
+                if (
+                    node.agent_ids
+                    and retry_counts[FailureKind.TRANSIENT]
+                    <= node.retry_budget.retry_limits[FailureKind.TRANSIENT]
+                    and attempts < attempt_limit
+                ):
+                    continue
                 return self._timed_out(
                     node,
                     attempts,

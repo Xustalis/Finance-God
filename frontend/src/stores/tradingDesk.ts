@@ -271,7 +271,14 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const workspaceControl = ref<{ section: DeskSection; kind: 'filter' | 'sort'; field: string; value: string } | null>(null)
   const openedRecord = ref<{ type: string; id: string } | null>(null)
   const candidateLocation = ref<{ symbol: string; target: 'watchlist' | 'research' } | null>(null)
-  const tradeDraftPrefill = ref<{ side: 'buy' | 'sell'; quantity: string; priceType: 'market' | 'limit'; limitPrice: string | null } | null>(null)
+  const tradeDraftPrefill = ref<{
+    side: 'buy' | 'sell'
+    quantity: string
+    priceType: 'market' | 'limit'
+    limitPrice: string | null
+    source?: 'agent_strategy'
+    planId?: string
+  } | null>(null)
   const requestedArtifactId = ref<string | null>(null)
   const requestedReminderId = ref<string | null>(null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -282,6 +289,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   let agentPreviewRequestId = 0
   let barsRequestId = 0
   let marketNewsRequestId = 0
+  const appliedTradePlanPrefills = new Set<string>()
 
   function persistDeskContext() {
     localStorage.setItem(deskContextStorageKey(), JSON.stringify({
@@ -979,6 +987,15 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
           }
           setSymbol(parameters.symbol)
           setSection('watchlist')
+        } else if (actionId === 'add_to_watchlist') {
+          const targetGroupId = selectedWatchlistId.value ?? watchlistGroups.value[0]?.group_id
+          if (!targetGroupId) throw new Error('尚无自选分组，请先创建一个分组')
+          const normalizedSymbol = parameters.symbol.trim().toUpperCase()
+          const alreadyAdded = (watchlistInstruments.value[targetGroupId] ?? [])
+            .some((item) => item.instrument_id === normalizedSymbol)
+          if (!alreadyAdded) await addToWatchlist(targetGroupId, normalizedSymbol)
+          setSymbol(normalizedSymbol)
+          setSection('watchlist')
         } else if (actionId === 'fill_trade_draft') {
           tradeDraftPrefill.value = {
             side: parameters.side as 'buy' | 'sell',
@@ -1195,6 +1212,28 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     catch (error) { orderError.value = failureText(error, '创建订单草稿失败'); throw error }
   }
 
+  function preparePositionSell(instrumentId: string, availableQuantity: string | number) {
+    const normalizedSymbol = instrumentId.trim().toUpperCase()
+    const normalizedQuantity = String(availableQuantity)
+    const numericQuantity = Number(normalizedQuantity)
+    if (!normalizedSymbol || !Number.isFinite(numericQuantity) || numericQuantity <= 0) return
+    setSymbol(normalizedSymbol)
+    tradeDraftPrefill.value = {
+      side: 'sell',
+      quantity: normalizedQuantity,
+      priceType: 'market',
+      limitPrice: null,
+    }
+    setSection('trading')
+  }
+
+  function openPositionTrading(instrumentId: string) {
+    const normalizedSymbol = instrumentId.trim().toUpperCase()
+    if (!normalizedSymbol) return
+    setSymbol(normalizedSymbol)
+    setSection('trading')
+  }
+
   async function reviewDraft() {
     if (!activeDraft.value) throw new Error('没有可复核的订单草稿')
     orderError.value = null
@@ -1366,6 +1405,68 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       activeTradePlan.value = await confirmTradePlan(activeTradePlan.value.object.plan_id, activeTradePlan.value.object.revision, newIdempotencyKey('plan-confirm'))
       return activeTradePlan.value
     } catch (error) { tradePlanError.value = failureText(error, '确认交易计划失败'); throw error }
+  }
+
+  async function prefillTradeFormFromCompletedStrategy(
+    run: DeskWorkflowRun,
+    progress: DeskWorkflowProgress,
+  ) {
+    if (
+      run.workflow_key !== 'trade_plan_generation'
+      || run.scope?.requested_ui_action !== 'fill_trade_draft'
+      || appliedTradePlanPrefills.has(run.run_id)
+    ) return
+    const planReference = [
+      ...(progress.completed_node_artifacts ?? []),
+      ...(run.completed_node_artifacts ?? []),
+    ].find((item) => item.object_type === 'trade_plan')
+    if (!planReference) {
+      tradePlanError.value = '交易策略已完成，但没有返回可填写的版本化交易计划。'
+      return
+    }
+    let plan: TradePlan
+    try {
+      plan = await loadTradePlan(planReference.object_id)
+    } catch {
+      return
+    }
+    const actions = plan.object.actions.filter((item) => item.included)
+    if (actions.length !== 1) {
+      tradePlanError.value = '交易策略包含多个交易动作，不能自动映射到单张交易单。'
+      return
+    }
+    const action = actions[0]
+    if (action.side !== 'buy' && action.side !== 'sell') {
+      tradePlanError.value = '交易计划方向无法填写到当前交易单。'
+      return
+    }
+    if ((action.order_type ?? 'market') !== 'market') {
+      tradePlanError.value = '交易计划使用限价单，当前模拟交易表单仅支持市价单，未自动填写。'
+      return
+    }
+    appliedTradePlanPrefills.add(run.run_id)
+    setSymbol(action.instrument_id)
+    tradeDraftPrefill.value = {
+      side: action.side,
+      quantity: action.quantity ?? '',
+      priceType: 'market',
+      limitPrice: null,
+      source: 'agent_strategy',
+      planId: plan.object.plan_id,
+    }
+    setSection('trading')
+    if (!agentMessages.value.some((item) => item.id === `strategy-prefill-${run.run_id}`)) {
+      appendAgentMessage({
+        id: `strategy-prefill-${run.run_id}`,
+        role: 'assistant',
+        kind: 'text',
+        createdAt: new Date().toISOString(),
+        text: action.quantity
+          ? '已根据版本化交易计划填写模拟交易单，请核对真实行情后手动提交。'
+          : '已根据版本化交易计划填写标的与方向；计划未确定数量，请补充数量并手动提交。',
+        status: 'complete',
+      })
+    }
   }
 
   async function runWorkflow(intent: string) {
@@ -1603,6 +1704,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         loadWorkflowEvidence(run.final_artifact),
         ...(run.workflow_key === 'research_candidates' ? [loadCandidates()] : []),
       ])
+      await prefillTradeFormFromCompletedStrategy(run, progress)
       if (activeWorkflowEvidence.value && !agentMessages.value.some((item) => item.kind === 'research_report' && item.runId === runId)) {
         appendAgentMessage({
           id: `report-${runId}`,
@@ -1706,12 +1808,27 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     }
   }
 
-  async function openHistoricalWorkflow(run: DeskWorkflowRun) {
-    selectedHistoricalWorkflow.value = await fetchWorkflow(run.run_id)
-    selectedHistoricalProgress.value = await fetchWorkflowProgress(run.run_id)
-    selectedHistoricalEvidence.value = null
-    if (selectedHistoricalWorkflow.value.final_artifact) {
-      selectedHistoricalEvidence.value = await fetchWorkflowEvidence(selectedHistoricalWorkflow.value.final_artifact)
+  async function openHistoricalWorkflow(run: DeskWorkflowRun | string) {
+    const runId = typeof run === 'string' ? run : run.run_id
+    workflowHistoryLoading.value = true
+    workflowHistoryError.value = null
+    try {
+      const [workflow, progress] = await Promise.all([
+        fetchWorkflow(runId),
+        fetchWorkflowProgress(runId),
+      ])
+      selectedHistoricalWorkflow.value = workflow
+      selectedHistoricalProgress.value = progress
+      selectedHistoricalEvidence.value = workflow.final_artifact
+        ? await fetchWorkflowEvidence(workflow.final_artifact)
+        : null
+    } catch (error) {
+      selectedHistoricalWorkflow.value = null
+      selectedHistoricalProgress.value = null
+      selectedHistoricalEvidence.value = null
+      workflowHistoryError.value = failureText(error, '任务运行信息不可用')
+    } finally {
+      workflowHistoryLoading.value = false
     }
   }
 
@@ -1907,7 +2024,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     setSection, setSymbol, setBarsFrequency, refreshMarket, refreshOverviewWorkspace, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace, refreshSimulationClock, enterHistoricalMode, resumeClock,
     loadProfile, loadMarketFacts, loadMarketNews, loadNotifications, loadNotificationHistory,
     dismissNotification, applyUiAction,
-    loadSimulationData, loadTradeEpisodes, loadAgentLearningSummary, loadReviewWorkspace, selectTradeEpisode, retrySelectedTradeReview, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
+    loadSimulationData, loadTradeEpisodes, loadAgentLearningSummary, loadReviewWorkspace, selectTradeEpisode, retrySelectedTradeReview, loadWatchlists, loadCandidates, createAccount, createDraft, openPositionTrading, preparePositionSell, reviewDraft,
     acknowledgeSoftRisk, confirmDraft, submitDraft, submitMarketOrder, reconcileOrder, createWatchlist, renameWatchlist, removeWatchlist,
     addToWatchlist, removeFromWatchlist, ignoreCandidate, restoreCandidate, startCandidateTradePlan,
     startPortfolioDeviationTradePlan, loadTradePlan, reviseActiveTradePlan, confirmActiveTradePlan,

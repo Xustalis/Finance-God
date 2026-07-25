@@ -437,7 +437,23 @@ class WorkflowExecutorTest(unittest.IsolatedAsyncioTestCase):
         base = self.plan(WorkflowKey.COMPANY_RESEARCH, suffix="node-timeout")
         target = base.nodes[0]
         nodes = (
-            target.model_copy(update={"timeout_seconds": 1}),
+            target.model_copy(
+                update={
+                    "timeout_seconds": 1,
+                    "retry_budget": target.retry_budget.model_copy(
+                        update={
+                            "retry_limits": {
+                                FailureKind.TRANSIENT: 0,
+                                FailureKind.VALIDATION: 0,
+                                FailureKind.AUTHENTICATION: 0,
+                                FailureKind.PERMISSION: 0,
+                            },
+                            "total_attempt_limit": 1,
+                            "total_duration_seconds": 1,
+                        }
+                    ),
+                }
+            ),
             *base.nodes[1:],
         )
         plan = TaskPlan(**{**base.model_dump(), "nodes": nodes})
@@ -445,6 +461,51 @@ class WorkflowExecutorTest(unittest.IsolatedAsyncioTestCase):
         report = await self.executor(runner).execute(run_id=run_id, plan=plan)
         self.assertEqual(report.run.status, WorkflowRunStatus.TIMED_OUT)
         self.assertTrue(report.failures[0].timed_out)
+
+    async def test_agent_timeout_retries_within_transient_budget(self) -> None:
+        run_id = await self.make_run(
+            WorkflowKey.COMPANY_RESEARCH,
+            suffix="agent-timeout-retry",
+        )
+        plan = self.plan(
+            WorkflowKey.COMPANY_RESEARCH,
+            suffix="agent-timeout-retry",
+        )
+        target = plan.nodes[0]
+        runner = GovernedRunner(
+            fail={target.node_id: [TimeoutError("model response timed out")]}
+        )
+
+        report = await self.executor(runner).execute(run_id=run_id, plan=plan)
+
+        self.assertEqual(report.run.status, WorkflowRunStatus.COMPLETED)
+        self.assertEqual(runner.attempts[target.node_id], 2)
+        timed_out_audits = [
+            payload
+            for _, event_type, payload, _ in self.repository.audits
+            if event_type == "node_attempt_timed_out"
+        ]
+        self.assertEqual(len(timed_out_audits), 1)
+        self.assertTrue(timed_out_audits[0]["retryable"])
+
+    async def test_deterministic_service_timeout_does_not_retry(self) -> None:
+        run_id = await self.make_run(
+            WorkflowKey.COMPANY_RESEARCH,
+            suffix="service-timeout",
+        )
+        plan = self.plan(
+            WorkflowKey.COMPANY_RESEARCH,
+            suffix="service-timeout",
+        )
+        target = next(node for node in plan.nodes if node.service_id)
+        runner = GovernedRunner(
+            fail={target.node_id: [TimeoutError("service timed out")]}
+        )
+
+        report = await self.executor(runner).execute(run_id=run_id, plan=plan)
+
+        self.assertEqual(report.run.status, WorkflowRunStatus.TIMED_OUT)
+        self.assertEqual(runner.attempts[target.node_id], 1)
 
     async def test_nonblocking_failure_is_audited_without_rollback(self) -> None:
         run_id = await self.make_run(

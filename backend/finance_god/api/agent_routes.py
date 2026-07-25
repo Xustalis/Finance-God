@@ -28,6 +28,7 @@ from finance_god.agents.contracts import WorkflowKey
 from finance_god.api.auth import AuthenticationError, OwnerResolver
 from finance_god.api.desk_intent import (
     requires_desk_workflow,
+    requests_trade_form_prefill,
     select_desk_workflow,
 )
 from finance_god.api.desk_routes import (
@@ -181,8 +182,10 @@ class DeskProposedUiAction(_APIModel):
 _EXPLICIT_UI_ACTION_PATTERN = re.compile(
     r"(打开|切换|切到|进入|跳转到)(总览|持仓|自选|交易)"
     r"|选择.{0,16}(标的|股票)"
+    r"|(?:加入|添加|放入).{0,12}自选"
     r"|刷新(行情|市场)"
     r"|预填|填入.{0,12}(草稿|买入|卖出)"
+    r"|(?:填写|填入|预填|生成).{0,12}(交易单|下单表单|订单草稿)"
     r"|设置.{0,12}(筛选|排序)"
     r"|打开.{0,16}(记录|提醒|计划|产物)"
 )
@@ -237,6 +240,17 @@ async def _compose_turn_with_safe_ui_actions(
     include_answer: bool = True,
 ) -> tuple[dict[str, object], tuple[DeskProposedUiAction, ...]]:
     """Retry one malformed action proposal without weakening the action policy."""
+    if workflow_title is not None and requests_trade_form_prefill(payload.message):
+        return (
+            {
+                "routing_reason": (
+                    f"该任务先执行“{workflow_title}”，完成后再用版本化交易计划预填交易单。"
+                ),
+                "answer_text": None,
+                "ui_actions": [],
+            },
+            (),
+        )
     if workflow_title is not None and not _requests_ui_action(payload.message):
         return (
             {

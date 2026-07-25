@@ -260,11 +260,21 @@ class MemoryRepository:
     async def append_fill(self, value: object) -> None:
         self.fills.append(value)
 
-    async def list_fills(self, order_id: str | None = None) -> tuple:
+    async def list_fills(
+        self,
+        order_id: str | None = None,
+        *,
+        order_ids: frozenset[str] | None = None,
+    ) -> tuple:
+        if order_id is not None and order_ids is not None:
+            raise ValueError("order_id and order_ids are mutually exclusive")
         return tuple(
             value
             for value in self.fills
-            if order_id is None or value.order_id == order_id
+            if (
+                (order_id is None or value.order_id == order_id)
+                and (order_ids is None or value.order_id in order_ids)
+            )
         )
 
     async def list_orders(self, owner_id: str) -> tuple[StoredOrder, ...]:
@@ -474,6 +484,15 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
             clock=Clock(),
             ids=IDs(),
         )
+
+    async def test_list_fills_returns_without_scanning_when_owner_has_no_orders(
+        self,
+    ) -> None:
+        self.repository.fills.append(object())
+
+        fills = await self.service.list_fills(owner_id="owner-without-orders")
+
+        self.assertEqual(fills, ())
 
     async def _confirmed(self, value: OrderDraft | None = None) -> StoredDraft:
         created = await self.service.create_draft(

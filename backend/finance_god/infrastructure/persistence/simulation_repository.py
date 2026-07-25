@@ -238,10 +238,18 @@ class SimulationRepository:
     async def list_fills(
         self,
         order_id: str | None = None,
+        *,
+        order_ids: frozenset[str] | None = None,
     ) -> tuple[SimulationFill, ...]:
+        if order_id is not None and order_ids is not None:
+            raise ValueError("order_id and order_ids are mutually exclusive")
+        if order_ids is not None and not order_ids:
+            return ()
         statement = select(SimulationFillRow).order_by(SimulationFillRow.occurred_at)
         if order_id is not None:
             statement = statement.where(SimulationFillRow.order_id == order_id)
+        elif order_ids is not None:
+            statement = statement.where(SimulationFillRow.order_id.in_(order_ids))
         rows = (await self._session.scalars(statement)).all()
         return tuple(SimulationFill.model_validate(row.payload_json) for row in rows)
 

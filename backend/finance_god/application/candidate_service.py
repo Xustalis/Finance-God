@@ -166,17 +166,28 @@ class CandidateScoringService:
         except Exception:  # noqa: BLE001 - explicit safe degradation boundary
             unavailable_reason = "MARKET_DATA_UNAVAILABLE"
 
+        verified_entries = tuple(
+            entry
+            for entry in universe
+            if (
+                (quote := quotes_by_symbol.get(entry.symbol)) is not None
+                and quote.provider == "PandaData"
+                and bool(quote.provider_time)
+            )
+        )
         candidates = tuple(
             self._score(
                 entry=entry,
-                quote=quotes_by_symbol.get(entry.symbol),
+                quote=quotes_by_symbol[entry.symbol],
                 quote_error=quote_errors.get(entry.symbol),
                 held_weights=held_weights,
                 missing_portfolio=missing_portfolio,
                 ignored=ignored,
             )
-            for entry in universe
+            for entry in verified_entries
         )
+        if not candidates:
+            unavailable_reason = "MARKET_DATA_UNAVAILABLE"
         return CandidateResponse(
             generated_at=now,
             rule_version=self._rule_version,

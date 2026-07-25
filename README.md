@@ -56,7 +56,13 @@ cd backend
 .venv/bin/alembic upgrade head
 cd ..
 make seed-dev-accounts
+make seed-dev-workspace
 ```
+
+`seed-dev-workspace` is development-only and idempotently adds a small simulated
+portfolio, two watchlist groups, and open/completed trade-review cases for the
+configured test user. It preserves existing user data and never seeds market
+quotes or research candidates.
 
 Start the services in separate terminals:
 

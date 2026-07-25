@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from finance_god.agents.contracts import WorkflowKey
@@ -57,7 +58,7 @@ _INTENT_RULES = (
     ),
     _IntentRule(
         WorkflowKey.TRADE_PLAN_GENERATION,
-        ("交易方案", "交易计划", "建仓计划", "调仓计划", "生成计划"),
+        ("交易方案", "交易计划", "交易策略", "建仓计划", "调仓计划", "生成计划"),
     ),
     _IntentRule(
         WorkflowKey.FUND_RESEARCH,
@@ -89,7 +90,16 @@ _INTENT_RULES = (
     ),
     _IntentRule(
         WorkflowKey.COMPANY_RESEARCH,
-        ("公司研究", "研究公司", "基本面", "财务分析", "公司估值", "个股研究"),
+        (
+            "公司研究",
+            "研究公司",
+            "基本面",
+            "财务分析",
+            "公司估值",
+            "个股研究",
+            "基础信息",
+            "公司资料",
+        ),
     ),
     _IntentRule(
         WorkflowKey.MARKET_CONTEXT,
@@ -99,6 +109,7 @@ _INTENT_RULES = (
 
 _GENERAL_WORKFLOW_TERMS = (
     "分析",
+    "梳理",
     "研究",
     "比较",
     "评估",
@@ -131,6 +142,17 @@ _CONTEXT_SIGNALS = (
     "组合",
     "订单",
 )
+
+_TRADE_FORM_PREFILL_PATTERN = re.compile(
+    r"(?:填写|填入|预填|生成).{0,12}(?:交易单|下单表单|订单草稿)"
+    r"|(?:交易单|下单表单|订单草稿).{0,12}(?:填写|填入|预填|生成)"
+)
+
+
+def requests_trade_form_prefill(message: str) -> bool:
+    """Return whether the user explicitly asked a strategy to populate the form."""
+
+    return _TRADE_FORM_PREFILL_PATTERN.search(message.strip()) is not None
 
 
 def classify_desk_intent(message: str) -> WorkflowKey | None:

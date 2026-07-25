@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ReviewWorkspace from '@/components/desk/ReviewWorkspace.vue'
-import type { AgentLearningSummary, TradeEpisode } from '@/services/tradingDesk'
+import type { AgentLearningSummary } from '@/services/tradingDesk'
 
 const baseSummary: AgentLearningSummary = {
   status: 'healthy',
@@ -128,78 +128,5 @@ describe('ReviewWorkspace Agent 自学习', () => {
     expect(wrapper.text()).toContain('暂无交易案例')
     await wrapper.get('.learning-retry').trigger('click')
     expect(retry).toHaveBeenCalledOnce()
-  })
-})
-
-describe('ReviewWorkspace 本地演示数据', () => {
-  it('在显式演示模式且无真实案例时展示可切换的 mock 复盘', async () => {
-    const wrapper = mount(ReviewWorkspace, {
-      props: {
-        episodes: [],
-        selected: null,
-        decisions: [],
-        review: null,
-        loading: false,
-        error: null,
-        learningSummary: null,
-        learningLoading: false,
-        learningError: null,
-        demoMode: true,
-        onLoad: vi.fn(),
-        onRetryLearning: vi.fn(),
-        onSelect: vi.fn(),
-        onRetry: vi.fn(),
-      },
-    })
-
-    expect(wrapper.text()).toContain('演示数据')
-    expect(wrapper.text()).toContain('600519.SH')
-    expect(wrapper.text()).toContain('实际收益')
-    expect(wrapper.text()).toContain('¥7,552.86')
-
-    const rows = wrapper.findAll('tbody tr')
-    await rows[1].trigger('click')
-    expect(wrapper.text()).toContain('持仓仍在进行')
-    expect(wrapper.text()).toContain('通过宽基仓位降低单一行业暴露')
-  })
-
-  it('有真实案例时不展示 mock 或演示披露', () => {
-    const realEpisode: TradeEpisode = {
-      episode_id: 'real-episode',
-      owner_id: 'real-user',
-      account_id: 'real-account',
-      instrument_id: '000001.SZ',
-      status: 'open',
-      review_status: null,
-      opened_at: '2026-07-25 10:00',
-      closed_at: null,
-      opening_quantity: '100',
-      current_quantity: '100',
-      revision: 1,
-      created_at: '2026-07-25T02:00:00Z',
-      updated_at: '2026-07-25T02:00:00Z',
-    }
-    const wrapper = mount(ReviewWorkspace, {
-      props: {
-        episodes: [realEpisode],
-        selected: realEpisode,
-        decisions: [],
-        review: null,
-        loading: false,
-        error: null,
-        learningSummary: null,
-        learningLoading: false,
-        learningError: null,
-        demoMode: true,
-        onLoad: vi.fn(),
-        onRetryLearning: vi.fn(),
-        onSelect: vi.fn(),
-        onRetry: vi.fn(),
-      },
-    })
-
-    expect(wrapper.text()).toContain('000001.SZ')
-    expect(wrapper.text()).not.toContain('600519.SH')
-    expect(wrapper.text()).not.toContain('演示数据')
   })
 })

@@ -7,14 +7,19 @@ import { resolveWorkbenchOrigin } from './config/env'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
-export default defineConfig(({mode})=>{const env={...loadEnv(mode,rootDir,''),...process.env};return{
+export default defineConfig(({mode})=>{const env={...loadEnv(mode,rootDir,''),...process.env};const apiProxy={ '/api': { target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true, ws: true } };return{
   plugins: [vue(), tailwindcss()],
   define:{'import.meta.env.VITE_WORKBENCH_ORIGIN':JSON.stringify(resolveWorkbenchOrigin(env))},
   resolve: { alias: { '@': path.resolve(rootDir, 'src') } },
   server: {
     port: 3000,
     host: true,
-    proxy: { '/api': { target: env.VITE_API_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true, ws: true } },
+    proxy: apiProxy,
+  },
+  preview: {
+    port: 3000,
+    host: true,
+    proxy: apiProxy,
   },
   test: {
     environment: 'happy-dom',

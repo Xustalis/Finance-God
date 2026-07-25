@@ -46,6 +46,7 @@ AGENT_INPUT_CONTRACT_ID: Final = "financegod.agent-input.v1"
 AGENT_OUTPUT_CONTRACT_ID: Final = "financegod.agent-output.v1"
 PLANNER_INPUT_CONTRACT_ID: Final = "financegod.planner-input.v1"
 PLANNER_OUTPUT_CONTRACT_ID: Final = "financegod.task-plan-output.v1"
+PROMPT_AGENT_TIMEOUT_SECONDS: Final = 120
 
 TRADE_WRITE_TOOLS: Final = frozenset(
     {
@@ -962,7 +963,12 @@ def _execution_controls(
         return ExecutionType.DETERMINISTIC, ImpactClass.COMPUTE, RiskLevel.MODERATE, 15
     if definition.minimum_profile is ExecutionProfile.WORKSPACE:
         return ExecutionType.SANDBOX, ImpactClass.SANDBOX_CODE, RiskLevel.HIGH, 120
-    return ExecutionType.PROMPT, ImpactClass.READ_ONLY, RiskLevel.LOW, 60
+    return (
+        ExecutionType.PROMPT,
+        ImpactClass.READ_ONLY,
+        RiskLevel.LOW,
+        PROMPT_AGENT_TIMEOUT_SECONDS,
+    )
 
 
 def _tools(
