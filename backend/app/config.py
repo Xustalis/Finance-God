@@ -69,10 +69,14 @@ class Settings(BaseSettings):
     # 检测异动。阈值为涨跌幅的绝对分数（0.05 = 5%）。universe 为空时由启动处
     # 依据标的主数据中支持快照的 A 股推导。
     market_poll_enabled: bool = True
-    market_poll_interval_seconds: float = 30.0
+    market_poll_interval_seconds: float = Field(default=60.0, gt=0)
+    market_alert_detection_sla_seconds: float = Field(default=75.0, gt=0)
     market_alert_threshold: float = 0.05
     market_alert_escalate_threshold: float = 0.09
     market_poll_universe: str | None = None
+    # 仅用于资讯、情绪等 trade_eligible=false 的只读参考模块。
+    # 行情、估值、提醒、研究证据和交易链路不读取此开关。
+    market_reference_mock_fallback: bool = True
 
     # Workflow Worker（Phase 4）：领取 queued WorkflowRun 并执行到终态。
     # 默认开启；测试通过 conftest 关闭。多 Worker 租约/SKIP LOCKED 延后。
@@ -84,6 +88,19 @@ class Settings(BaseSettings):
     def validate_production_secret(self):
         if self.app_env != "development" and self.secret_key == "change-me-in-production-please-use-a-long-random-string":
             raise ValueError("SECRET_KEY must be explicitly configured outside development")
+        return self
+
+    @model_validator(mode="after")
+    def validate_market_alert_detection_sla(self):
+        if (
+            self.market_poll_enabled
+            and self.market_poll_interval_seconds
+            > self.market_alert_detection_sla_seconds
+        ):
+            raise ValueError(
+                "MARKET_POLL_INTERVAL_SECONDS must not exceed "
+                "MARKET_ALERT_DETECTION_SLA_SECONDS"
+            )
         return self
 
     @model_validator(mode="after")

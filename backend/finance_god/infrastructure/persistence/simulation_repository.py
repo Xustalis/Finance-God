@@ -12,7 +12,13 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finance_god.domain import ConcurrentCommandConflict, DomainInvariantViolation
-from finance_god.execution.contracts import SimulationFill, StoredDraft, StoredOrder
+from finance_god.execution.contracts import (
+    ProtectiveStrategy,
+    ProtectiveStrategyStatus,
+    SimulationFill,
+    StoredDraft,
+    StoredOrder,
+)
 
 from .simulation_models import (
     SimulationDraftRow,
@@ -21,6 +27,7 @@ from .simulation_models import (
     SimulationExecutionOutboxRow,
     SimulationFillRow,
     SimulationOrderRow,
+    SimulationProtectiveStrategyRow,
 )
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -247,6 +254,99 @@ class SimulationRepository:
             )
         ).all()
         return tuple(StoredOrder.model_validate(row.payload_json) for row in rows)
+
+    async def create_strategy(
+        self,
+        strategy: ProtectiveStrategy,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> ProtectiveStrategy:
+        _require_hash(request_hash)
+        prior = await self._session.scalar(
+            select(SimulationProtectiveStrategyRow).where(
+                SimulationProtectiveStrategyRow.owner_id == strategy.owner_id,
+                SimulationProtectiveStrategyRow.idempotency_key == idempotency_key,
+            )
+        )
+        if prior is not None:
+            _require_same_hash(prior.request_hash, request_hash)
+            return ProtectiveStrategy.model_validate(prior.payload_json)
+        self._session.add(
+            SimulationProtectiveStrategyRow(
+                strategy_id=strategy.strategy_id,
+                owner_id=strategy.owner_id,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+                instrument_id=strategy.instrument_id,
+                status=strategy.status.value,
+                revision=strategy.revision,
+                payload_json=strategy.model_dump(mode="json"),
+                created_at=strategy.created_at,
+                updated_at=strategy.updated_at,
+            )
+        )
+        await self._session.flush()
+        return strategy
+
+    async def list_strategies(
+        self,
+        owner_id: str | None = None,
+        *,
+        instrument_id: str | None = None,
+        status: ProtectiveStrategyStatus | None = None,
+    ) -> tuple[ProtectiveStrategy, ...]:
+        statement = select(SimulationProtectiveStrategyRow)
+        if owner_id is not None:
+            statement = statement.where(
+                SimulationProtectiveStrategyRow.owner_id == owner_id
+            )
+        if instrument_id is not None:
+            statement = statement.where(
+                SimulationProtectiveStrategyRow.instrument_id == instrument_id
+            )
+        if status is not None:
+            statement = statement.where(
+                SimulationProtectiveStrategyRow.status == status.value
+            )
+        rows = (
+            await self._session.scalars(
+                statement.order_by(
+                    SimulationProtectiveStrategyRow.created_at.desc()
+                )
+            )
+        ).all()
+        return tuple(
+            ProtectiveStrategy.model_validate(row.payload_json) for row in rows
+        )
+
+    async def get_strategy(self, strategy_id: str) -> ProtectiveStrategy | None:
+        row = await self._session.get(SimulationProtectiveStrategyRow, strategy_id)
+        return ProtectiveStrategy.model_validate(row.payload_json) if row else None
+
+    async def save_strategy(
+        self,
+        strategy: ProtectiveStrategy,
+        *,
+        expected_revision: int,
+    ) -> None:
+        if strategy.revision != expected_revision + 1:
+            raise DomainInvariantViolation("strategy revision must advance by one")
+        result = await self._session.execute(
+            update(SimulationProtectiveStrategyRow)
+            .where(
+                SimulationProtectiveStrategyRow.strategy_id == strategy.strategy_id,
+                SimulationProtectiveStrategyRow.revision == expected_revision,
+            )
+            .values(
+                status=strategy.status.value,
+                revision=strategy.revision,
+                payload_json=strategy.model_dump(mode="json"),
+                updated_at=strategy.updated_at,
+            )
+        )
+        _require_cas(result, "strategy revision changed")
+        await self._session.flush()
 
     async def _append_bundle(
         self,

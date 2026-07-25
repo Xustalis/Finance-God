@@ -16,7 +16,11 @@ from finance_god.market_data.monitor import (
     MarketSnapshot,
 )
 
-from .market_monitor_models import MarketAlertRow, MarketSnapshotRow
+from .market_monitor_models import (
+    MarketAlertDispatchRow,
+    MarketAlertRow,
+    MarketSnapshotRow,
+)
 
 
 class MarketMonitorRepository:
@@ -54,21 +58,29 @@ class MarketMonitorRepository:
 
     async def insert_alert(self, alert: MarketAlert) -> None:
         try:
-            self._session.add(
-                MarketAlertRow(
-                    alert_id=alert.alert_id,
-                    symbol=alert.symbol,
-                    name=alert.name,
-                    kind=alert.kind.value,
-                    severity=alert.severity.value,
-                    change_percent=alert.change_percent,
-                    last=alert.last,
-                    message=alert.message,
-                    provider_time=alert.provider_time,
-                    detected_at=alert.detected_at,
+            async with self._session.begin_nested():
+                self._session.add(
+                    MarketAlertRow(
+                        alert_id=alert.alert_id,
+                        symbol=alert.symbol,
+                        name=alert.name,
+                        kind=alert.kind.value,
+                        severity=alert.severity.value,
+                        change_percent=alert.change_percent,
+                        last=alert.last,
+                        message=alert.message,
+                        provider_time=alert.provider_time,
+                        detected_at=alert.detected_at,
+                    )
                 )
-            )
-            await self._session.flush()
+                self._session.add(
+                    MarketAlertDispatchRow(
+                        alert_id=alert.alert_id,
+                        created_at=alert.detected_at,
+                        attempt=0,
+                    )
+                )
+                await self._session.flush()
         except IntegrityError:
             # Idempotent: the same alert_id was already recorded.
             pass

@@ -12,6 +12,7 @@ from finance_god.domain import (
     JournalEntry,
     LedgerPosting,
     Money,
+    OrderSide,
     SimulationAccount,
     VersionReference,
 )
@@ -105,6 +106,12 @@ class ValueObjectTest(unittest.TestCase):
                 object_id="600519.SSE",
                 version="1",
             )
+
+    def test_order_side_owns_buy_direction_semantics(self) -> None:
+        self.assertTrue(OrderSide.BUY.is_buy_direction)
+        self.assertTrue(OrderSide.COVER.is_buy_direction)
+        self.assertFalse(OrderSide.SELL.is_buy_direction)
+        self.assertFalse(OrderSide.SHORT.is_buy_direction)
 
 
 def account(initial_cash: Decimal = Decimal("100000")) -> SimulationAccount:

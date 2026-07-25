@@ -153,6 +153,31 @@ async def test_poll_skips_unpriceable_quotes(
 
 
 @pytest.mark.asyncio
+async def test_poll_notifies_strategy_observer_after_snapshot_is_persisted(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    observed: list[str] = []
+
+    async def observe(snapshot) -> None:
+        async with MarketMonitorUnitOfWork(session_factory) as uow:
+            persisted = await uow.monitor.get_snapshot(snapshot.symbol)
+        assert persisted is not None
+        observed.append(snapshot.symbol)
+
+    poller = MarketPoller(
+        quotes_provider=_FakeQuotes([[_quote("600519.SH", "0.01")]]),
+        uow_factory=lambda: MarketMonitorUnitOfWork(session_factory),
+        threshold=Decimal("0.05"),
+        snapshot_observer=observe,
+        clock=lambda: NOW,
+    )
+
+    await poller.poll_once(["600519.SH"])
+
+    assert observed == ["600519.SH"]
+
+
+@pytest.mark.asyncio
 async def test_run_forever_stops_on_event_and_survives_provider_failure(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

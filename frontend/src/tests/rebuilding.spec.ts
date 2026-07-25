@@ -8,8 +8,18 @@ import TradingDeskView from '@/views/TradingDeskView.vue'
 import OverviewWorkspace from '@/components/desk/OverviewWorkspace.vue'
 import PortfolioWorkspace from '@/components/desk/PortfolioWorkspace.vue'
 import TradingWorkspace from '@/components/desk/TradingWorkspace.vue'
+import WatchlistWorkspace from '@/components/desk/WatchlistWorkspace.vue'
 import * as tradingDeskApi from '@/services/tradingDesk'
 import { useTradingDeskStore } from '@/stores/tradingDesk'
+
+vi.mock('@/services/notificationStream', () => ({
+  NotificationStreamError: class NotificationStreamError extends Error {},
+  consumeNotificationStream: vi.fn(({ signal }: { signal: AbortSignal }) => (
+    new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => resolve(), { once: true })
+    })
+  )),
+}))
 
 vi.mock('@/services/tradingDesk', () => ({
   canUseQuoteAsDraftReference: vi.fn((quote: { last: number | null; freshness: string; market_status: string }) => (
@@ -20,7 +30,10 @@ vi.mock('@/services/tradingDesk', () => ({
   )),
   draftReferenceBlockedReason: vi.fn(() => '真实行情不可用'),
   isDeskCapabilityEnabled: vi.fn((capabilities: Record<string, boolean> | null | undefined, key: string) => capabilities?.[key] === true),
-  fetchMarketOverview: vi.fn().mockResolvedValue([]),
+  fetchMarketOverview: vi.fn().mockResolvedValue({ quotes: [], warnings: [] }),
+  fetchBars: vi.fn().mockResolvedValue([]),
+  fetchSimulationMarketOverview: vi.fn().mockResolvedValue({ quotes: [], warnings: [] }),
+  fetchSimulationBars: vi.fn().mockResolvedValue([]),
   fetchDeskBootstrap: vi.fn(),
   fetchDeskQuickCommands: vi.fn(),
   previewDeskAgent: vi.fn(),
@@ -41,6 +54,18 @@ vi.mock('@/services/tradingDesk', () => ({
   fetchSimulationPortfolio: vi.fn().mockResolvedValue({ positions: [] }),
   fetchSimulationOrders: vi.fn().mockResolvedValue([]),
   fetchSimulationFills: vi.fn().mockResolvedValue([]),
+  fetchTradeEpisodes: vi.fn().mockResolvedValue([]),
+  fetchTradeEpisodeDecisions: vi.fn().mockResolvedValue([]),
+  fetchTradeEpisodeReview: vi.fn(),
+  retryTradeEpisodeReview: vi.fn(),
+  fetchAgentLearningSummary: vi.fn().mockResolvedValue({
+    status: 'unavailable',
+    message: '尚无学习周期',
+    last_cycle: null,
+    snapshot: null,
+    recent_verified_lessons: [],
+    freshness: { configured_interval_seconds: 900, age_seconds: null, is_stale: false },
+  }),
   fetchWatchlistGroups: vi.fn().mockResolvedValue([]),
   fetchWatchlistInstruments: vi.fn().mockResolvedValue([]),
   fetchResearchCandidates: vi.fn().mockResolvedValue({ candidates: [] }),
@@ -50,6 +75,7 @@ vi.mock('@/services/tradingDesk', () => ({
   confirmSimulationSoftRisk: vi.fn(),
   confirmSimulationDraft: vi.fn(),
   submitSimulationDraft: vi.fn(),
+  submitSimulationMarketOrder: vi.fn(),
   createWatchlistGroup: vi.fn(),
   updateWatchlistGroup: vi.fn(),
   deleteWatchlistGroup: vi.fn(),
@@ -124,7 +150,10 @@ beforeEach(() => {
           can_start: true,
         }
   ))
-  vi.mocked(tradingDeskApi.fetchMarketOverview).mockResolvedValue([])
+  vi.mocked(tradingDeskApi.fetchMarketOverview).mockResolvedValue({
+    quotes: [],
+    warnings: [],
+  })
   vi.mocked(tradingDeskApi.fetchProfile).mockRejectedValue(new Error('画像不可用'))
   vi.mocked(tradingDeskApi.fetchNotifications).mockResolvedValue([])
   vi.mocked(tradingDeskApi.fetchInformationFacts).mockRejectedValue(new Error('市场资讯不可用'))
@@ -133,6 +162,7 @@ beforeEach(() => {
   vi.mocked(tradingDeskApi.fetchSimulationPortfolio).mockResolvedValue({ account_id: '', owner_id: '', as_of: '', rule_version: '', positions: [], realized_pnl_rmb: '0' })
   vi.mocked(tradingDeskApi.fetchSimulationOrders).mockResolvedValue([])
   vi.mocked(tradingDeskApi.fetchSimulationFills).mockResolvedValue([])
+  vi.mocked(tradingDeskApi.fetchTradeEpisodes).mockResolvedValue([])
   vi.mocked(tradingDeskApi.streamDeskAgentDecision).mockImplementation(async (input) => ({
     decision_id: 'decision-test-workflow',
     decision_source: 'agent_generated_policy_approved',
@@ -656,7 +686,7 @@ describe('trading workspace routing', () => {
       routing_reason: '这是界面操作。',
       expected_stages: [],
       can_start: true,
-      answer_text: '已为你打开贵州茅台并预填仿真买入草稿，请在交易区复核。',
+      answer_text: '已为你打开贵州茅台并预填模拟买入草稿，请在交易区复核。',
       ui_actions: [
         { action_id: 'select_symbol', parameters: { symbol: '600519.SH' }, context_version: contextVersion },
         { action_id: 'navigate_trading', parameters: {}, context_version: contextVersion },
@@ -901,6 +931,44 @@ describe('trading workspace routing', () => {
     expect(wrapper.get('[aria-label="打开提醒"]').text()).toContain('提醒')
   })
 
+  it('keeps a required market alert visible until the user acts', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(tradingDeskApi.fetchNotifications).mockResolvedValue([{
+        notification_id: 'notice-required',
+        severity: 'required',
+        required: true,
+        title: '重大行情提醒',
+        message: '持仓标的达到高优先级阈值',
+        created_at: '2026-07-25T01:00:00Z',
+        status: 'unread',
+        details: {
+          symbol: '300750.SZ',
+          provider_time: '2026-07-25T00:59:50Z',
+          detected_at: '2026-07-25T01:00:00Z',
+        },
+      }])
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [{ path: '/desk', component: TradingDeskView }],
+      })
+      await router.push('/desk')
+      await router.isReady()
+      const wrapper = mount(TradingDeskView, {
+        global: { plugins: [createPinia(), router] },
+      })
+      await flushPromises()
+
+      await vi.advanceTimersByTimeAsync(8_001)
+
+      expect(wrapper.get('.alert-toast').text()).toContain('重大行情提醒')
+      expect(tradingDeskApi.markNotificationRead).not.toHaveBeenCalled()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('never renders facts from another symbol and keeps refresh errors visible', () => {
     const selectSymbol = vi.fn()
     const wrapper = mount(OverviewWorkspace, {
@@ -924,9 +992,65 @@ describe('trading workspace routing', () => {
 
     expect(wrapper.text()).not.toContain('不应显示')
     expect(wrapper.get('[role="alert"]').text()).toContain('新标的融资事实不可用')
-    const instrumentButton = wrapper.get('.instrument-select')
+    const instrumentButton = wrapper.get('.index-tab.active')
     expect(instrumentButton.element.tagName).toBe('BUTTON')
-    expect(instrumentButton.attributes('aria-pressed')).toBe('true')
+    expect(instrumentButton.text()).toContain('贵州茅台')
+  })
+
+  it('discloses mock reference data without turning mock news into external links', () => {
+    const generatedAt = '2026-07-25T01:00:00Z'
+    const wrapper = mount(OverviewWorkspace, {
+      props: {
+        quotes: [],
+        bars: [],
+        selectedSymbol: '600519.SH',
+        loading: false,
+        marketError: null,
+        barsError: null,
+        marketLoadedAt: null,
+        sentimentFacts: {
+          provider: 'Finance-God Mock',
+          fact_kind: 'market_sentiment',
+          symbol: '600519.SH',
+          requested_at: generatedAt,
+          generated_at: generatedAt,
+          data_mode: 'mock',
+          fallback_reason: '真实市场情绪源暂时不可用。',
+          facts: [{ fields: [{ name: 'score', value: 50 }, { name: 'level', value: 'neutral' }] }],
+        },
+        sentimentError: null,
+        informationFacts: {
+          provider: 'Finance-God Mock',
+          fact_kind: 'industry_news',
+          symbol: '600519.SH',
+          requested_at: generatedAt,
+          generated_at: generatedAt,
+          data_mode: 'mock',
+          fallback_reason: '真实市场资讯源暂时不可用。',
+          facts: [{
+            fields: [
+              { name: 'title', value: '市场公告示例' },
+              { name: 'source', value: 'Finance-God Mock' },
+              { name: 'sector', value: '公告' },
+              { name: 'url', value: '' },
+            ],
+          }],
+        },
+        informationError: null,
+        onSelectSymbol: vi.fn(),
+        onRefresh: vi.fn(),
+      },
+    })
+
+    const disclosures = wrapper.findAll('.mock-data-disclosure')
+    expect(disclosures).toHaveLength(2)
+    expect(wrapper.text()).toContain('模拟数据')
+    expect(wrapper.text()).toContain('真实市场情绪源暂时不可用')
+    expect(wrapper.text()).toContain('真实市场资讯源暂时不可用')
+    expect(wrapper.text()).toContain('刷新可重试真实数据')
+    expect(wrapper.find('.news-item a').exists()).toBe(false)
+    expect(wrapper.get('.news-item .news-source').text()).toBe('Finance-God Mock')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
   it('does not offer account creation while the account request is failing', () => {
@@ -947,7 +1071,60 @@ describe('trading workspace routing', () => {
     expect(wrapper.find('form').exists()).toBe(false)
   })
 
-  it('mounts all four workspaces and preserves explicit empty states', async () => {
+  it('presents historical candidate unavailability as a status instead of a read failure', () => {
+    const wrapper = mount(WatchlistWorkspace, {
+      props: {
+        groups: [],
+        candidates: [],
+        loading: false,
+        watchlistError: null,
+        candidateError: null,
+        candidateNotice: '历史演示不提供研究候选，避免引入未来信息。',
+        onLoad: vi.fn(),
+        onCreateGroup: vi.fn(),
+        onRenameGroup: vi.fn(),
+        onDeleteGroup: vi.fn(),
+        onAddInstrument: vi.fn(),
+        onRemoveInstrument: vi.fn(),
+        onIgnoreCandidate: vi.fn(),
+      },
+    })
+
+    expect(wrapper.get('[role="status"]').text()).toBe('历史演示不提供研究候选，避免引入未来信息。')
+    expect(wrapper.text()).not.toContain('候选读取失败')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('presents historical market-fact boundaries as statuses instead of refresh failures', () => {
+    const wrapper = mount(OverviewWorkspace, {
+      props: {
+        quotes: [],
+        bars: [],
+        selectedSymbol: '000001.SH',
+        loading: false,
+        marketError: null,
+        barsError: null,
+        marketLoadedAt: null,
+        sentimentFacts: null,
+        sentimentError: null,
+        sentimentNotice: '历史演示不提供时点还原的市场情绪事实。',
+        informationFacts: null,
+        informationError: null,
+        informationNotice: '历史演示不展示现实资讯，避免引入未来信息。',
+        onSelectSymbol: vi.fn(),
+        onRefresh: vi.fn(),
+      },
+    })
+
+    expect(wrapper.findAll('[role="status"]').map((item) => item.text())).toEqual([
+      '历史演示不提供时点还原的市场情绪事实。',
+      '历史演示不展示现实资讯，避免引入未来信息。',
+    ])
+    expect(wrapper.text()).not.toContain('刷新失败')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('mounts all five workspaces and preserves explicit empty states', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/desk', component: TradingDeskView }],
@@ -958,17 +1135,25 @@ describe('trading workspace routing', () => {
     await flushPromises()
     const workspaceNav = wrapper.find('[aria-label="交易台工作区"]')
     const buttons = workspaceNav.findAll('button')
-    expect(buttons).toHaveLength(4)
+    expect(buttons).toHaveLength(5)
     await buttons[1].trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('建立仿真账户'))
-    expect(wrapper.text()).toContain('建立仿真账户')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('建立模拟账户'))
+    expect(wrapper.text()).toContain('建立模拟账户')
     await buttons[2].trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('自选分组'))
     expect(wrapper.text()).toContain('自选分组')
     expect(wrapper.text()).toContain('可研究候选')
     await buttons[3].trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('尚未建立仿真账户')
+    expect(wrapper.text()).toContain('尚未建立模拟账户')
+    await buttons[4].trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('暂无交易案例'))
+    expect(tradingDeskApi.fetchTradeEpisodes).toHaveBeenCalledOnce()
+    expect(tradingDeskApi.fetchAgentLearningSummary).toHaveBeenCalledOnce()
+
+    await wrapper.get('.review-workspace .refresh-button').trigger('click')
+    await vi.waitFor(() => expect(tradingDeskApi.fetchTradeEpisodes).toHaveBeenCalledTimes(2))
+    expect(tradingDeskApi.fetchAgentLearningSummary).toHaveBeenCalledTimes(2)
   })
 
   it('loads orders only once when the trading workspace opens', async () => {
@@ -982,7 +1167,7 @@ describe('trading workspace routing', () => {
     await flushPromises()
 
     await wrapper.findAll('[aria-label="交易台工作区"] button')[3].trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('尚未建立仿真账户'))
+    await vi.waitFor(() => expect(wrapper.text()).toContain('尚未建立模拟账户'))
     expect(tradingDeskApi.fetchSimulationOrders).toHaveBeenCalledTimes(1)
   })
 
@@ -996,6 +1181,7 @@ describe('trading workspace routing', () => {
       cash_frozen_rmb: '12500.00',
       margin_rmb: '0.00',
       revision: 3,
+      simulation_time: '2026-07-24T01:30:00Z',
     })
     vi.mocked(tradingDeskApi.fetchSimulationOrders).mockResolvedValue([{
       order_id: 'order-1',
@@ -1066,7 +1252,7 @@ describe('trading workspace routing', () => {
 
     await wrapper.get('[aria-label="关闭我的"]').trigger('click')
     await wrapper.findAll('[aria-label="交易台工作区"] button')[3].trigger('click')
-    await vi.waitFor(() => expect(wrapper.text()).toContain('订单 / 成交回执'))
+    await vi.waitFor(() => expect(wrapper.text()).toContain('成交回执'))
     expect(wrapper.text()).toContain('order-1')
   })
 
@@ -1085,34 +1271,54 @@ describe('trading workspace routing', () => {
     expect(wrapper.find('[role="separator"]').exists()).toBe(false)
     expect(wrapper.get('[aria-label="交易 Agent"]').text()).toContain('AI AGENT')
     const labels = wrapper.findAll('[aria-label="交易台工作区"] button').map((button) => button.text())
-    expect(labels).toEqual(['总览', '持仓', '自选', '交易'])
+    expect(labels).toEqual(['总览', '持仓', '自选', '交易', '复盘'])
   })
 
-  it('requires soft-risk acknowledgement before exposing order-summary confirmation', () => {
+  it('submits one immediate market trade with only symbol, side, and quantity', async () => {
+    const onSubmit = vi.fn()
+    const onSelectSymbol = vi.fn()
+    const onPeriodChange = vi.fn()
     const wrapper = mount(TradingWorkspace, {
       props: {
         account: { account_id: 'account-1', cash_available_rmb: '100000' }, accountState: 'available',
+        portfolio: { account_id: 'account-1', owner_id: 'user-1', as_of: '2026-07-25T01:00:00Z', rule_version: 'simulation-rules-v1', positions: [], realized_pnl_rmb: '0' },
         selectedSymbol: '000001.SZ',
         quotes: [{
           symbol: '000001.SZ', name: '平安银行', last: 11.12, change: 0.12, change_percent: 1.09,
           provider: 'PandaData', provider_time: '2026-07-25T01:00:00Z', frequency: '1m',
           freshness: 'current', market_status: 'in_session',
         }],
+        bars: [{
+          time: '2026-07-25T01:00:00Z',
+          open: 11,
+          high: 11.2,
+          low: 10.9,
+          close: 11.12,
+          volume: 1000,
+        }],
+        barsError: null,
+        fills: [],
         receipt: null,
-        loading: false, error: null, onLoad: vi.fn(), onCreateDraft: vi.fn(), onReviewDraft: vi.fn(),
-        onConfirmSoftRisk: vi.fn(), onConfirmDraft: vi.fn(), onSubmitDraft: vi.fn(),
-        draft: {
-          record_revision: 2,
-          draft: { draft_id: 'draft-1', status: 'pending_review', instrument_id: '000001.SZ', side: 'buy', order_type: 'market', quantity: '100', limit_price: null },
-          risk_result: { status: 'confirmation_required', reason_hash: 'a'.repeat(64), reasons: [{ code: 'market_volatility', severity: 'soft', message: '市场波动较大' }], soft_confirmation: null },
-          immutable_summary_hash: 'b'.repeat(64), confirmed_at: null,
-        },
+        loading: false, error: null, onLoad: vi.fn(), onSubmit, onSelectSymbol, onPeriodChange,
       },
     })
-    expect(wrapper.text()).toContain('确认已知风险')
-    expect(wrapper.text()).not.toContain('确认订单摘要')
-    expect(wrapper.text()).toContain('市场波动较大（market_volatility）')
-    expect(wrapper.text()).toContain('真实引用行情')
+    expect(wrapper.text()).toContain('交易股票实时 K 线')
+    expect(wrapper.text()).toContain('000001.SZ')
+    await wrapper.get('input:not([type])').setValue('600519.sh')
+    await wrapper.get('input:not([type])').trigger('change')
+    expect(onSelectSymbol).toHaveBeenCalledWith('600519.SH')
+    await wrapper.findAll('.period-tab').find((tab) => tab.text() === '5分')!.trigger('click')
+    expect(onPeriodChange).toHaveBeenCalledWith('1m')
+
+    await wrapper.get('input:not([type])').setValue('000001.SZ')
+    await wrapper.get('input:not([type])').trigger('change')
+    await wrapper.get('input[type="number"]').setValue('100')
+    expect(wrapper.text()).toContain('立即买入')
+    expect(wrapper.text()).not.toContain('订单草稿')
+    expect(wrapper.text()).not.toContain('风险复核')
+    await wrapper.get('form').trigger('submit')
+    expect(onSubmit).toHaveBeenCalledWith({ instrumentId: '000001.SZ', side: 'buy', quantity: '100' })
+    expect(wrapper.text()).toContain('真实行情')
     expect(wrapper.text()).toContain('2026-07-25T01:00:00Z')
   })
 
@@ -1123,24 +1329,21 @@ describe('trading workspace routing', () => {
       props: {
         account: null,
         accountState: 'absent',
+        portfolio: null,
         selectedSymbol: '000001.SZ',
         quotes: [],
-        draft: null,
+        fills: [],
         receipt: null,
         loading: false,
         error: null,
         onLoad: vi.fn(),
         onOpenPortfolio: openPortfolio,
         onEnsureQuoteSymbol: ensureQuote,
-        onCreateDraft: vi.fn(),
-        onReviewDraft: vi.fn(),
-        onConfirmSoftRisk: vi.fn(),
-        onConfirmDraft: vi.fn(),
-        onSubmitDraft: vi.fn(),
+        onSubmit: vi.fn(),
       },
     })
-    expect(absent.text()).toContain('尚未建立仿真账户')
-    expect(absent.text()).toContain('前往持仓建立账户')
+    expect(absent.text()).toContain('尚未建立模拟账户')
+    expect(absent.text()).toContain('前往持仓')
     await absent.get('button.ink-button').trigger('click')
     expect(openPortfolio).toHaveBeenCalledTimes(1)
 
@@ -1149,27 +1352,23 @@ describe('trading workspace routing', () => {
       props: {
         account: { account_id: 'account-1', cash_available_rmb: '100000' },
         accountState: 'available',
+        portfolio: null,
         selectedSymbol: '000001.SZ',
         quotes: [{
           symbol: '000001.SZ', name: '平安银行', last: 11.12, change: 0.12, change_percent: 1.09,
           provider: 'PandaData', provider_time: '2026-07-25T01:00:00Z', frequency: '1m',
           freshness: 'unavailable', market_status: 'in_session',
         }],
-        draft: null,
+        fills: [],
         receipt: null,
         loading: false,
         error: null,
         onLoad: vi.fn(),
         onEnsureQuoteSymbol: ensureQuote,
-        onCreateDraft: vi.fn(),
-        onReviewDraft: vi.fn(),
-        onConfirmSoftRisk: vi.fn(),
-        onConfirmDraft: vi.fn(),
-        onSubmitDraft: vi.fn(),
+        onSubmit: vi.fn(),
       },
     })
     expect(blocked.text()).toContain('行情新鲜度不可用，不能作为订单引用价。')
-    expect(blocked.text()).toContain('刷新真实行情')
     expect(blocked.get('button.ink-button').attributes('disabled')).toBeDefined()
   })
 
@@ -1182,6 +1381,7 @@ describe('trading workspace routing', () => {
           cash_available_rmb: '90000',
           cash_frozen_rmb: '10000',
           revision: 1,
+          simulation_time: '2026-07-24T01:30:00Z',
         },
         accountState: 'available',
         portfolio: {
@@ -1215,6 +1415,9 @@ describe('trading workspace routing', () => {
     expect(wrapper.text()).toContain('2026-07-25T01:00:00Z · error · closed')
     expect(wrapper.text()).toContain('不会用本地估算填充')
     expect(wrapper.text()).not.toMatch(/市值[\s\S]*¥1,1/)
+    expect(wrapper.text()).not.toContain('自动卖出策略')
+    expect(wrapper.text()).not.toContain('设止盈止损')
+    expect(wrapper.find('th[scope="col"]:last-child').text()).toBe('已实现')
   })
 
   it('treats only explicit true capabilities as enabled', () => {

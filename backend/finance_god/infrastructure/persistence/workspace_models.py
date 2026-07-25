@@ -86,6 +86,12 @@ class NotificationRow(Base):
         Index("ix_notifications_status", "status"),
         Index("ix_notifications_category", "category"),
         Index("ix_notifications_severity", "severity"),
+        UniqueConstraint(
+            "owner_user_id",
+            "source_object_type",
+            "source_object_id",
+            name="uq_notifications_owner_source",
+        ),
     )
 
     notification_id: Mapped[str] = mapped_column(String(160), primary_key=True)
@@ -94,6 +100,9 @@ class NotificationRow(Base):
     severity: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     message: Mapped[str] = mapped_column(String(1000), nullable=False)
+    details_json: Mapped[dict[str, str]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     source_object_type: Mapped[str] = mapped_column(String(80), nullable=False)
     source_object_id: Mapped[str] = mapped_column(String(160), nullable=False)
     source_version: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -128,3 +137,56 @@ class NotificationPreferenceRow(Base):
     owner_user_id: Mapped[str] = mapped_column(String(160), primary_key=True)
     preferences_json: Mapped[dict[str, bool]] = mapped_column(JSON, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class UserMarketFocusRow(Base):
+    __tablename__ = "user_market_focus"
+
+    owner_user_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class UserEventRow(Base):
+    __tablename__ = "user_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_user_id",
+            "event_id",
+            name="uq_user_events_owner_event",
+        ),
+        Index("ix_user_events_owner_cursor", "owner_user_id", "cursor"),
+    )
+
+    cursor: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    notification_id: Mapped[str] = mapped_column(
+        ForeignKey("notifications.notification_id"), nullable=False
+    )
+    fact_version: Mapped[str] = mapped_column(String(160), nullable=False)
+    payload_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class NotificationDeliveryRow(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_id",
+            "channel",
+            name="uq_notification_delivery_channel",
+        ),
+        Index("ix_notification_deliveries_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    notification_id: Mapped[str] = mapped_column(
+        ForeignKey("notifications.notification_id"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    error: Mapped[str | None] = mapped_column(String(500))

@@ -657,44 +657,46 @@ class RealWorkflowNodeRunner:
                 history,
             )
             fact_evidence: list[EvidenceRecord] = []
-            if (
-                self._information_facts_provider is None
-                or self._sentiment_facts_provider is None
-            ):
-                raise NodeExecutionError(
-                    FailureKind.VALIDATION,
-                    "deterministic service is not connected: instrument research facts",
+            if getattr(quote, "asset_type", "equity") == "equity":
+                if (
+                    self._information_facts_provider is None
+                    or self._sentiment_facts_provider is None
+                ):
+                    raise NodeExecutionError(
+                        FailureKind.VALIDATION,
+                        "deterministic service is not connected: instrument research facts",
+                    )
+                start_quarter, end_quarter = _research_quarter_range(
+                    self._market_observed_at
                 )
-            start_quarter, end_quarter = _research_quarter_range(
-                self._market_observed_at
-            )
-            try:
-                information = await self._information_facts_provider(
-                    symbol,
-                    start_quarter=start_quarter,
-                    end_quarter=end_quarter,
-                    limit=12,
-                )
-            except Exception as error:  # noqa: BLE001 - market-data boundary
-                raise NodeExecutionError(
-                    FailureKind.TRANSIENT,
-                    f"company disclosure facts failed: {type(error).__name__}: "
-                    f"{str(error)[:300]}",
-                ) from error
-            fact_evidence.extend(_market_fact_evidence(information))
-            try:
-                sentiment = await self._sentiment_facts_provider(
-                    symbol,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit=30,
-                )
-            except Exception as error:  # noqa: BLE001 - market-data boundary
-                raise NodeExecutionError(
-                    FailureKind.TRANSIENT,
-                    f"margin facts failed: {type(error).__name__}: {str(error)[:300]}",
-                ) from error
-            fact_evidence.extend(_market_fact_evidence(sentiment))
+                try:
+                    information = await self._information_facts_provider(
+                        symbol,
+                        start_quarter=start_quarter,
+                        end_quarter=end_quarter,
+                        limit=12,
+                    )
+                except Exception as error:  # noqa: BLE001 - market-data boundary
+                    raise NodeExecutionError(
+                        FailureKind.TRANSIENT,
+                        f"company disclosure facts failed: {type(error).__name__}: "
+                        f"{str(error)[:300]}",
+                    ) from error
+                fact_evidence.extend(_market_fact_evidence(information))
+                try:
+                    sentiment = await self._sentiment_facts_provider(
+                        symbol,
+                        start_date=start_date,
+                        end_date=end_date,
+                        limit=30,
+                    )
+                except Exception as error:  # noqa: BLE001 - market-data boundary
+                    raise NodeExecutionError(
+                        FailureKind.TRANSIENT,
+                        f"margin facts failed: {type(error).__name__}: "
+                        f"{str(error)[:300]}",
+                    ) from error
+                fact_evidence.extend(_market_fact_evidence(sentiment))
             self._service_evidence[node.node_id] = [
                 item
                 for item in (evidence, history_evidence, *fact_evidence)

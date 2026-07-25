@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -277,6 +277,7 @@ class NotificationRepository:
         *,
         limit: int = 50,
         include_read: bool = True,
+        cursor: str | None = None,
     ) -> list[Notification]:
         """List recent notifications for the owner (history, not just unread).
 
@@ -291,6 +292,24 @@ class NotificationRepository:
         if not include_read:
             query = query.where(
                 NotificationRow.status == NotificationStatus.UNREAD.value,
+            )
+        if cursor:
+            cursor_row = await self._session.scalar(
+                select(NotificationRow).where(
+                    NotificationRow.owner_user_id == owner_user_id,
+                    NotificationRow.notification_id == cursor,
+                )
+            )
+            if cursor_row is None:
+                raise DomainInvariantViolation("notification history cursor not found")
+            query = query.where(
+                or_(
+                    NotificationRow.created_at < cursor_row.created_at,
+                    and_(
+                        NotificationRow.created_at == cursor_row.created_at,
+                        NotificationRow.notification_id > cursor_row.notification_id,
+                    ),
+                )
             )
         rows = await self._session.scalars(
             query.order_by(
@@ -381,6 +400,7 @@ def _notification_values(notification: Notification) -> dict[str, object]:
         "severity": notification.severity.value,
         "title": notification.title,
         "message": notification.message,
+        "details_json": notification.details,
         "source_object_type": notification.source_object_type,
         "source_object_id": notification.source_object_id,
         "source_version": notification.source_version,
@@ -403,6 +423,7 @@ def _notification(row: NotificationRow) -> Notification:
             "severity": row.severity,
             "title": row.title,
             "message": row.message,
+            "details": row.details_json,
             "source_object_type": row.source_object_type,
             "source_object_id": row.source_object_id,
             "source_version": row.source_version,

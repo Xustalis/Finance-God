@@ -169,6 +169,31 @@ class SimulationFillRow(Base):
     occurred_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 
+class SimulationProtectiveStrategyRow(Base):
+    __tablename__ = "simulation_protective_strategies"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "idempotency_key",
+            name="uq_simulation_strategy_owner_idempotency",
+        ),
+        CheckConstraint("revision >= 1", name="ck_simulation_strategy_revision"),
+        Index("ix_simulation_strategies_owner", "owner_id"),
+        Index("ix_simulation_strategies_symbol_status", "instrument_id", "status"),
+    )
+
+    strategy_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    instrument_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
 SIMULATION_FACT_TABLES: tuple[Table, ...] = (
     cast(Table, SimulationExecutionEventRow.__table__),
     cast(Table, SimulationExecutionAuditRow.__table__),

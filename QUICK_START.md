@@ -57,14 +57,22 @@ cd backend
 cd ..
 make seed-dev-accounts
 
-# 7. 启动服务（开两个终端）
+# 7. 启动服务（本机进程方式，开三个终端）
 # 终端1：后端
 make backend
 
 # 终端2：前端
 cd frontend
 npm run dev
+
+# 终端3：Agent 持续自学习 Worker
+cd backend
+.venv/bin/python -m scripts.run_self_iteration_loop
 ```
+
+也可以在项目根目录执行 `docker compose up -d --build`，一次启动数据库、后端、
+前端和 Agent 持续自学习 Worker。Worker 默认每 900 秒执行一轮，并通过共享知识卷
+向后端只读提供已验证学习成果。
 
 ### 访问应用
 - 🌐 **前端**：http://localhost:3000

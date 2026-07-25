@@ -2,6 +2,8 @@ import { adminHttpApi, api } from './client'
 import type { AISetting, AuthData, EditableAISetting, MessageTurn, ObjectiveProfile, ProfileDimension, ProfileWithRecommendations, Session, User } from '@/types/api'
 import { adminUpdatePayload } from '@/services/admin'
 
+export const ONBOARDING_MESSAGE_TIMEOUT_MS = 70_000
+
 export const authApi = {
   login:(email:string,password:string)=>api.post<AuthData>('/auth/login',{email,password}),
   devLogin:()=>api.post<AuthData>('/auth/dev-login'),
@@ -16,7 +18,7 @@ export const adminAuthApi = {
 export const onboardingApi = {
   current:()=>api.get<Session>('/onboarding/sessions/current'), create:()=>api.post<Session>('/onboarding/sessions'),
   saveObjective:(id:string,body:ObjectiveProfile)=>api.put<Session>(`/onboarding/sessions/${id}/objective-profile`,body),
-  sendMessage:(id:string,body:{request_id?:string;content:string;input_mode?:'text'|'voice'})=>api.post<MessageTurn>(`/onboarding/sessions/${id}/messages`,body),
+  sendMessage:(id:string,body:{request_id?:string;content:string;input_mode?:'text'|'voice'})=>api.post<MessageTurn>(`/onboarding/sessions/${id}/messages`,body,{timeout:ONBOARDING_MESSAGE_TIMEOUT_MS}),
   skip:(id:string,dimension:ProfileDimension)=>api.post<Session>(`/onboarding/sessions/${id}/skip`,{dimension}),
   complete:(id:string)=>api.post<ProfileWithRecommendations>(`/onboarding/sessions/${id}/complete`),
 }

@@ -97,8 +97,9 @@ class MultiAgentRuntime:
         # delegates everything else to the PandaData fallback
         data_provider = CrawlerDataProvider(fallback=panda_provider)
 
+        chat_client = OpenAICompatibleChat(settings)
         runner = AgentRunner(
-            chat_client=OpenAICompatibleChat(settings),
+            chat_client=chat_client,
             data_provider=data_provider,
             fmp_settings=(
                 FmpSettings.from_environment() if enable_finrobot_metrics else None

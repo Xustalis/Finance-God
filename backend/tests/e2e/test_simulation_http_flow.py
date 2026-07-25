@@ -69,14 +69,31 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
     monkeypatch.setattr(
         finance_server,
         "_services",
-        lambda: (SimpleNamespace(), trusted_market),
+        lambda: (
+            SimpleNamespace(
+                read_historical_minute_bars=lambda *_args, **_kwargs: (
+                    SimpleNamespace(
+                        bars=[
+                            SimpleNamespace(
+                                provider_time="2026-07-24T01:30:00+00:00",
+                                close=Decimal("11.10"),
+                            )
+                        ]
+                    )
+                )
+            ),
+            trusted_market,
+        ),
     )
     first_headers, first_user_id = _register(client, "e2e-first@example.com")
     second_headers, _ = _register(client, "e2e-second@example.com")
 
     account_response = client.post(
         "/api/simulation/accounts",
-        json={"initial_cash_rmb": 100000},
+        json={
+            "initial_cash_rmb": 100000,
+            "simulation_start_at": "2026-07-24T09:31:00+08:00",
+        },
         headers={**first_headers, "idempotency-key": "e2e-account-first"},
     )
     assert account_response.status_code == 201
@@ -158,6 +175,70 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
     assert cross_user_draft.status_code == 404
     assert cross_user_draft.json()["error"]["code"] == "NOT_FOUND"
     assert client.get("/api/simulation/orders", headers=second_headers).json() == []
+
+    immediate = client.post(
+        "/api/simulation/market-orders",
+        json={
+            "account_id": account["account_id"],
+            "instrument_id": "000001.SZ",
+            "side": "buy",
+            "quantity": "100",
+        },
+        headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
+    )
+    assert immediate.status_code == 201, immediate.text
+    immediate_order = immediate.json()
+    assert immediate_order["status"] == "accepted"
+    assert immediate_order["average_fill_price"] is None
+    assert immediate_order["cumulative_filled"] == "0"
+    assert immediate_order["fills"] == []
+
+    replay = client.post(
+        "/api/simulation/market-orders",
+        json={
+            "account_id": account["account_id"],
+            "instrument_id": "000001.SZ",
+            "side": "buy",
+            "quantity": "100",
+        },
+        headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
+    )
+    assert replay.status_code == 201
+    assert replay.json()["order_id"] == immediate_order["order_id"]
+
+    strategy = client.post(
+        "/api/simulation/protective-strategies",
+        json={
+            "account_id": account["account_id"],
+            "instrument_id": "000001.SZ",
+            "quantity": "100",
+            "take_profit_price": "12.00",
+            "stop_loss_price": "10.00",
+        },
+        headers={**first_headers, "idempotency-key": "e2e-protective-strategy"},
+    )
+    assert strategy.status_code == 400
+    assert "exceeds available position" in strategy.text
+    listed_strategies = client.get(
+        "/api/simulation/protective-strategies",
+        headers=first_headers,
+    )
+    assert listed_strategies.status_code == 200
+    assert listed_strategies.json() == []
+
+    order_count = len(client.get("/api/simulation/orders", headers=first_headers).json())
+    insufficient = client.post(
+        "/api/simulation/market-orders",
+        json={
+            "account_id": account["account_id"],
+            "instrument_id": "000001.SZ",
+            "side": "buy",
+            "quantity": "1000000",
+        },
+        headers={**first_headers, "idempotency-key": "e2e-insufficient-cash"},
+    )
+    assert insufficient.status_code == 409
+    assert len(client.get("/api/simulation/orders", headers=first_headers).json()) == order_count
 
 
 async def _create_finance_schema(

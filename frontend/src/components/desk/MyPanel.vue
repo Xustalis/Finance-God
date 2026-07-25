@@ -183,7 +183,7 @@ function openWorkspace(next: DeskSection) {
 
     <section v-else-if="section === 'wallet'" data-test="my-wallet">
       <header class="my-section-heading">
-        <div><p class="chapter">仿真数据</p><h3>钱包</h3></div>
+        <div><p class="chapter">模拟数据</p><h3>钱包</h3></div>
         <button class="refresh-button" type="button" :disabled="desk.loadingSimulation" @click="desk.loadSimulationData">
           {{ desk.loadingSimulation ? '读取中' : '刷新' }}
         </button>
@@ -197,19 +197,19 @@ function openWorkspace(next: DeskSection) {
           <div><dt>保证金</dt><dd>{{ formatMoney(desk.account.margin_rmb) }}</dd></div>
         </dl>
         <p class="data-footnote">
-          仿真账户 · {{ desk.account.status }} · 修订 {{ desk.account.revision }}
+          模拟账户 · {{ desk.account.status }} · 修订 {{ desk.account.revision }}
           <span v-if="desk.simulationLoadedAt">· 读取于 {{ formatTime(desk.simulationLoadedAt) }}</span>
         </p>
       </template>
       <div v-else-if="!desk.loadingSimulation" class="my-empty-state">
-        <p>尚未建立仿真账户。钱包不会显示示例资金。</p>
+        <p>尚未建立模拟账户。钱包不会显示示例资金。</p>
         <button class="ink-button" type="button" @click="openWorkspace('portfolio'); $emit('close')">前往持仓建立账户</button>
       </div>
     </section>
 
     <section v-else-if="section === 'history'" data-test="my-history">
       <header class="my-section-heading">
-        <div><p class="chapter">仿真数据</p><h3>交易记录</h3></div>
+        <div><p class="chapter">模拟数据</p><h3>交易记录</h3></div>
         <button class="refresh-button" type="button" :disabled="desk.loadingSimulation" @click="desk.loadSimulationData">
           {{ desk.loadingSimulation ? '读取中' : '刷新' }}
         </button>
@@ -220,7 +220,7 @@ function openWorkspace(next: DeskSection) {
         <p v-if="desk.ordersError" class="data-error" role="alert">{{ desk.ordersError }}</p>
         <div v-else-if="desk.orders.length" class="market-table-wrap">
           <table class="market-table history-table">
-            <caption class="sr-only">仿真订单记录</caption>
+            <caption class="sr-only">模拟订单记录</caption>
             <thead><tr><th>更新时间</th><th>标的</th><th>方向</th><th>状态</th><th class="numeric">委托</th><th class="numeric">成交</th><th class="numeric">均价</th><th class="numeric">费用</th></tr></thead>
             <tbody>
               <tr v-for="order in desk.orders" :key="order.order_id">
@@ -236,7 +236,7 @@ function openWorkspace(next: DeskSection) {
             </tbody>
           </table>
         </div>
-        <p v-else-if="!desk.loadingSimulation" class="my-empty-copy">暂无服务端仿真订单记录。</p>
+        <p v-else-if="!desk.loadingSimulation" class="my-empty-copy">暂无服务端模拟订单记录。</p>
       </div>
 
       <div class="history-block">
@@ -244,7 +244,7 @@ function openWorkspace(next: DeskSection) {
         <p v-if="desk.fillsError" class="data-error" role="alert">{{ desk.fillsError }}</p>
         <div v-else-if="desk.fills.length" class="market-table-wrap">
           <table class="market-table history-table">
-            <caption class="sr-only">仿真成交记录</caption>
+            <caption class="sr-only">模拟成交记录</caption>
             <thead><tr><th>成交时间</th><th>标的</th><th>方向</th><th class="numeric">数量</th><th class="numeric">价格</th><th class="numeric">费用</th></tr></thead>
             <tbody>
               <tr v-for="fill in desk.fills" :key="fill.fill_id">
@@ -258,7 +258,13 @@ function openWorkspace(next: DeskSection) {
             </tbody>
           </table>
         </div>
-        <p v-else-if="!desk.loadingSimulation" class="my-empty-copy">暂无服务端仿真成交记录。</p>
+        <p v-else-if="!desk.loadingSimulation" class="my-empty-copy">暂无服务端模拟成交记录。</p>
+      </div>
+
+      <div class="history-block">
+        <h4>决策日志与复盘</h4>
+        <p class="my-empty-copy">按完整持仓周期查看当时决策、成交偏离、终局复盘和画像版本反馈。</p>
+        <button class="ink-button" type="button" @click="openWorkspace('review'); $emit('close')">打开交易复盘</button>
       </div>
 
       <p v-if="desk.simulationLoadedAt" class="data-footnote">订单与成交读取于 {{ formatTime(desk.simulationLoadedAt) }}。</p>

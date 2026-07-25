@@ -91,6 +91,30 @@ class AccountRow(Base):
     )
 
 
+class SimulationClockRow(Base):
+    __tablename__ = "simulation_clocks"
+    __table_args__ = (
+        CheckConstraint("speed = 1", name="ck_simulation_clock_speed"),
+        CheckConstraint(
+            "status IN ('running','paused_market_closed')",
+            name="ck_simulation_clock_status",
+        ),
+        CheckConstraint("revision >= 1", name="ck_simulation_clock_revision"),
+    )
+
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("simulation_accounts.account_id"), primary_key=True
+    )
+    simulation_start_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    real_anchor_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    paused_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    speed: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_resume_key: Mapped[str | None] = mapped_column(String(160))
+
+
 class AccountEventRow(Base):
     __tablename__ = "account_events"
     __table_args__ = (

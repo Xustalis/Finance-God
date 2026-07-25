@@ -32,6 +32,7 @@ const props = defineProps<{
   loading: boolean
   watchlistError: string | null
   candidateError: string | null
+  candidateNotice?: string | null
   planError?: string | null
   onLoad: () => void | Promise<void>
   onCreateGroup: (input: { name: string; description: string | null }) => void | Promise<void>
@@ -85,7 +86,6 @@ watch(
 <template>
   <section class="information-workspace" aria-labelledby="watchlist-title">
     <header class="overview-heading"><h1 id="watchlist-title">自选</h1><button class="refresh-button" type="button" :disabled="loading" @click="onLoad">{{ loading ? '正在刷新' : '刷新' }}</button></header>
-    <p class="chapter">自选分组与可研究候选。候选不是买入推荐，不能直接下单。</p>
     <section class="overview-section" aria-labelledby="group-title">
       <header><h2 id="group-title">自选分组</h2><small>每项修改均由服务端修订版本校验</small></header>
       <div class="quote-strip" role="list" aria-label="自选分组"><button v-for="group in groups" :key="group.group_id" type="button" :class="{ selected: selectedGroup?.group_id === group.group_id }" @click="selectGroup(group)"><strong>{{ group.name }}</strong><span>{{ group.instruments.length }} 个标的 · 修订 {{ group.revision }}</span></button></div>
@@ -110,6 +110,7 @@ watch(
       </header>
       <div v-if="candidates.length" class="market-table-wrap candidate-table"><table class="market-table"><thead><tr><th scope="col">标的</th><th scope="col">用途</th><th scope="col">五项解释维度</th><th scope="col">反方证据 / 未知项</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="candidate in candidates" :key="candidate.instrument_id"><th scope="row">{{ candidate.name || candidate.symbol }}<small>{{ candidate.symbol }} · {{ candidate.direction_label }}</small></th><td>{{ candidate.purpose }}<small>{{ candidate.provider || '—' }} · {{ candidate.as_of || '—' }}</small></td><td><ul class="fact-list"><li v-for="dimension in candidate.dimensions.slice(0, 5)" :key="dimension.dimension"><strong>{{ dimension.label }} · {{ dimension.rating }}</strong><span>{{ dimension.detail }}</span></li></ul></td><td><p v-for="exclusion in candidate.exclusions" :key="exclusion.reason_code">{{ exclusion.detail }}</p><p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">未知：{{ dimension.missing_fields.join('、') }}</p><span v-if="!candidate.exclusions.length && !candidate.dimensions.some((item) => item.missing_fields.length)">未返回反方证据或未知项。</span></td><td class="candidate-actions"><template v-if="candidate.ignored"><small>已忽略：{{ candidate.ignore_reason || '—' }}</small></template><template v-else><button class="refresh-button" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button><button v-if="onCreateTradePlan" class="refresh-button" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划，不是直接下单'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button></template></td></tr></tbody></table></div>
       <p v-else-if="candidateUnavailableText" class="data-error" role="status">{{ candidateUnavailableText }}</p>
+      <p v-else-if="candidateNotice" class="empty-data" role="status">{{ candidateNotice }}</p>
       <p v-else-if="!candidateError" class="empty-data">暂无可研究候选。</p>
       <p v-if="candidateError" class="data-error" role="alert">候选读取失败：{{ candidateError }}</p>
       <p v-if="planError" class="data-error" role="alert">交易计划：{{ planError }}</p>

@@ -1,6 +1,11 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  consumeNotificationStream,
+  NotificationStreamError,
+  type NotificationCreatedEvent,
+} from '@/services/notificationStream'
+import {
   addWatchlistInstrument,
   applyDeskUiAction,
   confirmSimulationDraft,
@@ -25,10 +30,17 @@ import {
   fetchResearchCandidates,
   fetchSentimentFacts,
   fetchSimulationAccount,
+  fetchSimulationClock,
+  fetchSimulationBars,
+  fetchSimulationMarketOverview,
   fetchSimulationFills,
   fetchSimulationOrders,
   fetchSimulationPortfolio,
   fetchTradePlan,
+  fetchTradeEpisodes,
+  fetchTradeEpisodeDecisions,
+  fetchTradeEpisodeReview,
+  fetchAgentLearningSummary,
   fetchWatchlistGroups,
   fetchWatchlistInstruments,
   fetchWorkflow,
@@ -36,15 +48,18 @@ import {
   fetchWorkflowEvidence,
   fetchWorkflowProgress,
   retryWorkflow,
+  retryTradeEpisodeReview,
   ignoreResearchCandidate,
   isDeskCapabilityEnabled,
   markNotificationRead,
   previewDeskAgent,
   reconcileSimulationOrder,
+  resumeSimulationClock,
   removeWatchlistInstrument,
   reviewSimulationDraft,
   reviseTradePlan,
   submitSimulationDraft,
+  submitSimulationMarketOrder,
   streamDeskAgentDecision,
   unignoreResearchCandidate,
   updateWatchlistGroup,
@@ -63,6 +78,7 @@ import {
   type QuickCommandStage,
   type ResearchCandidateResponse,
   type SimulationAccount,
+  type SimulationClock,
   type SimulationDraft,
   type SimulationDraftInput,
   type SimulationFill,
@@ -70,12 +86,17 @@ import {
   type SimulationPortfolio,
   type TradePlan,
   type TradePlanActionRevision,
+  type TradeDecisionSnapshot,
+  type TradeEpisode,
+  type TradeReview,
+  type AgentLearningSummary,
   type WatchlistGroup,
   type WatchlistInstrument,
 } from '@/services/tradingDesk'
 import type { ProfileWithRecommendations } from '@/types/api'
+import { parseInstrumentId } from '@/domain/instrumentId'
 
-export type DeskSection = 'information' | 'portfolio' | 'watchlist' | 'trading'
+export type DeskSection = 'information' | 'portfolio' | 'watchlist' | 'trading' | 'review'
 export type DeskAccountState = 'unknown' | 'absent' | 'available' | 'error'
 export type DeskBootstrapStatus = 'loading' | 'ready' | 'error'
 export interface QueuedWorkflowIntent {
@@ -92,12 +113,13 @@ export type AgentThreadMessage =
   | { id: string; role: 'assistant'; kind: 'order_receipt'; createdAt: string; order: SimulationOrder }
   | { id: string; role: 'assistant'; kind: 'error'; createdAt: string; text: string }
 
+const DEFAULT_SYMBOL = '000001.SZ'
 const BASELINE_SYMBOLS = ['000001.SH', '399001.SZ', '000300.SH'] as const
 const POLL_INTERVAL_MS = 60_000
 const AGENT_THREAD_STORAGE_KEY = 'finance-god:agent-thread:v1'
 const WORKFLOW_QUEUE_STORAGE_KEY = 'finance-god:workflow-queue:v1'
 const DESK_CONTEXT_STORAGE_PREFIX = 'finance-god:desk-context:v1'
-const DESK_SECTIONS = new Set<DeskSection>(['information', 'portfolio', 'watchlist', 'trading'])
+const DESK_SECTIONS = new Set<DeskSection>(['information', 'portfolio', 'watchlist', 'trading', 'review'])
 const ACTIVE_WORKFLOW_STATUSES = new Set<DeskWorkflowRun['status']>([
   'queued',
   'running',
@@ -127,7 +149,7 @@ function deskContextStorageKey(): string {
 }
 
 function restoreDeskContext(): { section: DeskSection; symbol: string } {
-  const fallback = { section: 'information' as DeskSection, symbol: BASELINE_SYMBOLS[0] }
+  const fallback = { section: 'information' as DeskSection, symbol: DEFAULT_SYMBOL }
   try {
     const saved = JSON.parse(localStorage.getItem(deskContextStorageKey()) || 'null') as {
       section?: unknown
@@ -138,10 +160,11 @@ function restoreDeskContext(): { section: DeskSection; symbol: string } {
       || typeof saved.section !== 'string'
       || !DESK_SECTIONS.has(saved.section as DeskSection)
       || typeof saved.symbol !== 'string'
-      || saved.symbol.length < 1
-      || saved.symbol.length > 32
     ) return fallback
-    return { section: saved.section as DeskSection, symbol: saved.symbol }
+    const instrumentId = parseInstrumentId(saved.symbol)
+    return instrumentId
+      ? { section: saved.section as DeskSection, symbol: instrumentId }
+      : fallback
   } catch {
     localStorage.removeItem(deskContextStorageKey())
     return fallback
@@ -159,9 +182,19 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const bars = ref<DeskBar[]>([])
   const notifications = ref<DeskNotification[]>([])
   const account = ref<SimulationAccount | null>(null)
+  const simulationClock = ref<SimulationClock | null>(null)
   const portfolio = ref<SimulationPortfolio | null>(null)
   const orders = ref<SimulationOrder[]>([])
   const fills = ref<SimulationFill[]>([])
+  const tradeEpisodes = ref<TradeEpisode[]>([])
+  const selectedTradeEpisode = ref<TradeEpisode | null>(null)
+  const tradeEpisodeDecisions = ref<TradeDecisionSnapshot[]>([])
+  const tradeEpisodeReview = ref<TradeReview | null>(null)
+  const tradeReviewLoading = ref(false)
+  const tradeReviewError = ref<string | null>(null)
+  const agentLearningSummary = ref<AgentLearningSummary | null>(null)
+  const agentLearningLoading = ref(false)
+  const agentLearningError = ref<string | null>(null)
   const watchlistGroups = ref<WatchlistGroup[]>([])
   const watchlistInstruments = ref<Record<string, WatchlistInstrument[]>>({})
   const selectedWatchlistId = ref<string | null>(null)
@@ -176,6 +209,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const sentimentFactsError = ref<string | null>(null)
   const barsError = ref<string | null>(null)
   const notificationError = ref<string | null>(null)
+  const notificationStreamError = ref<string | null>(null)
   const simulationError = ref<string | null>(null)
   const accountError = ref<string | null>(null)
   const ordersError = ref<string | null>(null)
@@ -235,9 +269,12 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const requestedArtifactId = ref<string | null>(null)
   const requestedReminderId = ref<string | null>(null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let simulationClockTimer: ReturnType<typeof setInterval> | null = null
+  let simulationClockRefreshing = false
   let workflowObserver: AbortController | null = null
   let bootstrapRequestId = 0
   let agentPreviewRequestId = 0
+  let barsRequestId = 0
 
   function persistDeskContext() {
     localStorage.setItem(deskContextStorageKey(), JSON.stringify({
@@ -333,8 +370,15 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   let quickCommandRequestId = 0
   let quickCommandStage: QuickCommandStage = 'initial'
   let quickCommandReference: string | null = null
+  let notificationStream: AbortController | null = null
+  let notificationStreamOwnerId: string | null = null
+
+  function notificationCursorKey(): string {
+    return `finance-god:notification-cursor:v1:${notificationStreamOwnerId ?? 'anonymous'}`
+  }
 
   function applyBootstrap(bootstrap: DeskBootstrap) {
+    notificationStreamOwnerId = bootstrap.owner_id
     serverContextVersion.value = bootstrap.context_version
     uiActionCatalog.value = bootstrap.ui_action_catalog
     deskCapabilities.value = { ...bootstrap.capabilities }
@@ -490,14 +534,91 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     if (next === 'portfolio') void loadSimulationData()
     if (next === 'watchlist') void Promise.all([loadWatchlists(), loadCandidates()])
     if (next === 'trading') void loadSimulationData()
+    if (next === 'review') {
+      void loadReviewWorkspace()
+      return
+    }
     void refreshBootstrap()
+  }
+
+  async function loadTradeEpisodes() {
+    tradeReviewLoading.value = true
+    tradeReviewError.value = null
+    try {
+      tradeEpisodes.value = await fetchTradeEpisodes()
+      if (selectedTradeEpisode.value) {
+        selectedTradeEpisode.value = tradeEpisodes.value.find(
+          (item) => item.episode_id === selectedTradeEpisode.value?.episode_id,
+        ) ?? null
+      }
+    } catch (error) {
+      tradeReviewError.value = failureText(error, '交易案例读取失败')
+    } finally {
+      tradeReviewLoading.value = false
+    }
+  }
+
+  async function loadAgentLearningSummary() {
+    agentLearningLoading.value = true
+    agentLearningError.value = null
+    try {
+      agentLearningSummary.value = await fetchAgentLearningSummary()
+    } catch (error) {
+      agentLearningError.value = failureText(error, 'Agent 自学习状态读取失败')
+    } finally {
+      agentLearningLoading.value = false
+    }
+  }
+
+  async function loadReviewWorkspace() {
+    await Promise.all([loadTradeEpisodes(), loadAgentLearningSummary()])
+  }
+
+  async function selectTradeEpisode(episode: TradeEpisode) {
+    selectedTradeEpisode.value = episode
+    tradeEpisodeDecisions.value = []
+    tradeEpisodeReview.value = null
+    tradeReviewLoading.value = true
+    tradeReviewError.value = null
+    try {
+      tradeEpisodeDecisions.value = await fetchTradeEpisodeDecisions(episode.episode_id)
+      if (episode.review_status === 'completed' || episode.review_status === 'failed') {
+        tradeEpisodeReview.value = await fetchTradeEpisodeReview(episode.episode_id)
+      }
+    } catch (error) {
+      tradeReviewError.value = failureText(error, '交易案例详情读取失败')
+    } finally {
+      tradeReviewLoading.value = false
+    }
+  }
+
+  async function retrySelectedTradeReview() {
+    if (!selectedTradeEpisode.value) throw new Error('未选择交易案例')
+    tradeReviewLoading.value = true
+    tradeReviewError.value = null
+    try {
+      tradeEpisodeReview.value = await retryTradeEpisodeReview(
+        selectedTradeEpisode.value.episode_id,
+        newIdempotencyKey('trade-review-retry'),
+      )
+      await loadTradeEpisodes()
+    } catch (error) {
+      tradeReviewError.value = failureText(error, '复盘重试失败')
+      throw error
+    } finally {
+      tradeReviewLoading.value = false
+    }
   }
 
   const barsFrequency = ref<string | undefined>(undefined)
 
   function setSymbol(next: string) {
+    const normalized = parseInstrumentId(next)
+    if (!normalized || normalized === symbol.value) return
     quickCommandRequestId += 1
-    symbol.value = next
+    barsRequestId += 1
+    bars.value = []
+    symbol.value = normalized
     persistDeskContext()
     contextVersion.value += 1
     serverQuickCommands.value = []
@@ -519,8 +640,16 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     loadingMarket.value = true
     marketError.value = null
     try {
-      quotes.value = await fetchMarketOverview(quoteSymbols.value)
+      const result = hasSimulationAccount.value
+        ? await fetchSimulationMarketOverview(quoteSymbols.value)
+        : await fetchMarketOverview(quoteSymbols.value)
+      quotes.value = result.quotes
       marketLoadedAt.value = new Date().toISOString()
+      if (result.warnings.length) {
+        marketError.value = result.warnings
+          .map((warning) => `${warning.symbol ? `${warning.symbol}：` : ''}${warning.message}`)
+          .join('；')
+      }
     }
     catch (error) { marketError.value = failureText(error, '真实行情不可用') }
     finally { loadingMarket.value = false }
@@ -531,7 +660,15 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   async function ensureQuote(instrumentId: string): Promise<DeskQuote | null> {
     const cached = quotes.value.find((item) => item.symbol === instrumentId)
     if (cached) return cached
-    const fetched = await fetchMarketOverview([instrumentId])
+    const result = hasSimulationAccount.value
+      ? await fetchSimulationMarketOverview([instrumentId])
+      : await fetchMarketOverview([instrumentId])
+    const fetched = result.quotes
+    if (result.warnings.length) {
+      marketError.value = result.warnings
+        .map((warning) => `${warning.symbol ? `${warning.symbol}：` : ''}${warning.message}`)
+        .join('；')
+    }
     if (fetched.length) {
       const known = new Set(quotes.value.map((item) => item.symbol))
       quotes.value = [...quotes.value, ...fetched.filter((item) => !known.has(item.symbol))]
@@ -540,11 +677,22 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   }
 
   async function loadBars() {
+    const requestId = ++barsRequestId
+    const requestedSymbol = symbol.value
     barsError.value = null
     const freq = barsFrequency.value
     const limit = freq === '1m' ? 500 : 250
-    try { bars.value = await fetchBars(symbol.value, limit, freq) }
-    catch (error) { barsError.value = failureText(error, 'K线数据不可用') }
+    bars.value = []
+    try {
+      const result = hasSimulationAccount.value
+        ? await fetchSimulationBars(requestedSymbol)
+        : await fetchBars(requestedSymbol, limit, freq)
+      if (requestId === barsRequestId && symbol.value === requestedSymbol && barsFrequency.value === freq) {
+        bars.value = result
+      }
+    } catch (error) {
+      if (requestId === barsRequestId) barsError.value = failureText(error, 'K线数据不可用')
+    }
   }
 
   async function ensureQuoteSymbol(next: string) {
@@ -583,6 +731,11 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     const requestedSymbol = symbol.value
     informationFactsError.value = null
     sentimentFactsError.value = null
+    if (hasSimulationAccount.value) {
+      informationFacts.value = null
+      sentimentFacts.value = null
+      return
+    }
     if (informationFacts.value?.symbol !== requestedSymbol) informationFacts.value = null
     if (sentimentFacts.value?.symbol !== requestedSymbol) sentimentFacts.value = null
     const [information, sentiment] = await Promise.allSettled([
@@ -610,6 +763,71 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     notificationError.value = null
     try { notifications.value = await fetchNotifications() }
     catch (error) { notificationError.value = failureText(error, '提醒不可用') }
+  }
+
+  function applyNotificationEvent(event: NotificationCreatedEvent) {
+    const notification: DeskNotification = {
+      ...event.payload,
+      notification_id: event.notification_id,
+    }
+    if (!notifications.value.some((item) => item.notification_id === event.notification_id)) {
+      notifications.value = [notification, ...notifications.value]
+    }
+    if (
+      notificationHistory.value.length
+      && !notificationHistory.value.some((item) => item.notification_id === event.notification_id)
+    ) {
+      notificationHistory.value = [notification, ...notificationHistory.value]
+    }
+    localStorage.setItem(notificationCursorKey(), event.cursor)
+    notificationStreamError.value = null
+  }
+
+  function stopNotificationStream() {
+    notificationStream?.abort()
+    notificationStream = null
+  }
+
+  function startNotificationStream() {
+    stopNotificationStream()
+    if (!notificationStreamOwnerId || document.hidden) return
+    const controller = new AbortController()
+    notificationStream = controller
+    void observeNotificationStream(controller)
+  }
+
+  async function observeNotificationStream(controller: AbortController) {
+    while (!controller.signal.aborted && !document.hidden) {
+      try {
+        await consumeNotificationStream({
+          cursor: localStorage.getItem(notificationCursorKey()),
+          signal: controller.signal,
+          onEvent: applyNotificationEvent,
+        })
+        if (!controller.signal.aborted) {
+          notificationStreamError.value = '实时提醒已断开，正在重连。'
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return
+        if (
+          error instanceof NotificationStreamError
+          && (error.code === 'EVENT_CURSOR_EXPIRED' || error.code === 'INVALID_EVENT_CURSOR')
+        ) {
+          localStorage.removeItem(notificationCursorKey())
+          await Promise.all([loadNotifications(), loadNotificationHistory()])
+        }
+        notificationStreamError.value = failureText(error, '实时提醒已断开，正在重连。')
+      }
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          window.clearTimeout(timer)
+          controller.signal.removeEventListener('abort', finish)
+          resolve()
+        }
+        const timer = window.setTimeout(finish, 3_000)
+        controller.signal.addEventListener('abort', finish, { once: true })
+      })
+    }
   }
 
   async function loadNotificationHistory(limit = 50) {
@@ -752,7 +970,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       hasSimulationAccount.value = accountResult.value !== null
       accountState.value = accountResult.value ? 'available' : 'absent'
     } else {
-      const message = failureText(accountResult.reason, '仿真账户不可用')
+      const message = failureText(accountResult.reason, '模拟账户不可用')
       if (isMissingSimulationAccount(message)) {
         account.value = null
         hasSimulationAccount.value = false
@@ -813,20 +1031,82 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   async function loadCandidates() {
     loadingCandidates.value = true
     candidateError.value = null
+    if (hasSimulationAccount.value) {
+      candidates.value = null
+      loadingCandidates.value = false
+      return
+    }
     try { candidates.value = await fetchResearchCandidates() }
     catch (error) { candidateError.value = failureText(error, '研究候选不可用') }
     finally { loadingCandidates.value = false }
   }
 
-  async function createAccount(initialCashRmb: string) {
+  async function createAccount(initialCashRmb: string, simulationStartAt: string) {
     simulationError.value = null
     try {
-      account.value = await createSimulationAccount(initialCashRmb, newIdempotencyKey('simulation-account'))
+      account.value = await createSimulationAccount(
+        initialCashRmb,
+        simulationStartAt,
+        newIdempotencyKey('simulation-account'),
+      )
       hasSimulationAccount.value = true
       accountState.value = 'available'
       await loadSimulationData()
       return account.value
-    } catch (error) { simulationError.value = failureText(error, '建立仿真账户失败'); throw error }
+    } catch (error) { simulationError.value = failureText(error, '建立模拟账户失败'); throw error }
+  }
+
+  async function refreshSimulationClock() {
+    if (simulationClockRefreshing) return
+    if (!hasSimulationAccount.value) {
+      simulationClock.value = null
+      return
+    }
+    simulationClockRefreshing = true
+    try {
+      simulationClock.value = await fetchSimulationClock()
+      const pending = orders.value.filter((order) => (
+        order.status === 'accepted' || order.status === 'partially_filled'
+      ))
+      if (pending.length) {
+        await Promise.all(pending.map((order) => reconcileSimulationOrder(order.order_id)))
+        await loadSimulationData()
+      }
+    } catch (error) {
+      simulationError.value = failureText(error, '模拟时钟不可用')
+    } finally {
+      simulationClockRefreshing = false
+    }
+  }
+
+  async function bootstrapSimulationClock() {
+    try {
+      const current = await fetchSimulationAccount()
+      account.value = current
+      hasSimulationAccount.value = current !== null
+      accountState.value = current ? 'available' : 'absent'
+      if (current) simulationClock.value = await fetchSimulationClock()
+    } catch (error) {
+      const message = failureText(error, '模拟账户不可用')
+      if (isMissingSimulationAccount(message)) {
+        account.value = null
+        hasSimulationAccount.value = false
+        accountState.value = 'absent'
+        simulationClock.value = null
+        return
+      }
+      accountState.value = 'error'
+      accountError.value = message
+    }
+  }
+
+  async function resumeClock() {
+    if (!simulationClock.value) throw new Error('模拟时钟不可用')
+    simulationClock.value = await resumeSimulationClock(
+      simulationClock.value.revision,
+      newIdempotencyKey('simulation-clock-resume'),
+    )
+    await Promise.all([refreshMarket({ withBars: true }), loadSimulationData()])
   }
 
   async function createDraft(input: SimulationDraftInput) {
@@ -883,18 +1163,35 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       })
       await loadSimulationData()
       return activeOrder.value
-    } catch (error) { orderError.value = failureText(error, '提交仿真订单失败'); throw error }
+    } catch (error) { orderError.value = failureText(error, '提交模拟订单失败'); throw error }
+  }
+
+  async function submitMarketOrder(input: { accountId: string; instrumentId: string; side: 'buy' | 'sell'; quantity: string }) {
+    orderError.value = null
+    try {
+      activeOrder.value = await submitSimulationMarketOrder({
+        account_id: input.accountId,
+        instrument_id: input.instrumentId,
+        side: input.side,
+        quantity: input.quantity,
+      }, newIdempotencyKey('simulation-market-order'))
+      await loadSimulationData()
+      return activeOrder.value
+    } catch (error) {
+      orderError.value = failureText(error, '模拟交易失败')
+      throw error
+    }
   }
 
   async function reconcileOrder() {
-    if (!activeOrder.value) throw new Error('没有可撮合的仿真订单')
+    if (!activeOrder.value) throw new Error('没有可撮合的模拟订单')
     orderError.value = null
     try {
       activeOrder.value = await reconcileSimulationOrder(activeOrder.value.order_id)
       await loadSimulationData()
       return activeOrder.value
     } catch (error) {
-      orderError.value = failureText(error, '仿真订单撮合失败')
+      orderError.value = failureText(error, '模拟订单撮合失败')
       throw error
     }
   }
@@ -1457,15 +1754,28 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   function startPolling() {
     stopPolling()
     pollTimer = setInterval(() => { if (!document.hidden) void refreshMarket() }, POLL_INTERVAL_MS)
+    simulationClockTimer = setInterval(() => {
+      if (!document.hidden && hasSimulationAccount.value) void refreshSimulationClock()
+    }, 1_000)
   }
 
-  function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null }
+  function stopPolling() {
+    if (pollTimer) clearInterval(pollTimer)
+    if (simulationClockTimer) clearInterval(simulationClockTimer)
+    pollTimer = null
+    simulationClockTimer = null
+  }
   function onVisibilityChange() {
     if (document.hidden) {
       stopWorkflowPolling()
+      stopNotificationStream()
       return
     }
     void refreshMarket()
+    void refreshSimulationClock()
+    void Promise.all([loadNotifications(), loadNotificationHistory()]).finally(
+      startNotificationStream,
+    )
     if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
       void refreshWorkflow().finally(() => {
         if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
@@ -1481,7 +1791,9 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     restoreWorkflowQueue()
     // Shell state only after a successful bootstrap response — never declare capabilities locally.
     await refreshBootstrap()
+    await bootstrapSimulationClock()
     await Promise.all([refreshMarket({ withBars: true }), loadProfile(), loadNotifications(), loadMarketFacts()])
+    startNotificationStream()
     await restoreActiveWorkflow()
     startPolling()
     document.addEventListener('visibilitychange', onVisibilityChange)
@@ -1490,18 +1802,19 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   function dispose() {
     stopPolling()
     stopWorkflowPolling()
+    stopNotificationStream()
     document.removeEventListener('visibilitychange', onVisibilityChange)
   }
   onScopeDispose(dispose)
 
   return {
     section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, bars, notifications,
-    account, accountState, portfolio, orders, fills, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
+    account, accountState, simulationClock, portfolio, orders, fills, tradeEpisodes, selectedTradeEpisode, tradeEpisodeDecisions, tradeEpisodeReview, agentLearningSummary, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
     selectedWatchlistInstruments, candidates, activeDraft, activeOrder, activeTradePlan, hasSimulationAccount,
-    marketError, profileError, informationFactsError, sentimentFactsError, barsError, notificationError, simulationError,
+    marketError, profileError, informationFactsError, sentimentFactsError, barsError, notificationError, notificationStreamError, simulationError,
     accountError, ordersError, fillsError, marketLoadedAt, simulationLoadedAt, watchlistError, candidateError,
     orderError, tradePlanError,
-    loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates,
+    loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates, tradeReviewLoading, tradeReviewError, agentLearningLoading, agentLearningError,
     activeWorkflow, activeWorkflowProgress, activeWorkflowEvidence, workflowIntent, agentMessages, queuedWorkflowIntents,
     workflowHistory, workflowHistoryCursor, workflowHistoryLoading, workflowHistoryError,
     selectedHistoricalWorkflow, selectedHistoricalProgress, selectedHistoricalEvidence,
@@ -1511,11 +1824,11 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     deskCapabilities, profileProjection, bootstrapStatus, bootstrapError, notificationHistory, uiActionError, lastUiActionReceipt,
     workspaceControl, openedRecord, candidateLocation, tradeDraftPrefill, requestedArtifactId, requestedReminderId,
     selectedQuote, unreadCount, profileSummary, quickCommands,
-    setSection, setSymbol, setBarsFrequency, refreshMarket, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace,
+    setSection, setSymbol, setBarsFrequency, refreshMarket, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace, refreshSimulationClock, resumeClock,
     loadProfile, loadMarketFacts, loadNotifications, loadNotificationHistory,
     dismissNotification, applyUiAction,
-    loadSimulationData, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
-    acknowledgeSoftRisk, confirmDraft, submitDraft, reconcileOrder, createWatchlist, renameWatchlist, removeWatchlist,
+    loadSimulationData, loadTradeEpisodes, loadAgentLearningSummary, loadReviewWorkspace, selectTradeEpisode, retrySelectedTradeReview, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
+    acknowledgeSoftRisk, confirmDraft, submitDraft, submitMarketOrder, reconcileOrder, createWatchlist, renameWatchlist, removeWatchlist,
     addToWatchlist, removeFromWatchlist, ignoreCandidate, restoreCandidate, startCandidateTradePlan,
     startPortfolioDeviationTradePlan, loadTradePlan, reviseActiveTradePlan, confirmActiveTradePlan,
     runWorkflow, submitAgentIntent, previewAgentIntent, appendAgentMessage, removeQueuedWorkflow, refreshWorkflow, refreshBootstrap, refreshQuickCommands, rerollQuickCommands,

@@ -297,6 +297,28 @@ summary { display: flex; align-items: center; justify-content: space-between; cu
 summary span { display: flex; align-items: center; gap: .55rem; }
 details p, details ul { color: var(--muted-ink); padding-left: 0; }
 details li { margin: .5rem 0; list-style-position: inside; }
+.review-timeline { margin: 0; padding: 0; list-style: none; }
+.review-timeline > li { padding: 1rem 0; border-bottom: 1px solid var(--faint-rule); }
+.review-timeline > li > header { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
+.review-timeline time { color: var(--muted-ink); font-size: .78rem; }
+.review-findings { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; border-top: 3px double var(--ink); }
+.review-findings section { padding-top: .8rem; }
+.review-findings ul { margin: .4rem 0 0; padding-left: 1.2rem; }
+.review-workspace .market-table tbody tr { cursor: pointer; }
+.review-workspace .market-table tbody tr.selected { background: var(--paper-light); box-shadow: inset 3px 0 0 #c91418; }
+.agent-learning-section > header > div { min-width: 0; }
+.learning-scope { margin: .35rem 0 0; color: var(--muted-ink); font-size: .82rem; }
+.learning-summary { margin-bottom: .75rem; }
+.learning-lessons { margin: 0; padding: 0; list-style: none; border-top: 3px double var(--ink); }
+.learning-lessons li { padding: .9rem 0; border-bottom: 1px solid var(--faint-rule); }
+.learning-lessons p { margin: 0 0 .35rem; }
+.learning-lessons small, .learning-meta { color: var(--muted-ink); font-size: .76rem; }
+.learning-lessons .learning-meta { margin-top: .35rem; }
+.learning-retry { margin-top: .75rem; }
+@media (max-width: 680px) {
+  .review-findings { grid-template-columns: 1fr; }
+  .review-timeline > li > header { display: grid; }
+}
 .education-band { display: flex; gap: 1.2rem; padding: 2rem; background: var(--jade-pale); border-left: 4px solid var(--positive); }
 .education-band h2 { margin: .2rem 0 .6rem; }
 .education-band p:last-child { margin: 0; color: var(--muted-ink); }
@@ -357,6 +379,9 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
 .credential-status { grid-column: 1/-1; display: flex; align-items: center; gap: .55rem; color: var(--muted-ink); margin: .2rem 0; }
 .credential-status strong { color: var(--positive); }
 .mock-disclosure { border-left: 3px solid var(--risk); padding: .65rem .85rem; background: #f5ebe8; color: var(--risk); }
+.mock-data-label { margin-left: .45rem; color: var(--risk); font-size: .72rem; font-weight: 800; letter-spacing: .08em; }
+.mock-data-disclosure { margin: .55rem 0; padding: .45rem .65rem; border-left: 3px solid var(--risk); background: rgb(143 48 39 / 7%); color: var(--risk); font-size: .78rem; line-height: 1.55; }
+.mock-data-disclosure strong { margin-right: .35rem; letter-spacing: .08em; }
 
 /* ═══ 响应式 ═══ */
 @media (max-width: 900px) {
@@ -833,6 +858,23 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
   display: block;
   flex: 0 0 auto;
 }
+.simulation-time-strip {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: .75rem;
+  padding: 5px 18px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted-ink);
+  font-size: .78rem;
+  letter-spacing: .04em;
+}
+.simulation-time-strip strong {
+  color: var(--ink);
+  font-family: var(--font-numeric);
+}
+.simulation-time-strip .refresh-button { margin-left: auto; }
 .desk-page .desk-workspace-bar .desk-nav {
   min-width: 0;
 }
@@ -840,6 +882,34 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
   height: 100%;
   max-height: 100%;
   overflow: hidden;
+}
+@media (min-width: 1024px) {
+  .desk-page {
+    height: 100svh;
+    min-height: 100svh;
+    overflow: hidden;
+  }
+  .desk-page .desk-spread {
+    height: calc(100svh - 70px);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .desk-page .desk-left {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+  }
+  .desk-page .desk-workspace-bar {
+    flex: 0 0 auto;
+  }
+  .desk-page .desk-left-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 .agent-expanded {
   display: flex;
@@ -1030,7 +1100,7 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
   text-decoration: none;
 }
 
-/* “我的”使用真实仿真账户、订单和成交投影。 */
+/* “我的”使用真实模拟账户、订单和成交投影。 */
 .my-panel {
   width: min(760px, calc(100vw - 36px));
   max-height: min(82vh, 760px);
@@ -1198,7 +1268,7 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
 }
 
 @media (max-width: 1023px) {
-  /* 窄屏切上下堆叠：恢复整页文档滚动，Agent 面板保持固定高度独立滚动。 */
+  /* 窄屏切上下堆叠，恢复整页文档滚动。 */
   .desk-page {
     display: block;
     height: auto;
@@ -1207,26 +1277,31 @@ input[readonly] { background: var(--paper); color: var(--muted-ink); }
   }
   .desk-page .desk-spread {
     grid-template-columns: 1fr;
+    height: auto;
     min-height: calc(100svh - 70px);
     overflow: visible;
   }
   .desk-page .desk-left {
     display: block;
+    min-height: 0;
     overflow: visible;
   }
   .desk-page .desk-left-content {
+    min-height: 0;
     overflow: visible;
   }
   .desk-page .desk-agent {
-    height: calc(100svh - 70px);
-    max-height: calc(100svh - 70px);
+    height: auto;
+    max-height: none;
+    min-height: 560px;
+    overflow: hidden;
   }
 }
 
 @media (max-width: 680px) {
   .desk-page .desk-agent {
-    height: calc(100svh - 58px);
-    max-height: calc(100svh - 58px);
+    height: auto;
+    max-height: none;
   }
   .my-panel {
     top: 62px;

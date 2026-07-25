@@ -6,12 +6,13 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from threading import Lock
 from time import monotonic
 from typing import TYPE_CHECKING
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from sqlalchemy import inspect, select
@@ -25,6 +26,7 @@ from app.config import settings
 from app.core.security import resolve_active_user
 from app.db.session import create_db_session
 from app.models.profile import DirectionRecommendation, InvestmentProfile
+from finance_god.api.agent_learning_routes import create_agent_learning_routes
 from finance_god.api.agent_routes import (
     AgentRuntimeUnavailable,
     create_agent_routes,
@@ -32,15 +34,18 @@ from finance_god.api.agent_routes import (
 from finance_god.api.auth import AuthenticationError
 from finance_god.api.crawler_routes import create_crawler_routes
 from finance_god.api.desk_routes import create_desk_routes, project_suitability_profile
+from finance_god.api.event_routes import create_event_routes
 from finance_god.api.evidence_routes import create_evidence_routes
 from finance_god.api.mandate_routes import create_mandate_routes
 from finance_god.api.simulation import create_simulation_routes
+from finance_god.api.trade_episode_routes import create_trade_episode_routes
 from finance_god.api.trade_plan_routes import create_trade_plan_routes
 from finance_god.api.workflow_routes import (
     WorkflowRuntimeUnavailable,
     create_workflow_routes,
 )
 from finance_god.api.workspace_routes import create_workspace_routes
+from finance_god.application.agent_learning_summary import AgentLearningSummaryReader
 from finance_god.application.candidate_service import (
     CandidateResponse,
     CandidateScoringService,
@@ -50,8 +55,12 @@ from finance_god.application.decision_inbox import DecisionInboxService
 from finance_god.application.evidence_service import EvidenceService
 from finance_god.application.ledger_service import SimulationLedgerService
 from finance_god.application.mandate_service import MandateService
+from finance_god.application.market_alert_notifications import (
+    MarketAlertNotificationProjector,
+)
 from finance_god.application.market_poller import MarketPoller
 from finance_god.application.portfolio_query import PortfolioQueryService
+from finance_god.application.simulation_clock import SimulationClockService
 from finance_god.application.trade_plan_service import TradePlanService
 from finance_god.application.workflow_worker import MarketAlertContext, WorkflowWorker
 from finance_god.crawler.service import get_crawler_service
@@ -65,6 +74,7 @@ from finance_god.infrastructure.persistence.market_monitor_repository import (
 )
 from finance_god.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
 from finance_god.infrastructure.persistence.workflow_uow import WorkflowUnitOfWork
+from finance_god.infrastructure.persistence.workspace_models import UserMarketFocusRow
 from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
 from finance_god.infrastructure.simulation_wiring import (
     SystemClock,
@@ -77,6 +87,8 @@ from finance_god.market_data import (
     MarketDataApplication,
     MarketDataError,
     MarketDataService,
+    MarketQuote,
+    QuoteBatch,
     capability_catalog_summary,
 )
 from finance_god.orchestration.multi_agent import MultiAgentRuntime
@@ -87,6 +99,7 @@ from finance_god.orchestration.workflows import (
     WorkflowKey,
     create_workflow_command_runtime_from_environment,
 )
+from finance_god.trade_review import TradeReviewService
 
 if TYPE_CHECKING:
     from finance_god.crawler.service import CrawlerService
@@ -117,6 +130,7 @@ _desk_decision_contexts: dict[str, tuple[str, str, float]] = {}
 _DESK_DECISION_CONTEXT_TTL_SECONDS = 1_800.0
 _readiness_cache: tuple[float, bool, str] | None = None
 _readiness_lock = asyncio.Lock()
+_simulation_next_session_cache: dict[str, datetime] = {}
 
 
 def _crawler_service_instance() -> "CrawlerService":
@@ -189,6 +203,19 @@ def _services() -> tuple[MarketDataService, MarketDataApplication]:
 
 def _workspace_session() -> AsyncSession:
     return create_db_session()
+
+
+async def _record_market_focus(
+    owner_user_id: str, symbol: str, updated_at: datetime
+) -> None:
+    async with create_db_session() as session, session.begin():
+        await session.merge(
+            UserMarketFocusRow(
+                owner_user_id=owner_user_id,
+                symbol=symbol,
+                updated_at=updated_at,
+            )
+        )
 
 
 def _mandate_service() -> MandateService:
@@ -573,6 +600,8 @@ async def bars(request: Request) -> JSONResponse:
         service, _application = _services()
         from finance_god.market_data.contracts import DataFrequency as DF
         freq_map = {"1m": DF.MINUTE_1, "daily": DF.DAILY, "1d": DF.DAILY}
+        if frequency_param and frequency_param not in freq_map:
+            raise ValueError("unsupported bar frequency")
         frequency_override = freq_map.get(frequency_param) if frequency_param else None
         result = await asyncio.to_thread(
             service.read_bars,
@@ -635,11 +664,20 @@ async def information_facts(request: Request) -> JSONResponse:
             "fact_kind": "industry_news",
             "symbol": symbol.upper() if symbol else "A_SHARE_MARKET",
             "requested_at": news[0].publish_time.isoformat() if news and news[0].publish_time else None,
+            "generated_at": datetime.now(UTC).isoformat(),
             "facts": facts,
             "news": [item.model_dump(mode="json") for item in news],
             "trade_eligible": False,
+            "data_mode": "real",
+            "fallback_reason": None,
         })
-    except Exception:  # noqa: BLE001 - public HTTP error boundary
+    except Exception as error:  # noqa: BLE001 - public HTTP error boundary
+        if settings.market_reference_mock_fallback:
+            _LOGGER.warning(
+                "Information reference source failed; serving labeled mock: %s",
+                type(error).__name__,
+            )
+            return _mock_information_facts(symbol)
         return _internal_error()
 
 
@@ -657,6 +695,7 @@ async def sentiment_facts(request: Request) -> JSONResponse:
             "fact_kind": "market_sentiment",
             "symbol": request.query_params.get("symbol", "A_SHARE_MARKET"),
             "requested_at": data["retrieved_at"],
+            "generated_at": datetime.now(UTC).isoformat(),
             "sentiment": data,
             "facts": [
                 {
@@ -672,9 +711,83 @@ async def sentiment_facts(request: Request) -> JSONResponse:
                 },
             ],
             "trade_eligible": False,
+            "data_mode": "real",
+            "fallback_reason": None,
         })
-    except Exception:  # noqa: BLE001 - public HTTP error boundary
+    except Exception as error:  # noqa: BLE001 - public HTTP error boundary
+        if settings.market_reference_mock_fallback:
+            _LOGGER.warning(
+                "Sentiment reference source failed; serving labeled mock: %s",
+                type(error).__name__,
+            )
+            return _mock_sentiment_facts(
+                request.query_params.get("symbol", "A_SHARE_MARKET")
+            )
         return _internal_error()
+
+
+def _mock_information_facts(symbol: str) -> JSONResponse:
+    generated_at = datetime.now(UTC).isoformat()
+    normalized_symbol = symbol.upper() if symbol else "A_SHARE_MARKET"
+    items = (
+        ("市场公告示例：上市公司披露定期报告安排", "公告"),
+        ("行业资讯示例：主要指数成分调整进入观察期", "市场"),
+        ("研究资料示例：关注公开数据更新时间与口径差异", "研究"),
+    )
+    facts = [
+        {
+            "scope": f"mock-news:{index}",
+            "fields": [
+                {"name": "title", "value": title},
+                {
+                    "name": "summary",
+                    "value": "仅用于保持资讯模块可读，不构成市场事实或投资依据。",
+                },
+                {"name": "source", "value": "Finance-God Mock"},
+                {"name": "url", "value": ""},
+                {"name": "sector", "value": sector},
+            ],
+        }
+        for index, (title, sector) in enumerate(items, start=1)
+    ]
+    return _json({
+        "provider": "Finance-God Mock",
+        "fact_kind": "industry_news",
+        "symbol": normalized_symbol,
+        "requested_at": generated_at,
+        "generated_at": generated_at,
+        "facts": facts,
+        "news": [],
+        "trade_eligible": False,
+        "data_mode": "mock",
+        "fallback_reason": "真实市场资讯源暂时不可用。",
+    })
+
+
+def _mock_sentiment_facts(symbol: str) -> JSONResponse:
+    generated_at = datetime.now(UTC).isoformat()
+    return _json({
+        "provider": "Finance-God Mock",
+        "fact_kind": "market_sentiment",
+        "symbol": symbol or "A_SHARE_MARKET",
+        "requested_at": generated_at,
+        "generated_at": generated_at,
+        "sentiment": None,
+        "facts": [
+            {
+                "scope": "mock-market-sentiment",
+                "fields": [
+                    {"name": "score", "value": 50},
+                    {"name": "level", "value": "neutral"},
+                    {"name": "north_flow", "value": None},
+                    {"name": "up_ratio", "value": None},
+                ],
+            },
+        ],
+        "trade_eligible": False,
+        "data_mode": "mock",
+        "fallback_reason": "真实市场情绪源暂时不可用。",
+    })
 
 
 def _instrument_frequency(market: str, asset_class: str) -> str:
@@ -865,6 +978,88 @@ async def _candidate_quotes(symbols: list[str]):
     return await application.quotes(symbols)
 
 
+async def _workflow_market_context_quotes(symbols: list[str]) -> QuoteBatch:
+    """Return a research snapshot, deriving index values from verified daily bars.
+
+    PandaData does not expose a verified real-time snapshot endpoint for indices.
+    The workflow still needs a source-stamped point-in-time value, so indices use
+    the latest two released daily bars instead of pretending the equity endpoint
+    supports them.
+    """
+    batch = await _candidate_quotes(symbols)
+    missing = [
+        symbol
+        for symbol in symbols
+        if symbol not in {quote.symbol for quote in batch.quotes}
+        and batch.errors.get(symbol)
+        == "asset class has no verified snapshot endpoint"
+    ]
+    if not missing:
+        return batch
+
+    _, application = _services()
+    derived: list[MarketQuote] = []
+    remaining_errors = dict(batch.errors)
+    end = datetime.now(ZoneInfo("Asia/Shanghai"))
+    start_date = (end - timedelta(days=45)).strftime("%Y%m%d")
+    end_date = end.strftime("%Y%m%d")
+    for symbol in missing:
+        history = await application.historical_daily_bars(
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            limit=45,
+        )
+        if len(history.bars) < 2:
+            remaining_errors[symbol] = (
+                "index snapshot requires at least two released daily bars"
+            )
+            continue
+        previous, latest = history.bars[-2:]
+        change = latest.close - previous.close
+        change_percent = (
+            change / previous.close if previous.close != 0 else None
+        )
+        derived.append(
+            MarketQuote(
+                symbol=symbol,
+                name=symbol,
+                asset_type="index",
+                market="CN",
+                currency="CNY",
+                last=latest.close,
+                open=latest.open,
+                high=latest.high,
+                low=latest.low,
+                previous_close=previous.close,
+                change=change,
+                change_percent=change_percent,
+                volume=latest.volume,
+                amount=latest.amount,
+                provider="PandaData",
+                provider_time=latest.provider_time,
+                retrieved_at=datetime.now(UTC),
+                frequency=history.frequency,
+                freshness=latest.freshness,
+                session_alignment="latest_released_session",
+                market_status="released",
+                source_endpoint=latest.source_endpoint,
+                capability_version=latest.capability_version,
+                instrument_master_identity=latest.instrument_master_identity,
+                instrument_master_version=latest.instrument_master_version,
+            )
+        )
+        remaining_errors.pop(symbol, None)
+    return QuoteBatch(
+        requested_at=batch.requested_at,
+        cache_hit=batch.cache_hit,
+        quotes=(*batch.quotes, *derived),
+        errors=remaining_errors,
+        diagnostics=batch.diagnostics,
+        quality=batch.quality,
+    )
+
+
 async def _workflow_market_history(
     symbol: str,
     *,
@@ -1004,6 +1199,23 @@ def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | N
         _LOGGER.info("market poller idle: no priceable instruments in universe")
         return None, None
     escalate = settings.market_alert_escalate_threshold
+
+    async def evaluate_protective_strategies(snapshot) -> None:
+        global simulation_execution
+        if simulation_execution is None:
+            _simulation_routes()
+        if simulation_execution is None:
+            raise RuntimeError("simulation execution service is unavailable")
+        await simulation_execution.evaluate_protective_strategies(
+            instrument_id=snapshot.symbol,
+            trusted_price=snapshot.last,
+            market_evidence=VersionReference(
+                object_type="market_quote",
+                object_id=snapshot.symbol,
+                version=snapshot.provider_time,
+            ),
+        )
+
     poller = MarketPoller(
         quotes_provider=_candidate_quotes,
         uow_factory=_market_monitor_uow,
@@ -1011,6 +1223,10 @@ def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | N
         escalate_threshold=(
             Decimal(str(escalate)) if escalate is not None else None
         ),
+        snapshot_observer=evaluate_protective_strategies,
+        alert_dispatcher=MarketAlertNotificationProjector(
+            _workspace_session
+        ).dispatch_pending,
     )
     stop_event = asyncio.Event()
     task = asyncio.create_task(
@@ -1053,7 +1269,7 @@ def _start_workflow_worker() -> tuple[
         evidence_recorder=_record_workflow_evidence,
         profile_provider=_workflow_profile_context,
         candidate_provider=_workflow_candidates,
-        market_context_provider=_candidate_quotes,
+        market_context_provider=_workflow_market_context_quotes,
         market_history_provider=_workflow_market_history,
         information_facts_provider=_workflow_information_facts,
         sentiment_facts_provider=_workflow_sentiment_facts,
@@ -1197,6 +1413,127 @@ async def _trusted_simulation_market_reference(
             version=quote.provider_time,
         ),
     )
+
+
+async def _trusted_historical_simulation_market_reference(
+    owner_id: str,
+    symbol: str,
+) -> tuple[Decimal, VersionReference]:
+    """Return the latest completed one-minute bar visible to the simulation clock."""
+
+    simulation_clock = SimulationClockService(_workspace_session)
+    clock = await simulation_clock.current_for_owner(owner_id)
+    requested_symbol = symbol.strip().upper()
+    trading_date = clock.current_time.astimezone(
+        ZoneInfo("Asia/Shanghai")
+    ).strftime("%Y%m%d")
+    service, _application = _services()
+    result = await asyncio.to_thread(
+        service.read_historical_minute_bars,
+        requested_symbol,
+        trading_date=trading_date,
+        limit=1_000,
+    )
+    completed = []
+    for bar in result.bars:
+        observed_at = datetime.fromisoformat(bar.provider_time)
+        if (
+            observed_at.tzinfo is not None
+            and observed_at + timedelta(minutes=1) <= clock.current_time
+        ):
+            completed.append((observed_at, bar))
+    if not completed:
+        raise ValueError(
+            "no completed PandaData minute bar is available at simulation time"
+        )
+    _observed_at, selected = max(completed, key=lambda item: item[0])
+    if selected.close <= 0:
+        raise ValueError("historical PandaData bar has no positive close")
+    return (
+        selected.close,
+        VersionReference(
+            object_type="simulation_historical_bar",
+            object_id=requested_symbol,
+            version=f"{selected.provider_time}:clock:{clock.revision}",
+        ),
+    )
+
+
+async def _historical_simulation_market_bars(
+    owner_id: str,
+    symbol: str,
+) -> dict[str, object]:
+    clock = await SimulationClockService(_workspace_session).current_for_owner(owner_id)
+    trading_date = clock.current_time.astimezone(
+        ZoneInfo("Asia/Shanghai")
+    ).strftime("%Y%m%d")
+    service, _application = _services()
+    result = await asyncio.to_thread(
+        service.read_historical_minute_bars,
+        symbol.strip().upper(),
+        trading_date=trading_date,
+        limit=1_000,
+    )
+    visible = tuple(
+        bar
+        for bar in result.bars
+        if (
+            (observed_at := datetime.fromisoformat(bar.provider_time)).tzinfo is not None
+            and observed_at + timedelta(minutes=1) <= clock.current_time
+        )
+    )
+    if not visible:
+        raise ValueError("no completed PandaData minute bar is available at simulation time")
+    return {
+        "bars": visible,
+        "frequency": "1m",
+        "simulation_time": clock.current_time,
+        "simulation_clock_revision": clock.revision,
+    }
+
+
+async def _next_pandadata_session_open(after_close: datetime) -> datetime:
+    local = after_close.astimezone(ZoneInfo("Asia/Shanghai"))
+    if local.hour < 12:
+        return local.replace(hour=13, minute=0, second=0, microsecond=0)
+    cache_key = local.date().isoformat()
+    cached = _simulation_next_session_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    service, _application = _services()
+    candidate = local.date() + timedelta(days=1)
+    for _ in range(20):
+        result = await asyncio.to_thread(
+            service.read_historical_minute_bars,
+            "000001.SZ",
+            trading_date=candidate.strftime("%Y%m%d"),
+            limit=1,
+        )
+        if result.bars:
+            resolved = datetime.combine(
+                candidate,
+                datetime.min.time().replace(hour=9, minute=30),
+                ZoneInfo("Asia/Shanghai"),
+            )
+            _simulation_next_session_cache[cache_key] = resolved
+            return resolved
+        candidate += timedelta(days=1)
+    raise ValueError("PandaData has no next A-share session within 20 days")
+
+
+async def _validate_simulation_start(start_at: datetime) -> None:
+    local = start_at.astimezone(ZoneInfo("Asia/Shanghai"))
+    service, _application = _services()
+    result = await asyncio.to_thread(
+        service.read_historical_minute_bars,
+        "000001.SZ",
+        trading_date=local.strftime("%Y%m%d"),
+        limit=1_000,
+    )
+    if not result.bars:
+        raise ValueError(
+            "simulation_start_at has no available PandaData one-minute data"
+        )
 
 
 def _trade_plan_service() -> TradePlanService:
@@ -1377,6 +1714,10 @@ class _WorkspaceNotificationSource:
 
 def _assemble_simulation_routes() -> list:
     clock = SystemClock()
+    simulation_clock = SimulationClockService(
+        _workspace_session,
+        next_session_resolver=_next_pandadata_session_open,
+    )
     portfolio = PortfolioQueryService(
         uow_factory=_simulation_uow_factory,
         clock=clock,
@@ -1393,7 +1734,14 @@ def _assemble_simulation_routes() -> list:
         portfolio=portfolio,
         decision_inbox=decision_inbox,
         owner_resolver=_authenticated_owner,
+        simulation_clock=simulation_clock,
         market_reference_provider=_trusted_simulation_market_reference,
+        historical_market_reference_provider=(
+            _trusted_historical_simulation_market_reference
+        ),
+        historical_market_bars_provider=_historical_simulation_market_bars,
+        simulation_start_validator=_validate_simulation_start,
+        trade_review_service=TradeReviewService(_workspace_session),
     )
 
 
@@ -1421,6 +1769,10 @@ def _simulation_routes() -> list:
             ledger=ledger,
             market_data=_services()[0],
             authorization=PersistentAuthorizationProvider(_mandate_service()),
+            simulation_clock=SimulationClockService(
+                _workspace_session,
+                next_session_resolver=_next_pandadata_session_open,
+            ),
         )
         _LOGGER.info("simulation services initialized successfully")
     except Exception as error:  # noqa: BLE001
@@ -1591,6 +1943,14 @@ finance_routes = [
         name="simulation",
     ),
     Mount(
+        "/trade-episodes",
+        routes=create_trade_episode_routes(
+            service=TradeReviewService(_workspace_session),
+            owner_resolver=_authenticated_owner,
+        ),
+        name="trade-episodes",
+    ),
+    Mount(
         "/trade-plans",
         routes=create_trade_plan_routes(
             service_provider=_trade_plan_service,
@@ -1636,6 +1996,11 @@ finance_routes = [
         quick_command_provider=_generate_desk_quick_commands,
         quick_command_context_provider=_desk_quick_command_context,
         instrument_name_provider=_desk_instrument_name,
+        market_focus_recorder=_record_market_focus,
+    ),
+    *create_event_routes(
+        session_factory=_workspace_session,
+        owner_resolver=_authenticated_owner,
     ),
     Mount(
         "/agent",
@@ -1650,6 +2015,14 @@ finance_routes = [
             decision_recorder=_record_desk_decision,
         ),
         name="agent",
+    ),
+    Mount(
+        "/agent-learning",
+        routes=create_agent_learning_routes(
+            owner_resolver=_authenticated_owner,
+            reader_provider=AgentLearningSummaryReader.from_environment,
+        ),
+        name="agent-learning",
     ),
     *create_crawler_routes(),
 ]

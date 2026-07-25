@@ -455,6 +455,10 @@ class OrderSide(str, Enum):
     CONVERT = "convert"
     RECURRING_INVEST = "recurring_invest"
 
+    @property
+    def is_buy_direction(self) -> bool:
+        return self is OrderSide.BUY or self is OrderSide.COVER
+
 
 class OrderType(str, Enum):
     MARKET = "market"
@@ -1313,6 +1317,7 @@ class Notification(FrozenModel):
     severity: NotificationSeverity
     title: str = Field(min_length=1, max_length=200)
     message: str = Field(min_length=1, max_length=1000)
+    details: dict[str, str] = Field(default_factory=dict)
     source_object_type: str = Field(min_length=1, max_length=80)
     source_object_id: str = Field(min_length=1, max_length=160)
     source_version: str = Field(min_length=1, max_length=80)

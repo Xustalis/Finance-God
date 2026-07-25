@@ -51,6 +51,7 @@ describe('market quote normalization', () => {
       frequency: '1m',
       freshness: 'stale',
       market_status: 'released',
+      session_alignment: 'latest_released_session',
     })
     expect(quote.last).toBe(11.1)
     expect(quote.open).toBe(11)
@@ -62,6 +63,7 @@ describe('market quote normalization', () => {
     expect(quote.change).toBeNull()
     expect(quote.change_percent).toBe(1.25)
     expect(quote.freshness).toBe('stale')
+    expect(quote.session_alignment).toBe('latest_released_session')
   })
 })
 

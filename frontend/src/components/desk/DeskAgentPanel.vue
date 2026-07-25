@@ -150,6 +150,15 @@ function workflowStatus(status: string) {
   }[status] ?? status
 }
 
+function workflowReceiptTitle(status: string) {
+  if (status === 'queued') return '正式任务已受理'
+  if (status === 'running') return '正式任务已开始执行'
+  if (status === 'completed') return '正式任务已完成'
+  if (status === 'cancel_requested' || status === 'cancelling') return '正式任务正在取消'
+  if (status === 'cancelled') return '正式任务已取消'
+  return '正式任务已终止'
+}
+
 function workflowError(error: string) {
   return {
     deterministic_quality_gate_failed: '确定性输入校验未通过，请检查失败节点后重试。',
@@ -372,11 +381,12 @@ watch(prompt, (value) => {
             <template v-else-if="message.kind === 'workflow'">
               <details
                 class="workflow-message-detail"
+                :open="['queued', 'running', 'cancel_requested', 'cancelling'].includes(message.status)"
                 @toggle="refreshExpandedWorkflow($event, message.runId)"
               >
                 <summary class="agent-task-heading workflow-message-receipt">
                   <div>
-                    <span>正式任务已创建</span>
+                    <span>{{ workflowReceiptTitle(message.status) }}</span>
                     <small>{{ message.intent }}</small>
                   </div>
                   <div class="workflow-message-actions">
@@ -514,8 +524,8 @@ watch(prompt, (value) => {
               </details>
             </section>
 
-            <section v-else-if="message.kind === 'order_draft'" class="agent-order-bubble" aria-label="仿真订单草稿气泡">
-              <header><h3>仿真订单草稿</h3><strong>{{ message.draft.draft.status }}</strong></header>
+            <section v-else-if="message.kind === 'order_draft'" class="agent-order-bubble" aria-label="模拟订单草稿气泡">
+              <header><h3>模拟订单草稿</h3><strong>{{ message.draft.draft.status }}</strong></header>
               <dl>
                 <div><dt>标的</dt><dd>{{ message.draft.draft.instrument_id }}</dd></div>
                 <div><dt>方向</dt><dd>{{ message.draft.draft.side }}</dd></div>
@@ -526,8 +536,8 @@ watch(prompt, (value) => {
               <button class="refresh-button" type="button" @click="desk.setSection('trading')">前往复核</button>
             </section>
 
-            <section v-else-if="message.kind === 'order_receipt'" class="agent-order-bubble" aria-label="仿真订单回执气泡">
-              <header><h3>仿真订单回执</h3><strong>{{ message.order.status }}</strong></header>
+            <section v-else-if="message.kind === 'order_receipt'" class="agent-order-bubble" aria-label="模拟订单回执气泡">
+              <header><h3>模拟订单回执</h3><strong>{{ message.order.status }}</strong></header>
               <dl>
                 <div><dt>订单号</dt><dd>{{ message.order.order_id }}</dd></div>
                 <div><dt>标的</dt><dd>{{ message.order.instrument_id }}</dd></div>
