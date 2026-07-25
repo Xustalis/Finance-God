@@ -1,20 +1,288 @@
-name: Fast Deploy
+name: CI/CD
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the validated main branch to production
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
 
 concurrency:
-  group: finance-god-production
-  cancel-in-progress: true
+  group: finance-god-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  boundary:
+    name: Deployment boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate deployment scripts and contracts
+        run: |
+          bash -n deploy/check-production-config.sh
+          bash -n deploy/deploy-now.sh
+          bash -n deploy/remote-deploy.sh
+          bash deploy/tests/test-production-config.sh
+          python3 deploy/tests/test-verify-public-api.py
+          docker run --rm \
+            --add-host backend:127.0.0.1 \
+            -v "$PWD/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t
+
+      - name: Validate production Compose configuration
+        env:
+          FINANCE_GOD_ENV_FILE: production.env.example
+          POSTGRES_PASSWORD: ci-postgres-password
+          PANDA_DATA_USERNAME: ci-contract-test
+          PANDA_DATA_PASSWORD: ci-contract-test
+        run: >-
+          docker compose
+          --env-file deploy/production.env.example
+          -f deploy/docker-compose.prod.yml
+          config --quiet
+
+      - name: Build backend and frontend production images
+        env:
+          FINANCE_GOD_ENV_FILE: production.env.example
+          POSTGRES_PASSWORD: ci-postgres-password
+          PANDA_DATA_USERNAME: ci-contract-test
+          PANDA_DATA_PASSWORD: ci-contract-test
+        run: >-
+          docker compose
+          --env-file deploy/production.env.example
+          -f deploy/docker-compose.prod.yml
+          build backend frontend
+
+  backend-quality:
+    name: Backend quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+
+      - name: Lint and compile backend
+        working-directory: backend
+        run: |
+          ruff check app finance_god scripts tests
+          python -m compileall -q app finance_god scripts
+
+      - name: Render migration SQL
+        working-directory: backend
+        run: alembic upgrade head --sql >/tmp/finance-god-migrations.sql
+
+  backend-tests:
+    name: Backend tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            paths: tests/unit tests/domain tests/application tests/agents tests/learning tests/orchestration
+          - name: api
+            paths: tests/api tests/crawler tests/integration tests/e2e
+          - name: trading
+            paths: tests/execution tests/ledger tests/market_data tests/trading tests/trade_reviews
+          - name: workflow
+            paths: tests/workflows tests/workflow_persistence tests/workspace tests/test_multi_agent.py tests/test_workflows.py
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+
+      - name: Run test shard with a hard timeout
+        working-directory: backend
+        env:
+          PANDA_DATA_USERNAME: ci-contract-test
+          PANDA_DATA_PASSWORD: ci-contract-test
+        run: timeout --kill-after=5s 60s pytest -q ${{ matrix.paths }}
+
+  migrations:
+    name: PostgreSQL 16 migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: finance_god
+          POSTGRES_PASSWORD: finance-god-ci
+          POSTGRES_DB: finance_god_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finance_god -d finance_god_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend in the migration test environment
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Run PostgreSQL migration and repository contracts
+        working-directory: backend
+        env:
+          FINANCE_GOD_POSTGRES_TEST_URL: postgresql://finance_god:finance-god-ci@127.0.0.1:5432/finance_god_test
+          FINANCE_GOD_TEST_POSTGRES_URL: postgresql+asyncpg://finance_god:finance-god-ci@127.0.0.1:5432/finance_god_test
+        run: >-
+          timeout --kill-after=5s 60s .venv/bin/pytest -q
+          tests/integration/test_postgres_migrations.py
+          tests/ledger/test_migration.py
+          tests/ledger/test_postgres_contract.py
+          tests/workflow_persistence/test_postgres_contract.py
+
+  frontend:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Lint frontend without warnings
+        working-directory: frontend
+        run: npm run lint -- --max-warnings 0
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  quality-gate:
+    name: Quality gate
+    if: ${{ always() }}
+    needs:
+      - boundary
+      - backend-quality
+      - backend-tests
+      - migrations
+      - frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every quality job to succeed
+        env:
+          BOUNDARY_RESULT: ${{ needs.boundary.result }}
+          BACKEND_QUALITY_RESULT: ${{ needs['backend-quality'].result }}
+          BACKEND_TESTS_RESULT: ${{ needs['backend-tests'].result }}
+          MIGRATIONS_RESULT: ${{ needs.migrations.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+        run: |
+          failed=0
+          for result in \
+            "$BOUNDARY_RESULT" \
+            "$BACKEND_QUALITY_RESULT" \
+            "$BACKEND_TESTS_RESULT" \
+            "$MIGRATIONS_RESULT" \
+            "$FRONTEND_RESULT"
+          do
+            if [[ "$result" != "success" ]]; then
+              echo "Quality dependency finished with result: $result" >&2
+              failed=1
+            fi
+          done
+          exit "$failed"
+
   deploy:
+    name: Deploy production
+    needs: quality-gate
+    if: >-
+      needs['quality-gate'].result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy == true)
+      )
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v4
+
+      - name: Confirm release commit is still the main tip
+        run: |
+          git fetch --force --no-tags --depth=1 \
+            origin "refs/heads/main:refs/remotes/origin/main"
+          readonly MAIN_TIP="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$GITHUB_SHA" != "$MAIN_TIP" ]]; then
+            echo "Refusing to deploy stale commit $GITHUB_SHA; main is $MAIN_TIP" >&2
+            exit 1
+          fi
+
+      - name: Validate production deployment inputs
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          FINANCE_GOD_SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
+          FINANCE_GOD_SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}
+          FINANCE_GOD_SMOKE_SYMBOL: ${{ vars.PRODUCTION_SMOKE_SYMBOL }}
+          FINANCE_GOD_SMOKE_QUANTITY: ${{ vars.PRODUCTION_SMOKE_QUANTITY }}
+        run: |
+          : "${DEPLOY_SSH_KEY:?DEPLOY_SSH_KEY secret is required}"
+          : "${DEPLOY_HOST_KEY:?DEPLOY_HOST_KEY secret is required}"
+          : "${DEPLOY_HOST:?DEPLOY_HOST variable is required}"
+          : "${DEPLOY_USER:?DEPLOY_USER variable is required}"
+          : "${FINANCE_GOD_SMOKE_EMAIL:?PRODUCTION_SMOKE_EMAIL secret is required}"
+          : "${FINANCE_GOD_SMOKE_PASSWORD:?PRODUCTION_SMOKE_PASSWORD secret is required}"
+          : "${FINANCE_GOD_SMOKE_SYMBOL:?PRODUCTION_SMOKE_SYMBOL variable is required}"
+          : "${FINANCE_GOD_SMOKE_QUANTITY:?PRODUCTION_SMOKE_QUANTITY variable is required}"
 
       - name: Configure SSH
         env:
@@ -47,10 +315,33 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/finance-god/"
 
-      - name: Deploy and verify
+      - name: Deploy and verify containers
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
         run: |
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
             "chmod +x /opt/finance-god/deploy/remote-deploy.sh && /opt/finance-god/deploy/remote-deploy.sh"
+
+      - name: Verify public health and readiness
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          readonly BASE_URL="http://$DEPLOY_HOST"
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 \
+            "$BASE_URL/healthz" >/dev/null
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 \
+            "$BASE_URL/api/ready" >/dev/null
+
+      - name: Verify public API contracts
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          FINANCE_GOD_SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
+          FINANCE_GOD_SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}
+          FINANCE_GOD_SMOKE_SYMBOL: ${{ vars.PRODUCTION_SMOKE_SYMBOL }}
+          FINANCE_GOD_SMOKE_QUANTITY: ${{ vars.PRODUCTION_SMOKE_QUANTITY }}
+          FINANCE_GOD_SMOKE_IDEMPOTENCY_KEY: production-smoke-${{ github.sha }}
+        run: >-
+          python3 deploy/verify-public-api.py
+          "http://$DEPLOY_HOST"
+          --authenticated-smoke

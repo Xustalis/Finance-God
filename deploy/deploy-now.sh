@@ -22,8 +22,10 @@ git push "$DEPLOY_REMOTE" "HEAD:${DEPLOY_BRANCH}"
 run_id=""
 for _ in {1..30}; do
   run_id="$(gh run list \
-    --workflow "Fast Deploy" \
+    --workflow "deploy.yml" \
     --commit "$COMMIT_SHA" \
+    --branch "$DEPLOY_BRANCH" \
+    --event push \
     --limit 1 \
     --json databaseId \
     --jq '.[0].databaseId // empty')"
@@ -32,11 +34,11 @@ for _ in {1..30}; do
 done
 
 if [[ -z "$run_id" ]]; then
-  echo "未找到提交 ${COMMIT_SHA} 对应的快速部署任务。" >&2
+  echo "未找到提交 ${COMMIT_SHA} 对应的 CI/CD 任务。" >&2
   exit 1
 fi
 
-echo "等待快速部署任务 ${run_id}"
+echo "等待 CI/CD 任务 ${run_id}"
 watch_succeeded=false
 for _ in {1..3}; do
   if gh run watch "$run_id" --exit-status; then
@@ -46,8 +48,8 @@ for _ in {1..3}; do
   sleep 2
 done
 if [[ "$watch_succeeded" != true ]]; then
-  echo "快速部署任务 ${run_id} 未成功完成。" >&2
+  echo "CI/CD 任务 ${run_id} 未成功完成。" >&2
   exit 1
 fi
 
-echo "快速部署完成：${COMMIT_SHA}"
+echo "CI/CD 与生产部署完成：${COMMIT_SHA}"
