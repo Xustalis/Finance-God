@@ -28,6 +28,12 @@ sudo docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build
 sudo docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up \
   -d \
   --force-recreate \
+  --no-deps \
+  backend \
+  frontend \
+  learning
+sudo docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up \
+  -d \
   --remove-orphans \
   --wait \
   --wait-timeout "$COMPOSE_WAIT_TIMEOUT_SECONDS"
