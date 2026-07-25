@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import settings
 from app.core.security import create_access_token, hash_password
 from app.models.user import User
 
@@ -30,6 +31,45 @@ def test_register_login_and_me_expose_role(client: TestClient) -> None:
     assert me.status_code == 200
     assert me.json()["data"]["email"] == "reader@example.com"
     assert me.json()["data"]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_dev_login_issues_normal_token_for_configured_test_user(
+    client: TestClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "app_env", "development")
+    monkeypatch.setattr(settings, "dev_test_user_email", "local-test@example.com")
+    async with session_factory() as session:
+        session.add(
+            User(
+                email="local-test@example.com",
+                hashed_password=hash_password("unused-development-password"),
+                role="user",
+                status="active",
+            )
+        )
+        await session.commit()
+
+    response = client.post("/api/v1/auth/dev-login")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["access_token"]
+    assert data["user"]["email"] == "local-test@example.com"
+    assert data["user"]["role"] == "user"
+
+
+def test_dev_login_is_hidden_outside_development(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
+
+    response = client.post("/api/v1/auth/dev-login")
+
+    assert response.status_code == 404
 
 
 def test_me_rejects_token_for_missing_user(client: TestClient) -> None:

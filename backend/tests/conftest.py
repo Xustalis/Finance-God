@@ -21,6 +21,9 @@ def _neutralize_ark_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     # 常驻行情轮询器依赖真实上游与数据库，测试默认关闭以保持确定性；
     # 轮询器逻辑由 tests/market 下的定向用例直接覆盖。
     monkeypatch.setattr(settings, "market_poll_enabled", False, raising=False)
+    # Workflow Worker 会领取 queued 并执行 DAG；测试默认关闭，避免与定向
+    # 工作流用例竞态。Worker 逻辑由 tests/workflows/test_workflow_worker 覆盖。
+    monkeypatch.setattr(settings, "workflow_worker_enabled", False, raising=False)
 
 
 @pytest_asyncio.fixture

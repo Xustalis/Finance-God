@@ -2,9 +2,11 @@
 
 import uuid
 from contextlib import asynccontextmanager
+from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from server import finance_app
 from server import lifespan as finance_lifespan
 
@@ -37,6 +39,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 # 注册异常处理器
 register_exception_handlers(app)
@@ -44,10 +47,14 @@ register_exception_handlers(app)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
-    """为每个请求添加 request_id"""
+    """Attach stable request correlation and server processing time."""
+    started_at = perf_counter()
     request.state.request_id = str(uuid.uuid4())
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
+    response.headers["Server-Timing"] = (
+        f"app;dur={(perf_counter() - started_at) * 1000:.2f}"
+    )
     return response
 
 

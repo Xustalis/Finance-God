@@ -79,6 +79,7 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
     (
         InstrumentId(
             symbol="000001.SZ",
+            name="平安银行",
             provider_symbol="000001.SZ",
             market=MarketType.CN,
             asset_class=AssetClass.EQUITY,
@@ -87,6 +88,7 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
         ),
         InstrumentId(
             symbol="600519.SH",
+            name="贵州茅台",
             provider_symbol="600519.SH",
             market=MarketType.CN,
             asset_class=AssetClass.EQUITY,
@@ -95,6 +97,7 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
         ),
         InstrumentId(
             symbol="000002.SZ",
+            name="万科A",
             provider_symbol="000002.SZ",
             market=MarketType.CN,
             asset_class=AssetClass.EQUITY,
@@ -103,6 +106,7 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
         ),
         InstrumentId(
             symbol="000858.SZ",
+            name="五粮液",
             provider_symbol="000858.SZ",
             market=MarketType.CN,
             asset_class=AssetClass.EQUITY,
@@ -111,6 +115,7 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
         ),
         InstrumentId(
             symbol="002594.SZ",
+            name="比亚迪",
             provider_symbol="002594.SZ",
             market=MarketType.CN,
             asset_class=AssetClass.EQUITY,
@@ -119,6 +124,7 @@ DEFAULT_INSTRUMENT_MASTER = InstrumentMaster(
         ),
         InstrumentId(
             symbol="300750.SZ",
+            name="宁德时代",
             provider_symbol="300750.SZ",
             market=MarketType.CN,
             asset_class=AssetClass.EQUITY,

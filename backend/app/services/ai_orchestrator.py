@@ -456,6 +456,7 @@ class OpenAICompatibleStructuredChat(AIOrchestrator):
         system_prompt: str,
         error_prefix: str,
         generation_options: dict[str, Any] | None = None,
+        invalid_response_retries: int = 0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.api_key = api_key
@@ -464,6 +465,7 @@ class OpenAICompatibleStructuredChat(AIOrchestrator):
         self.system_prompt = system_prompt
         self.error_prefix = error_prefix
         self.generation_options = dict(generation_options or {})
+        self.invalid_response_retries = invalid_response_retries
         self.transport = transport
 
     async def respond(
@@ -542,47 +544,69 @@ class OpenAICompatibleStructuredChat(AIOrchestrator):
             **self.generation_options,
         }
         timeout = httpx.Timeout(settings.ai_request_timeout_seconds, connect=5.0)
-        try:
-            async with httpx.AsyncClient(
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                timeout=timeout,
-                transport=self.transport,
-            ) as client:
-                # 使用绝对 URL，避免 base_url 携带路径（如 ARK 的 /api/v3）被 httpx join 丢弃
-                response = await client.post(f"{self.base_url}/chat/completions", json=body)
-        except httpx.TimeoutException as exc:
-            raise AIProviderError(
-                f"{self.error_prefix}_TIMEOUT", "AI 服务响应超时，请稍后重试"
-            ) from exc
-        except httpx.RequestError as exc:
-            raise AIProviderError(
-                f"{self.error_prefix}_UNAVAILABLE", "AI 服务暂时无法连接，请稍后重试"
-            ) from exc
+        async with httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=timeout,
+            transport=self.transport,
+        ) as client:
+            for attempt in range(self.invalid_response_retries + 1):
+                request_body = body
+                if attempt:
+                    request_body = {
+                        **body,
+                        "messages": [
+                            *body["messages"],
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The previous response contained no valid JSON object. "
+                                    "Retry once and return only the required JSON object."
+                                ),
+                            },
+                        ],
+                    }
+                try:
+                    # 使用绝对 URL，避免 base_url 携带路径（如 ARK 的 /api/v3）被 httpx join 丢弃
+                    response = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        json=request_body,
+                    )
+                except httpx.TimeoutException as exc:
+                    raise AIProviderError(
+                        f"{self.error_prefix}_TIMEOUT", "AI 服务响应超时，请稍后重试"
+                    ) from exc
+                except httpx.RequestError as exc:
+                    raise AIProviderError(
+                        f"{self.error_prefix}_UNAVAILABLE", "AI 服务暂时无法连接，请稍后重试"
+                    ) from exc
 
-        if response.status_code in {401, 403}:
-            raise AIProviderError(f"{self.error_prefix}_AUTH_FAILED", "AI 服务凭据无效")
-        if response.status_code == 429:
-            raise AIProviderError(
-                f"{self.error_prefix}_RATE_LIMITED", "AI 服务请求过于频繁，请稍后重试"
-            )
-        if response.status_code >= 500:
-            raise AIProviderError(
-                f"{self.error_prefix}_UPSTREAM_ERROR", "AI 服务暂时不可用，请稍后重试"
-            )
-        if response.is_error:
-            raise AIProviderError(
-                f"{self.error_prefix}_REQUEST_REJECTED", "AI 服务拒绝了当前请求，请稍后重试"
-            )
+                if response.status_code in {401, 403}:
+                    raise AIProviderError(f"{self.error_prefix}_AUTH_FAILED", "AI 服务凭据无效")
+                if response.status_code == 429:
+                    raise AIProviderError(
+                        f"{self.error_prefix}_RATE_LIMITED", "AI 服务请求过于频繁，请稍后重试"
+                    )
+                if response.status_code >= 500:
+                    raise AIProviderError(
+                        f"{self.error_prefix}_UPSTREAM_ERROR", "AI 服务暂时不可用，请稍后重试"
+                    )
+                if response.is_error:
+                    raise AIProviderError(
+                        f"{self.error_prefix}_REQUEST_REJECTED", "AI 服务拒绝了当前请求，请稍后重试"
+                    )
 
-        try:
-            envelope = response.json()
-            raw_content = envelope["choices"][0]["message"]["content"]
-            parsed = DeepSeekTurnPayload.model_validate(extract_json_object(raw_content))
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as exc:
-            raise AIProviderError(
-                f"{self.error_prefix}_INVALID_RESPONSE",
-                "AI 服务返回了无法解析的结构化结果，请稍后重试",
-            ) from exc
+                try:
+                    envelope = response.json()
+                    raw_content = envelope["choices"][0]["message"]["content"]
+                    parsed = DeepSeekTurnPayload.model_validate(extract_json_object(raw_content))
+                    break
+                except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as exc:
+                    if attempt < self.invalid_response_retries:
+                        continue
+                    raise AIProviderError(
+                        f"{self.error_prefix}_INVALID_RESPONSE",
+                        "AI 服务返回了无法解析的结构化结果，请稍后重试",
+                    ) from exc
 
         # 归一化维度：真实模型可能自造枚举外维度或偏离当前维度，
         # 本轮证据始终归属会话当前维度；非法的下一问题维度置空，由服务端兜底补问。
@@ -647,6 +671,7 @@ class StepFunOrchestrator(OpenAICompatibleStructuredChat):
                 "max_tokens": 2048,
                 "reasoning_effort": "low",
             },
+            invalid_response_retries=1,
             transport=transport,
         )
 
@@ -800,6 +825,35 @@ class AIAdapterRegistry:
                 objective_profile={"investment_experience": "none"},
             )
             return {"ok": bool(result.reply), "adapter": type(orchestrator).__name__}
+        if capability == "realtime":
+            from websockets.asyncio.client import connect
+
+            from app.ai_catalog import STEPFUN_REALTIME_MODEL, STEPFUN_REALTIME_URL
+
+            if (
+                provider != "stepfun"
+                or provider not in self.text_providers
+                or model_name != STEPFUN_REALTIME_MODEL
+            ):
+                raise LookupError("No configured realtime adapter for provider")
+            stepfun_provider = self.text_providers[provider]
+            if not isinstance(stepfun_provider, StepFunTextProvider):
+                raise LookupError("Invalid StepFun realtime adapter")
+            try:
+                async with connect(
+                    f"{STEPFUN_REALTIME_URL}?model={STEPFUN_REALTIME_MODEL}",
+                    additional_headers={"Authorization": f"Bearer {stepfun_provider.api_key}"},
+                    open_timeout=10,
+                    close_timeout=5,
+                    proxy=None,
+                ):
+                    pass
+            except Exception as exc:
+                raise AIProviderError(
+                    "STEPFUN_UNAVAILABLE",
+                    "StepFun realtime connection failed",
+                ) from exc
+            return {"ok": True, "adapter": "StepFunRealtimeWebSocketAdapter"}
         adapters = self.stt_adapters if capability == "stt" else self.tts_adapters
         if provider in adapters:
             return {"ok": True, "adapter": type(adapters[provider]).__name__}

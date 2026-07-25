@@ -3,6 +3,16 @@ import type { ProfileWithRecommendations } from '@/types/api'
 
 const client = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '/api', timeout: 30_000 })
 
+export class DeskApiError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly activeRunId?: string,
+  ) {
+    super(message)
+  }
+}
+
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('finance-god-token')
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -12,7 +22,7 @@ client.interceptors.request.use((config) => {
 export interface DeskQuote {
   symbol: string
   name: string
-  last: number
+  last: number | null
   change: number | null
   change_percent: number | null
   provider: string
@@ -22,15 +32,226 @@ export interface DeskQuote {
   market_status: string
 }
 
+/** PandaData 常以字符串返回价格；统一成有限数字或 null。 */
+export function parseMarketNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = typeof value === 'number' ? value : Number(String(value).trim())
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+export function normalizeDeskQuote(raw: Record<string, unknown>): DeskQuote {
+  return {
+    symbol: String(raw.symbol ?? ''),
+    name: String(raw.name ?? raw.symbol ?? ''),
+    last: parseMarketNumber(raw.last),
+    change: parseMarketNumber(raw.change),
+    change_percent: parseMarketNumber(raw.change_percent),
+    provider: String(raw.provider ?? 'PandaData'),
+    provider_time: String(raw.provider_time ?? ''),
+    frequency: String(raw.frequency ?? ''),
+    freshness: String(raw.freshness ?? 'unknown'),
+    market_status: String(raw.market_status ?? 'unknown'),
+  }
+}
+
+/**
+ * 仿真草稿引用价门禁：与后端对齐——
+ * 交易中或已发布收盘（released）且有有效最新价即可；
+ * 允许 stale（收盘后缓存），拒绝无价或明确不可用。
+ */
+export function canUseQuoteAsDraftReference(quote: Pick<DeskQuote, 'last' | 'freshness' | 'market_status'>): boolean {
+  if (quote.last === null || quote.last <= 0) return false
+  if (!['in_session', 'released'].includes(quote.market_status)) return false
+  if (['error', 'unavailable', 'missing'].includes(quote.freshness)) return false
+  return true
+}
+
+export function draftReferenceBlockedReason(quote: Pick<DeskQuote, 'last' | 'freshness' | 'market_status'> | null | undefined): string {
+  if (!quote) return '该标的没有可用的真实行情，无法创建引用价格明确的订单草稿。'
+  if (quote.last === null || quote.last <= 0) return '该标的没有可用的最新价，无法创建引用价格明确的订单草稿。'
+  if (!['in_session', 'released'].includes(quote.market_status)) {
+    return `该标的市场状态为 ${quote.market_status}，请等待交易中行情或已发布收盘价后再创建草稿。`
+  }
+  if (['error', 'unavailable', 'missing'].includes(quote.freshness)) {
+    return `该标的行情新鲜度为 ${quote.freshness}，服务端未提供可用引用价。`
+  }
+  return `该标的行情状态为 ${quote.freshness}/${quote.market_status}，暂不可创建草稿。`
+}
+
 export interface DeskWorkflowRun {
   run_id: string
-  status: 'queued' | 'running' | 'completed' | 'attention_required' | 'failed' | 'timed_out' | 'blocked' | 'cancelled'
+  status: 'queued' | 'running' | 'completed' | 'attention_required' | 'failed' | 'timed_out' | 'blocked'
+    | 'cancel_requested' | 'cancelling' | 'cancelled' | 'expired'
   workflow_key: string
   workflow_version: string
   revision: number
+  final_artifact?: VersionReference | null
+  completed_node_artifacts?: VersionReference[]
   created_at?: string
   updated_at?: string
   errors?: readonly unknown[]
+  request_intent?: string
+  scope?: Record<string, string>
+  requested_at?: string
+  parent_run_id?: string | null
+  retry_mode?: 'full' | 'resume_failed' | null
+  resumed_from_node_id?: string | null
+}
+
+export interface DeskWorkflowProgress {
+  run_id: string
+  workflow_key: string
+  workflow_version: string
+  status: DeskWorkflowRun['status']
+  revision: number
+  updated_at: string
+  total_node_count: number
+  completed_node_artifact_count: number
+  completed_node_artifacts: VersionReference[]
+  nodes?: Array<{
+    node_id: string
+    title: string
+    agent_ids: string[]
+    service_id: string | null
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'timed_out' | 'reused'
+    attempt: number | null
+    updated_at: string | null
+  }>
+  errors: string[]
+  is_terminal: boolean
+}
+
+export interface DeskAgentDecision {
+  decision_id: string
+  decision_source: 'agent_generated_policy_approved'
+  mode: 'answer' | 'workflow'
+  message: string
+  workflow_key: string | null
+  workflow_title: string | null
+  routing_reason: string
+  expected_stages: string[]
+  can_start: boolean
+  answer_text: string | null
+  ui_actions: DeskProposedUiAction[]
+}
+
+export interface DeskAgentPreview {
+  mode: 'answer' | 'workflow'
+  workflow_key: string | null
+  workflow_title: string | null
+  expected_roles: string[]
+  artifact_types: string[]
+  can_start: boolean
+}
+
+export interface DeskProposedUiAction {
+  action_id: string
+  parameters: Record<string, string>
+  context_version: string
+}
+
+export interface DeskDirectAnswer {
+  run_id: string
+  plan: {
+    assignments: Array<{ agent_id: string; reason: string }>
+  }
+  results: Array<{
+    agent_id: string
+    summary: string
+    claims: Array<{
+      kind: string
+      statement: string
+      evidence_ids: string[]
+      unknowns: string[]
+      invalidation_conditions: string[]
+    }>
+    proposed_actions: string[]
+  }>
+}
+
+export interface DeskEvidenceClaim {
+  kind: string
+  statement: string
+  author_agent_id: string | null
+  evidence_ids: string[]
+  unknowns: string[]
+  invalidation_conditions: string[]
+}
+
+export interface DeskEvidenceBundle {
+  object_type: string
+  object_id: string
+  version: string
+  subject: string
+  conclusion: string | null
+  provider: string
+  generated_at: string
+  facts: DeskEvidenceClaim[]
+  inferences: DeskEvidenceClaim[]
+  counterpoints: string[]
+  unknowns: string[]
+  invalidation_conditions: string[]
+  sources: Array<{ identifier: string; source: string; excerpt: string | null }>
+  agent_nodes: Array<{ agent_id: string; reason: string | null }>
+  notices: Array<{
+    agent_id: string
+    reason: string
+    missing_resources: string[]
+    missing_authorizations: string[]
+  }>
+}
+
+export type DeskSectionKey = 'information' | 'portfolio' | 'watchlist' | 'trading'
+
+export interface DeskUiActionDescriptor {
+  id: string
+  object: string
+  mutation: string
+  descriptor_version: string
+}
+
+export interface DeskProfileProjection {
+  version: number | null
+  archetype_code: string | null
+  archetype_title: string | null
+  risk_level: string | null
+  loss_tolerance_percent: number | null
+  confidence: number | null
+  completeness: number | null
+  education_only: boolean | null
+  selected_direction: string | null
+  recommended_directions: string[]
+  projection_version: string
+  available: boolean
+  degraded: boolean
+}
+
+export interface DeskBootstrap {
+  owner_id: string
+  section: DeskSectionKey
+  symbol: string
+  context_version: string
+  profile_projection: DeskProfileProjection
+  ui_action_catalog: DeskUiActionDescriptor[]
+  /** Live probe results only — missing/false means not proven available. */
+  capabilities: Record<string, boolean>
+  generated_at: string
+}
+
+export type QuickCommandStage = 'initial' | 'after_answer' | 'after_workflow'
+
+export interface QuickCommandResponse {
+  quick_commands: string[]
+  quick_commands_error: string | null
+  generated_at: string
+}
+
+/** Capability is usable only when the server explicitly reported True. */
+export function isDeskCapabilityEnabled(
+  capabilities: Record<string, boolean> | null | undefined,
+  key: string,
+): boolean {
+  return capabilities?.[key] === true
 }
 
 export interface DeskNotification {
@@ -297,6 +518,8 @@ export interface ResearchCandidateResponse {
   generated_at: string
   rule_version: string
   purpose_summary: string
+  profile_version: number | null
+  directions: string[]
   candidates: ResearchCandidate[]
   unavailable_reason: string | null
 }
@@ -327,19 +550,24 @@ export interface TradePlan {
   [key: string]: unknown
 }
 
-function errorText(error: unknown): string {
+function apiError(error: unknown): DeskApiError {
   if (axios.isAxiosError(error)) {
     const responseError = error.response?.data?.error
     const message = responseError?.message || error.response?.data?.detail
     const code = responseError?.code
-    if (typeof message === 'string' && typeof code === 'string') return `${code} · ${message}`
-    return typeof message === 'string' ? message : error.message
+    const activeRunId = responseError?.active_run_id
+    const text = typeof message === 'string' ? message : error.message
+    return new DeskApiError(
+      typeof code === 'string' ? `${code} · ${text}` : text,
+      typeof code === 'string' ? code : undefined,
+      typeof activeRunId === 'string' ? activeRunId : undefined,
+    )
   }
-  return error instanceof Error ? error.message : '请求失败'
+  return new DeskApiError(error instanceof Error ? error.message : '请求失败')
 }
 
 async function request<T>(call: () => Promise<{ data: T }>): Promise<T> {
-  try { return (await call()).data } catch (error) { throw new Error(errorText(error)) }
+  try { return (await call()).data } catch (error) { throw apiError(error) }
 }
 
 function idempotencyHeaders(idempotencyKey: IdempotencyKey): { 'Idempotency-Key': IdempotencyKey } {
@@ -347,8 +575,27 @@ function idempotencyHeaders(idempotencyKey: IdempotencyKey): { 'Idempotency-Key'
 }
 
 export async function fetchMarketOverview(symbols: readonly string[]): Promise<DeskQuote[]> {
-  const result = await request<{ data?: { quotes?: DeskQuote[] }; quotes?: DeskQuote[] }>(() => client.get('/market/overview', { params: { symbols: symbols.join(',') } }))
-  return result.data?.quotes ?? result.quotes ?? []
+  const result = await request<{ data?: { quotes?: Array<Record<string, unknown>> }; quotes?: Array<Record<string, unknown>> }>(
+    () => client.get('/market/overview', { params: { symbols: symbols.join(',') } }),
+  )
+  const raw = result.data?.quotes ?? result.quotes ?? []
+  return raw.map((item) => normalizeDeskQuote(item))
+}
+
+export function completedFinancialQuarterRange(now = new Date()): {
+  startQuarter: string
+  endQuarter: string
+} {
+  const currentYear = now.getUTCFullYear()
+  const currentQuarter = Math.floor(now.getUTCMonth() / 3) + 1
+  const endQuarterNumber = currentQuarter === 1 ? 4 : currentQuarter - 1
+  const endYear = currentQuarter === 1 ? currentYear - 1 : currentYear
+  const startQuarterNumber = endQuarterNumber === 1 ? 4 : endQuarterNumber - 1
+  const startYear = endQuarterNumber === 1 ? endYear - 1 : endYear
+  return {
+    startQuarter: `${startYear}q${startQuarterNumber}`,
+    endQuarter: `${endYear}q${endQuarterNumber}`,
+  }
 }
 
 export interface DeskBar {
@@ -372,8 +619,14 @@ export async function fetchBars(symbol: string, limit = 120, frequency?: string)
 }
 
 export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
+  const range = completedFinancialQuarterRange()
   return request(() => client.get('/market/information-facts', {
-    params: { symbol, limit: 10 },
+    params: {
+      symbol,
+      start_quarter: range.startQuarter,
+      end_quarter: range.endQuarter,
+      limit: 4,
+    },
   }))
 }
 
@@ -382,9 +635,36 @@ export function fetchSentimentFacts(symbol: string): Promise<DeskFactBatch> {
 }
 
 export async function fetchProfile(): Promise<ProfileWithRecommendations> {
-  const result = await request<{ success: boolean; data: ProfileWithRecommendations | null; error?: { message?: string } }>(() => client.get('/v1/profiles/me/latest'))
-  if (!result.success || !result.data) throw new Error(result.error?.message || '画像数据不可用')
-  return result.data
+  try {
+    const result = await request<{ success: boolean; data: ProfileWithRecommendations | null; error?: { message?: string; code?: string } }>(
+      () => client.get('/v1/profiles/me/latest'),
+    )
+    if (!result.success || !result.data) {
+      const code = result.error?.code
+      if (code === 'HTTP_404' || /not found/i.test(result.error?.message || '')) {
+        throw new Error('PROFILE_NOT_FOUND')
+      }
+      throw new Error(result.error?.message || '画像数据不可用')
+    }
+    return result.data
+  } catch (error) {
+    if (error instanceof Error && (error.message === 'PROFILE_NOT_FOUND' || /not found|404|Investment profile/i.test(error.message))) {
+      throw new Error('PROFILE_NOT_FOUND')
+    }
+    throw error
+  }
+}
+
+export async function fetchDeskBootstrap(input?: {
+  section?: DeskSectionKey
+  symbol?: string
+}): Promise<DeskBootstrap> {
+  return request(() => client.get('/desk/bootstrap', {
+    params: {
+      section: input?.section,
+      symbol: input?.symbol,
+    },
+  }))
 }
 
 export async function fetchNotifications(): Promise<DeskNotification[]> {
@@ -393,27 +673,297 @@ export async function fetchNotifications(): Promise<DeskNotification[]> {
   return result?.notifications ?? []
 }
 
+export async function fetchNotificationHistory(input?: {
+  limit?: number
+  includeRead?: boolean
+}): Promise<DeskNotification[]> {
+  const result = await request<DeskNotification[] | { notifications?: DeskNotification[] }>(() =>
+    client.get('/workspace/notifications/history', {
+      params: {
+        limit: input?.limit ?? 50,
+        include_read: input?.includeRead ?? true,
+      },
+    }),
+  )
+  if (Array.isArray(result)) return result
+  return result?.notifications ?? []
+}
+
 export async function markNotificationRead(notificationId: string): Promise<void> {
   await request(() => client.post(`/workspace/notifications/${encodeURIComponent(notificationId)}/read`))
 }
 
+export interface DeskUiActionReceipt {
+  receipt: 'applied' | 'rejected' | 'stale_context'
+  action_id: string
+  reason: string | null
+  owner_id: string
+  parameters: Record<string, string>
+  applied_at: string
+}
+
+export interface DeskUiActionCommand {
+  actionId: string
+  contextVersion: string
+  parameters?: Record<string, string>
+}
+
+export async function applyDeskUiAction(input: DeskUiActionCommand): Promise<DeskUiActionReceipt> {
+  return request(() =>
+    client.post('/desk/ui-actions', {
+      action_id: input.actionId,
+      context_version: input.contextVersion,
+      parameters: input.parameters ?? {},
+    }),
+  )
+}
+
+export async function decideDeskAgent(input: {
+  message: string
+  section: DeskSectionKey
+  symbol: string
+  contextVersion: string
+  activeWorkflow: boolean
+  orderDraft?: {
+    id: string
+    version: string
+  }
+}): Promise<DeskAgentDecision> {
+  return request(() => client.post('/agent/desk/decision', {
+    message: input.message,
+    section: input.section,
+    symbol: input.symbol,
+    context_version: input.contextVersion,
+    active_workflow: input.activeWorkflow,
+    ...(input.orderDraft
+      ? {
+          order_draft_id: input.orderDraft.id,
+          order_draft_version: input.orderDraft.version,
+        }
+      : {}),
+  }))
+}
+
+export async function previewDeskAgent(input: {
+  message: string
+  section: DeskSectionKey
+  symbol: string
+  contextVersion: string
+  activeWorkflow: boolean
+  orderDraft?: {
+    id: string
+    version: string
+  }
+}): Promise<DeskAgentPreview> {
+  return request(() => client.post('/agent/desk/preview', {
+    message: input.message,
+    section: input.section,
+    symbol: input.symbol,
+    context_version: input.contextVersion,
+    active_workflow: input.activeWorkflow,
+    ...(input.orderDraft
+      ? {
+          order_draft_id: input.orderDraft.id,
+          order_draft_version: input.orderDraft.version,
+        }
+      : {}),
+  }))
+}
+
+export async function streamDeskAgentDecision(
+  input: Parameters<typeof decideDeskAgent>[0],
+  onDelta: (delta: string) => void,
+): Promise<DeskAgentDecision> {
+  const token = localStorage.getItem('finance-god-token')
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+  const response = await fetch(`${baseUrl}/agent/desk/decision/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/x-ndjson, application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      message: input.message,
+      section: input.section,
+      symbol: input.symbol,
+      context_version: input.contextVersion,
+      active_workflow: input.activeWorkflow,
+      ...(input.orderDraft
+        ? {
+            order_draft_id: input.orderDraft.id,
+            order_draft_version: input.orderDraft.version,
+          }
+        : {}),
+    }),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null
+    throw new DeskApiError(
+      payload?.error?.message ?? `Agent 流式请求失败（HTTP ${response.status}）`,
+      payload?.error?.code,
+    )
+  }
+  if (response.headers.get('content-type')?.includes('application/json')) {
+    return await response.json() as DeskAgentDecision
+  }
+  if (!response.body) throw new DeskApiError('Agent 流式响应没有可读取的正文', 'AI_STREAM_EMPTY')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let decision: DeskAgentDecision | null = null
+  let answerText = ''
+
+  function consumeLine(line: string) {
+    if (!line.trim()) return
+    const event = JSON.parse(line) as {
+      type: 'start' | 'delta' | 'done' | 'error'
+      decision?: DeskAgentDecision
+      text?: string
+      answer_text?: string
+      message?: string
+      code?: string
+    }
+    if (event.type === 'start' && event.decision) decision = event.decision
+    if (event.type === 'delta' && event.text) {
+      answerText += event.text
+      onDelta(event.text)
+    }
+    if (event.type === 'done') answerText = event.answer_text ?? answerText
+    if (event.type === 'error') throw new DeskApiError(event.message ?? 'Agent 流式生成失败', event.code)
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value, { stream: !done })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    lines.forEach(consumeLine)
+    if (done) break
+  }
+  consumeLine(buffer)
+  if (!decision || !answerText.trim()) {
+    throw new DeskApiError('Agent 流式响应未正常结束', 'AI_STREAM_INCOMPLETE')
+  }
+  return { ...(decision as DeskAgentDecision), answer_text: answerText.trim() }
+}
+
+export function fetchDeskQuickCommands(input: {
+  stage: QuickCommandStage
+  section: DeskSectionKey
+  symbol: string
+  contextVersion: string
+  decisionId?: string
+  runId?: string
+}): Promise<QuickCommandResponse> {
+  return request(() => client.post('/desk/quick-commands', {
+    stage: input.stage,
+    section: input.section,
+    symbol: input.symbol,
+    context_version: input.contextVersion,
+    ...(input.decisionId ? { decision_id: input.decisionId } : {}),
+    ...(input.runId ? { run_id: input.runId } : {}),
+  }))
+}
+
+export async function runDeskDirectAnswer(message: string): Promise<DeskDirectAnswer> {
+  return request(() => client.post('/agent/research', {
+    subject: message,
+    task_type: 'research',
+    asset_kind: 'equity',
+    max_agents: 1,
+  }))
+}
+
 export async function createWorkflow(input: {
-  workflowKey: string
   intent: string
+  section: DeskSectionKey
   symbol: string
   contextVersion: string
   idempotencyKey: string
+  orderDraft?: {
+    id: string
+    version: string
+  }
 }): Promise<DeskWorkflowRun> {
-  return request(() => client.post('/workflows', {
-    workflow_key: input.workflowKey,
+  return request(() => client.post('/workflows/desk', {
     request_intent: input.intent,
+    section: input.section,
     symbol: input.symbol,
     context_version: input.contextVersion,
+    ...(input.orderDraft
+      ? {
+          order_draft_id: input.orderDraft.id,
+          order_draft_version: input.orderDraft.version,
+        }
+      : {}),
   }, { headers: { 'Idempotency-Key': input.idempotencyKey } }))
 }
 
 export async function fetchWorkflow(runId: string): Promise<DeskWorkflowRun> {
   return request(() => client.get(`/workflows/${encodeURIComponent(runId)}`))
+}
+
+export interface DeskWorkflowHistoryPage {
+  items: DeskWorkflowRun[]
+  next_cursor: string | null
+}
+
+export async function fetchWorkflowHistory(input?: {
+  cursor?: string | null
+  limit?: number
+  status?: DeskWorkflowRun['status'] | ''
+}): Promise<DeskWorkflowHistoryPage> {
+  return request(() => client.get('/workflows', {
+    params: {
+      limit: input?.limit ?? 20,
+      ...(input?.cursor ? { cursor: input.cursor } : {}),
+      ...(input?.status ? { status: input.status } : {}),
+    },
+  }))
+}
+
+export async function cancelWorkflow(runId: string, idempotencyKey: string): Promise<DeskWorkflowRun> {
+  return request(() => client.post(
+    `/workflows/${encodeURIComponent(runId)}/cancel`,
+    {},
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ))
+}
+
+export async function retryWorkflow(
+  runId: string,
+  mode: 'full' | 'resume_failed',
+  idempotencyKey: string,
+): Promise<DeskWorkflowRun> {
+  return request(() => client.post(
+    `/workflows/${encodeURIComponent(runId)}/retry`,
+    { mode },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ))
+}
+
+export async function fetchWorkflowProgress(
+  runId: string,
+  options?: { afterRevision?: number; waitSeconds?: number; signal?: AbortSignal },
+): Promise<DeskWorkflowProgress> {
+  return request(() => client.get(`/workflows/${encodeURIComponent(runId)}/progress`, {
+    params: options?.afterRevision === undefined
+      ? undefined
+      : {
+          after_revision: options.afterRevision,
+          wait_seconds: options.waitSeconds ?? 20,
+        },
+    signal: options?.signal,
+  }))
+}
+
+export async function fetchWorkflowEvidence(reference: VersionReference): Promise<DeskEvidenceBundle> {
+  return request(() => client.get(
+    `/evidence/${encodeURIComponent(reference.object_type)}/${encodeURIComponent(reference.object_id)}`,
+    { params: { version: reference.version, tier: 'advanced' } },
+  ))
 }
 
 export function fetchSimulationAccount(): Promise<SimulationAccount | null> {
@@ -476,7 +1026,18 @@ export function confirmSimulationDraft(draftId: string, expectedRevision: number
 }
 
 export function submitSimulationDraft(draftId: string, idempotencyKey: IdempotencyKey): Promise<SimulationOrder> {
-  return request(() => client.post(`/simulation/drafts/${encodeURIComponent(draftId)}/submit`, undefined, { headers: idempotencyHeaders(idempotencyKey) }))
+  return request(() => client.post(
+    `/simulation/drafts/${encodeURIComponent(draftId)}/submit`,
+    {},
+    { headers: idempotencyHeaders(idempotencyKey) },
+  ))
+}
+
+export function reconcileSimulationOrder(orderId: string): Promise<SimulationOrder> {
+  return request(() => client.post(
+    `/simulation/orders/${encodeURIComponent(orderId)}/reconcile`,
+    {},
+  ))
 }
 
 export function fetchWatchlistGroups(): Promise<WatchlistGroup[]> {

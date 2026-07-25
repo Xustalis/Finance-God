@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from types import TracebackType
 from typing import Self
 from uuid import uuid4
@@ -20,6 +21,7 @@ from .workflow_commands import (
     WorkflowCommandService,
     WorkflowCreateCommand,
     WorkflowCreationReceipt,
+    WorkflowExecutionAudit,
 )
 from .workflow_registry import FormalWorkflowRegistry, WorkflowDefinition
 
@@ -89,10 +91,156 @@ class WorkflowCommandRuntime:
             await uow.commit()
             return owner_id
 
+    async def get_record(self, run_id: str) -> dict[str, object] | None:
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            record = await uow.workflows.get_record(run_id)
+            await uow.commit()
+            return record
+
+    async def list_records(
+        self,
+        *,
+        owner_id: str,
+        limit: int,
+        cursor: str | None,
+        status: str | None,
+    ) -> tuple[tuple[dict[str, object], ...], str | None]:
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            records = await uow.workflows.list_records(
+                owner_id=owner_id,
+                limit=limit,
+                cursor=cursor,
+                status=status,
+            )
+            await uow.commit()
+            return records
+
+    async def cancel(
+        self,
+        run_id: str,
+        *,
+        actor_id: str,
+        cancelled_at: datetime,
+    ) -> WorkflowRun:
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            service = WorkflowCommandService(
+                registry=self._registry,
+                repository=uow.workflows,
+                run_ids=self._run_ids,
+            )
+            run = await service.cancel(
+                run_id,
+                actor_id=actor_id,
+                cancelled_at=cancelled_at,
+            )
+            await uow.commit()
+            return run
+
+    async def retry(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        mode: str,
+        requested_at: datetime,
+    ) -> WorkflowCreationReceipt:
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            service = WorkflowCommandService(
+                registry=self._registry,
+                repository=uow.workflows,
+                run_ids=self._run_ids,
+            )
+            receipt = await service.retry(
+                run_id,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                mode=mode,
+                requested_at=requested_at,
+            )
+            await uow.commit()
+            return receipt
+
+    async def list_execution_audits(
+        self,
+        run_id: str,
+    ) -> tuple[WorkflowExecutionAudit, ...]:
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            service = WorkflowCommandService(
+                registry=self._registry,
+                repository=uow.workflows,
+                run_ids=self._run_ids,
+            )
+            audits = await service.list_execution_audits(run_id)
+            await uow.commit()
+            return audits
+
+    async def claim(
+        self,
+        run_id: str,
+        *,
+        actor_id: str,
+        claimed_at: datetime,
+    ) -> WorkflowRun:
+        """Claim one queued run into running. Does not execute nodes."""
+
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            service = WorkflowCommandService(
+                registry=self._registry,
+                repository=uow.workflows,
+                run_ids=self._run_ids,
+            )
+            run = await service.claim(
+                run_id,
+                actor_id=actor_id,
+                claimed_at=claimed_at,
+            )
+            await uow.commit()
+            return run
+
+    async def claim_next(
+        self,
+        *,
+        actor_id: str,
+        claimed_at: datetime,
+    ) -> WorkflowRun | None:
+        """Claim the oldest queued run, if any. Worker-oriented."""
+
+        self._ensure_open()
+        async with WorkflowUnitOfWork(self._session_factory) as uow:
+            service = WorkflowCommandService(
+                registry=self._registry,
+                repository=uow.workflows,
+                run_ids=self._run_ids,
+            )
+            run = await service.claim_next(
+                actor_id=actor_id,
+                claimed_at=claimed_at,
+            )
+            await uow.commit()
+            return run
+
     def definition(self, workflow_key: str) -> WorkflowDefinition:
         """Return the registered definition used to calculate honest progress."""
         self._ensure_open()
         return self._registry.get(workflow_key)
+
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """Shared session factory for co-located workers (same engine/pool)."""
+        self._ensure_open()
+        return self._session_factory
+
+    @property
+    def registry(self) -> FormalWorkflowRegistry:
+        self._ensure_open()
+        return self._registry
 
     def data_quality_port(
         self,

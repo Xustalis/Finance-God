@@ -10,6 +10,7 @@ from typing import Mapping
 
 
 class WorkflowKey(str, Enum):
+    RESEARCH_CANDIDATES = "research_candidates"
     COMPANY_RESEARCH = "company_research"
     MARKET_CONTEXT = "market_context"
     PORTFOLIO_STRESS = "portfolio_stress"
@@ -379,7 +380,10 @@ class AgentGovernanceEntry:
             MappingProxyType(dict(self.workflow_matrix)),
         )
         if frozenset(self.workflow_matrix) != frozenset(WorkflowKey):
-            raise ValueError(f"{self.agent_id} must declare all 15 workflow decisions")
+            raise ValueError(
+                f"{self.agent_id} must declare all {len(WorkflowKey)} "
+                "workflow decisions"
+            )
         if self.timeout_seconds < 1:
             raise ValueError(f"{self.agent_id} timeout must be positive")
 

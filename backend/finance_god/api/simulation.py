@@ -29,6 +29,16 @@ from finance_god.execution import (
 )
 
 IDEMPOTENCY_HEADER = "idempotency-key"
+MarketReferenceProvider = Callable[
+    [str],
+    Awaitable[tuple[Decimal, VersionReference]],
+]
+
+
+class SimulationServiceUnavailable(RuntimeError):
+    """A required server-side simulation dependency is not available."""
+
+
 class APIModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -126,6 +136,7 @@ def create_simulation_routes(
     portfolio: PortfolioQueryService,
     decision_inbox: DecisionInboxService,
     owner_resolver: OwnerResolver,
+    market_reference_provider: MarketReferenceProvider | None = None,
 ) -> list[Route]:
     async def create_account(request: Request) -> JSONResponse:
         async def action() -> object:
@@ -171,6 +182,36 @@ def create_simulation_routes(
     async def create_draft(request: Request) -> JSONResponse:
         async def action() -> object:
             body = await _body(request, DraftCreateRequest)
+            if market_reference_provider is None:
+                raise SimulationServiceUnavailable(
+                    "trusted market reference provider is unavailable"
+                )
+            trusted_price, trusted_version = await market_reference_provider(
+                body.instrument_id
+            )
+            if (
+                body.reference_price is not None
+                and body.reference_price != trusted_price
+            ):
+                raise ValueError(
+                    "market reference changed; refresh the quote before creating a draft"
+                )
+            submitted_market_version = next(
+                (
+                    item
+                    for item in body.input_versions
+                    if item.object_type == trusted_version.object_type
+                    and item.object_id == trusted_version.object_id
+                ),
+                None,
+            )
+            if (
+                submitted_market_version is not None
+                and submitted_market_version != trusted_version
+            ):
+                raise ValueError(
+                    "market reference version changed; refresh before creating a draft"
+                )
             return await execution.create_order_draft(
                 owner_id=await _owner(owner_resolver, request),
                 mode=body.mode,
@@ -184,11 +225,11 @@ def create_simulation_routes(
                 time_in_force=body.time_in_force,
                 fund_rule_version=body.fund_rule_version,
                 valid_until=body.valid_until,
-                input_versions=body.input_versions,
+                input_versions=(trusted_version,),
                 plan_reference=body.plan_reference,
                 idempotency_key=_idempotency_key(request),
                 request_hash=_request_hash(body),
-                reference_price=body.reference_price,
+                reference_price=trusted_price,
             )
 
         return await _respond(action, success_status=201)
@@ -240,13 +281,18 @@ def create_simulation_routes(
     async def submit_draft(request: Request) -> JSONResponse:
         async def action() -> object:
             key = _idempotency_key(request)
-            return await execution.submit(
-                owner_id=await _owner(owner_resolver, request),
+            owner_id = await _owner(owner_resolver, request)
+            stored = await execution.submit(
+                owner_id=owner_id,
                 draft_id=request.path_params["draft_id"],
                 idempotency_key=key,
                 request_hash=_request_hash(
                     {"draft_id": request.path_params["draft_id"]}
                 ),
+            )
+            return await execution.get_order_view(
+                owner_id=owner_id,
+                order_id=stored.order_id,
             )
 
         return await _respond(action, success_status=201)
@@ -285,9 +331,13 @@ def create_simulation_routes(
     async def reconcile_order(request: Request) -> JSONResponse:
         async def action() -> object:
             owner_id = await _owner(owner_resolver, request)
-            return await execution.reconcile(
+            stored = await execution.reconcile(
                 owner_id=owner_id,
                 order_id=request.path_params["order_id"],
+            )
+            return await execution.get_order_view(
+                owner_id=owner_id,
+                order_id=stored.order_id,
             )
 
         return await _respond(action)
@@ -399,6 +449,8 @@ async def _respond(
         return _error("DOMAIN_INVARIANT_VIOLATION", str(error), 409)
     except (json.JSONDecodeError, ValueError) as error:
         return _error("INVALID_REQUEST", str(error), 400)
+    except SimulationServiceUnavailable as error:
+        return _error("SERVICE_UNAVAILABLE", str(error), 503)
 
 
 def _json_value(value: object) -> object:

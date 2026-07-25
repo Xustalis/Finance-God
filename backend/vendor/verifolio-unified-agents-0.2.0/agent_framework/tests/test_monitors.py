@@ -5,7 +5,13 @@ from datetime import datetime, timezone
 import pytest
 
 from research_runtime import AgentRequest, AgentRunner, AssetKind
-from research_runtime.models import DataArtifact, DataQuery, PandaDataDataset
+from research_runtime.models import (
+    DataArtifact,
+    DataQuery,
+    PandaDataDataset,
+    PandaMonitorRequest,
+)
+from research_runtime.monitors import build_monitor_queries
 
 
 class FakeProvider:
@@ -148,6 +154,25 @@ def test_every_monitor_agent_runs_through_the_same_runner(
 
     assert result.agent_id == agent_id
     assert result.metadata["snapshot"]["state"] == expected_state
+
+
+def test_historical_volatility_uses_the_full_monitor_window() -> None:
+    queries = build_monitor_queries(
+        PandaMonitorRequest(
+            kind="market_regime",
+            subject="Weekend-ending market regime",
+            symbol="000001.SZ",
+            option_underlying="510300.SH",
+            start_date="20260326",
+            end_date="20260425",
+        )
+    )
+
+    historical_volatility = next(
+        query for query in queries if query.identifier == "underlying-hv"
+    )
+    assert historical_volatility.start_date == "20260326"
+    assert historical_volatility.end_date == "20260425"
 
 
 def test_monitor_rejects_payload_for_a_different_agent_kind() -> None:

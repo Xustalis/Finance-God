@@ -139,7 +139,7 @@ async def _background_refresh_failure_is_visible_and_old_value_is_stale() -> Non
     state = await coordinator.cache_state(instrument.symbol)
 
     assert first.items[0].freshness.status.value == "current"
-    assert pending.items[0].freshness.status.value == "stale"
+    assert pending.items[0].freshness.status.value == "current"
     assert failed.items[0].freshness.status.value == "stale"
     assert failed.diagnostics[0].code.value == "refresh_failed"
     assert state is not None

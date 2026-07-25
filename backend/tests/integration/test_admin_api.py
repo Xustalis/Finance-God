@@ -144,7 +144,7 @@ async def test_admin_settings_require_admin_and_redact_keys(
 
     initial = client.get("/api/v1/admin/ai-settings", headers=headers(admin_token))
     assert initial.status_code == 200
-    assert {item["capability"] for item in initial.json()["data"]} == {"text", "stt", "tts"}
+    assert {item["capability"] for item in initial.json()["data"]} == {"text", "stt", "tts", "realtime"}
     text_setting = next(item for item in initial.json()["data"] if item["capability"] == "text")
     assert text_setting["base_url"] == "https://api.deepseek.com"
 

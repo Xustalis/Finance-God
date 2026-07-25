@@ -110,7 +110,7 @@ def _option_hv_query(request: PandaMonitorRequest) -> list[DataQuery]:
             identifier="underlying-hv",
             dataset=PandaDataDataset.OPTION_UNDERLYING_VOLATILITY,
             symbols=[request.option_underlying or ""],
-            start_date=request.end_date,
+            start_date=request.start_date,
             end_date=request.end_date,
             volatility_period=request.volatility_period,
         )

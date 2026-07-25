@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from time import monotonic
 from typing import Protocol
@@ -32,6 +33,8 @@ from .workflow_results import (
     OrderRiskCheckNodeResult,
     SimulationFactNodeResult,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class Clock(Protocol):
@@ -142,7 +145,9 @@ class WorkflowExecutor:
         *,
         run_id: str,
         plan: TaskPlan,
+        reused_outcomes: tuple[NodeExecutionOutcome, ...] = (),
     ) -> WorkflowExecutionReport:
+        execution_started = monotonic()
         run = await self._require_run(run_id)
         owner_id = await self._repository.get_owner_id(run_id)
         if owner_id is None:
@@ -169,7 +174,7 @@ class WorkflowExecutor:
         if run.status is not WorkflowRunStatus.RUNNING:
             raise ValueError(f"workflow run is not executable: {run.status.value}")
 
-        outcomes: list[NodeExecutionOutcome] = []
+        outcomes: list[NodeExecutionOutcome] = list(reused_outcomes)
         failures: list[NodeFailureRecord] = []
         routing = [plan.route_reason]
         pending_actions: set[str] = set()
@@ -195,13 +200,20 @@ class WorkflowExecutor:
                 )
             else:
                 run = current
-        return WorkflowExecutionReport(
+        report = WorkflowExecutionReport(
             run=run,
             outcomes=tuple(outcomes),
             failures=tuple(failures),
             routing=tuple(routing),
             pending_actions=tuple(sorted(pending_actions)),
         )
+        _LOGGER.info(
+            "workflow execution finished run=%s status=%s elapsed_ms=%d",
+            run_id,
+            report.run.status.value,
+            round((monotonic() - execution_started) * 1_000),
+        )
+        return report
 
     async def _execute_dag(
         self,
@@ -213,10 +225,19 @@ class WorkflowExecutor:
         pending_actions: set[str],
     ) -> WorkflowRun:
         definition = self._registry.get(plan.workflow_key)
-        pending = {node.node_id: node for node in plan.nodes}
-        terminal: set[str] = set()
+        reused_ids = {outcome.node_id for outcome in outcomes}
+        pending = {
+            node.node_id: node for node in plan.nodes if node.node_id not in reused_ids
+        }
+        terminal: set[str] = set(reused_ids)
         total_attempts = 0
-        passed_quality_gates = 0
+        passed_quality_gates = len(
+            [
+                node
+                for node in plan.nodes
+                if node.node_id in reused_ids and node.is_quality_gate
+            ]
+        )
         while pending:
             run = await self._apply_runtime_control(
                 run,
@@ -256,6 +277,7 @@ class WorkflowExecutor:
                 base_allocation + (1 if index < extra else 0)
                 for index in range(len(ready))
             )
+            phase_started = monotonic()
             results = await asyncio.gather(
                 *(
                     self._execute_node(
@@ -267,9 +289,12 @@ class WorkflowExecutor:
                     for node, allocation in zip(ready, allocations, strict=True)
                 )
             )
-            for result in results:
-                for audit in result.audits:
-                    await self._append_execution_audit(run.run_id, audit)
+            _LOGGER.info(
+                "workflow phase finished run=%s nodes=%s elapsed_ms=%d",
+                run.run_id,
+                ",".join(node.node_id for node in ready),
+                round((monotonic() - phase_started) * 1_000),
+            )
             for node, result in zip(ready, results, strict=True):
                 total_attempts += result.attempts
                 pending.pop(node.node_id)
@@ -409,6 +434,7 @@ class WorkflowExecutor:
                 },
                 )
             )
+            await self._append_execution_audit(run_id, audits[-1])
             try:
                 outcome = await asyncio.wait_for(
                     self._runner.run(node, context),
@@ -425,6 +451,7 @@ class WorkflowExecutor:
                     },
                     )
                 )
+                await self._append_execution_audit(run_id, audits[-1])
                 return self._timed_out(
                     node,
                     attempts,
@@ -444,6 +471,7 @@ class WorkflowExecutor:
                     },
                     )
                 )
+                await self._append_execution_audit(run_id, audits[-1])
                 if (
                     retry_counts[error.kind]
                     <= node.retry_budget.retry_limits[error.kind]
@@ -476,6 +504,7 @@ class WorkflowExecutor:
                     },
                     )
                 )
+                await self._append_execution_audit(run_id, audits[-1])
                 return _NodeResult(
                     outcome=None,
                     failure=NodeFailureRecord(
@@ -501,6 +530,7 @@ class WorkflowExecutor:
                         },
                     )
                 )
+                await self._append_execution_audit(run_id, audits[-1])
                 return _NodeResult(
                     outcome=None,
                     failure=NodeFailureRecord(
@@ -526,6 +556,7 @@ class WorkflowExecutor:
                 },
                 )
             )
+            await self._append_execution_audit(run_id, audits[-1])
             return _NodeResult(
                 outcome=outcome,
                 failure=None,
@@ -609,7 +640,10 @@ class WorkflowExecutor:
                 )
             if (
                 result.owner_id != context.owner_id
-                or result.order_reference not in context.input_versions
+                or (
+                    result.input_order_reference or result.order_reference
+                )
+                not in context.input_versions
                 or outcome.artifact_reference != result.risk_check_reference
                 or not result.risk_check.can_submit_at(self._clock.now())
             ):

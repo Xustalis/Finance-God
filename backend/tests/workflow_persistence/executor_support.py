@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -100,12 +101,9 @@ async def exercise_persisted_executor(
             route_reason="persistence executor contract",
         )
         if parallel_agent_layer:
-            plan = _parallelize_agent_layer(plan)
+            plan, parallel_node_ids = _parallelize_agent_layer(plan)
             runner.sleeps.update(
-                {
-                    "governed_agents_a": 0.02,
-                    "governed_agents_b": 0.02,
-                }
+                {node_id: 0.02 for node_id in parallel_node_ids}
             )
         executor = WorkflowExecutor(
             registry=registry,
@@ -121,12 +119,34 @@ async def exercise_persisted_executor(
     return report, runner, events, audits
 
 
-def _parallelize_agent_layer(plan: TaskPlan) -> TaskPlan:
+def _parallelize_agent_layer(plan: TaskPlan) -> tuple[TaskPlan, tuple[str, str]]:
     governed_index = next(
-        index
-        for index, node in enumerate(plan.nodes)
-        if node.node_id == "governed_agents"
+        (
+            index
+            for index, node in enumerate(plan.nodes)
+            if node.node_id == "governed_agents"
+        ),
+        None,
     )
+    if governed_index is None:
+        # The v2 registry already expands governed roles into parallel DAG phases.
+        dependency_groups: defaultdict[tuple[str, ...], list[str]] = defaultdict(
+            list
+        )
+        for node in plan.nodes:
+            if node.agent_ids and node.node_id != "planner":
+                dependency_groups[node.dependencies].append(node.node_id)
+        parallel_node_ids = next(
+            (
+                (node_ids[0], node_ids[1])
+                for node_ids in dependency_groups.values()
+                if len(node_ids) >= 2
+            ),
+            None,
+        )
+        if parallel_node_ids is None:
+            raise AssertionError("workflow plan has no parallel agent layer")
+        return plan, parallel_node_ids
     governed = plan.nodes[governed_index]
     midpoint = len(governed.agent_ids) // 2
     left = governed.model_copy(
@@ -149,7 +169,7 @@ def _parallelize_agent_layer(plan: TaskPlan) -> TaskPlan:
     nodes[finalizer_index] = nodes[finalizer_index].model_copy(
         update={"dependencies": (left.node_id, right.node_id)}
     )
-    return TaskPlan(
+    parallel_plan = TaskPlan(
         **{
             **plan.model_dump(),
             "nodes": tuple(nodes),
@@ -160,3 +180,4 @@ def _parallelize_agent_layer(plan: TaskPlan) -> TaskPlan:
             "dynamic": True,
         }
     )
+    return parallel_plan, (left.node_id, right.node_id)

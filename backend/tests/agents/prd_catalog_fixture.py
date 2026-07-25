@@ -1,6 +1,7 @@
 """Independent PRD 7 fixture; production catalog code must not import this module."""
 
 WORKFLOWS = (
+    "research_candidates",
     "company_research",
     "market_context",
     "portfolio_stress",
@@ -20,7 +21,7 @@ WORKFLOWS = (
 
 _A = dict(
     zip(
-        "CR MC PS SV RO DQ FR PC TP OR SE PR EI CM SM".split(),
+        "RC CR MC PS SV RO DQ FR PC TP OR SE PR EI CM SM".split(),
         WORKFLOWS,
         strict=True,
     )
@@ -185,8 +186,8 @@ PRD_AGENT_MATRIX = {
         "equity_fmp_workspace_available",
     ),
     "quantskills:agent-correlation-break-research": (
-        _keys("PS PC CM"),
-        _keys("FR SM"),
+        _keys("PC CM"),
+        _keys("PS FR SM"),
         "planner_selected",
     ),
     "quantskills:agent-crowding-risk-monitor": (

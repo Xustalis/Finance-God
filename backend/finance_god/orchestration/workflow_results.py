@@ -25,6 +25,7 @@ class OrderRiskCheckNodeResult(FrozenModel):
     result_kind: Literal["order_risk_check"] = "order_risk_check"
     owner_id: str = Field(min_length=1, max_length=160)
     order_reference: VersionReference
+    input_order_reference: VersionReference | None = None
     risk_check_reference: VersionReference
     risk_check: RiskCheckResult
 
@@ -32,6 +33,15 @@ class OrderRiskCheckNodeResult(FrozenModel):
     def validate_references(self) -> Self:
         if self.risk_check.order_version != self.order_reference:
             raise ValueError("risk check is not bound to the reviewed order version")
+        if (
+            self.input_order_reference is not None
+            and (
+                self.input_order_reference.object_type != "order_draft"
+                or self.input_order_reference.object_id
+                != self.order_reference.object_id
+            )
+        ):
+            raise ValueError("risk check input identifies another order draft")
         expected = VersionReference(
             object_type="RiskCheckResult",
             object_id=self.risk_check.risk_check_id,

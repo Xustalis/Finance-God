@@ -10,6 +10,7 @@ import { ApiClientError, errorMessageFromEnvelope, unwrapEnvelope } from '@/api/
 import { adminUpdatePayload } from '@/services/admin'
 import { bootstrapApplication } from '@/bootstrap'
 import { directionScore } from '@/services/profile'
+import { shouldAutoLoginLocalTestUser } from '@/services/localTestLogin'
 import { resolveWorkbenchOrigin } from '../../config/env'
 import { readFileSync } from 'node:fs'
 import type { ProfileWithRecommendations, Session } from '@/types/api'
@@ -23,6 +24,13 @@ const baseSession = (): Session => ({
 })
 
 describe('route permissions', () => {
+  it('auto logs into the desk only from a local hostname', () => {
+    expect(shouldAutoLoginLocalTestUser('127.0.0.1', '/desk')).toBe(true)
+    expect(shouldAutoLoginLocalTestUser('localhost', '/desk?preview=1')).toBe(true)
+    expect(shouldAutoLoginLocalTestUser('finance-god.example', '/desk')).toBe(false)
+    expect(shouldAutoLoginLocalTestUser('127.0.0.1', '/app/exe')).toBe(false)
+  })
+
   it('redirects unauthenticated users to login', async () => {
     const router = createAppRouter(createMemoryHistory())
     await router.push('/app/exe')
@@ -194,6 +202,6 @@ describe('application contract',()=>{
   it('provides the DOM mount target used by main',()=>{const html=readFileSync('index.html','utf8');expect(html).toContain('id="app"')})
   it('reads request ids from meta and error details',()=>{expect(errorMessageFromEnvelope({success:false,data:null,error:{code:'bad',message:'failed',details:{reason:'具体原因'}},meta:{request_id:'req-1'}})).toBe('failed：具体原因')})
   it('unwraps successful envelopes when request id is null',()=>{expect(unwrapEnvelope({success:true,data:{ok:true},error:null,meta:{request_id:null}})).toEqual({ok:true})})
-  it('hydrates an existing token before mounting and contains hydrate failures',async()=>{const order:string[]=[];await bootstrapApplication({hasToken:true,hydrate:async()=>{order.push('hydrate');throw new Error('expired')},mount:()=>order.push('mount')});expect(order).toEqual(['hydrate','mount'])})
+  it('mounts immediately, hydrates an existing token in the background, and contains hydrate failures',async()=>{const order:string[]=[];let release!:()=>void;const pending=new Promise<void>(resolve=>{release=resolve});const boot=bootstrapApplication({hasToken:true,hydrate:async()=>{order.push('hydrate');await pending;throw new Error('expired')},mount:()=>{order.push('mount')},afterHydrate:()=>{order.push('validated')}});expect(order).toEqual(['mount','hydrate']);release();await boot;expect(order).toEqual(['mount','hydrate','validated'])})
   it('resolves the workbench origin from either supported build variable',()=>{expect(resolveWorkbenchOrigin({VITE_WORKBENCH_ORIGIN:'https://vite.example',WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://vite.example');expect(resolveWorkbenchOrigin({WORKBENCH_ORIGIN:'https://alias.example'})).toBe('https://alias.example')})
 })

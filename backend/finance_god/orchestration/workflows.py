@@ -1,4 +1,4 @@
-"""Public workflow facade backed by the governed fifteen-workflow runtime.
+"""Public workflow facade backed by the governed product-workflow runtime.
 
 This module intentionally contains no workflow state model.  ``WorkflowRun`` and
 ``WorkflowRunStatus`` are re-exported from the domain package so callers cannot

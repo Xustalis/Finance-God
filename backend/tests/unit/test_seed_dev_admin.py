@@ -1,10 +1,10 @@
 import pytest
+from scripts.seed_dev_admin import seed_dev_admin
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.security import verify_password
 from app.models.user import User
-from scripts.seed_dev_admin import seed_dev_admin
 
 
 @pytest.mark.asyncio

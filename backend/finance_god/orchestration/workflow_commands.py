@@ -34,6 +34,9 @@ class WorkflowCreateCommand(FrozenModel):
     requested_at: AwareDatetime
     permissions: tuple[str, ...] = ()
     task_plan_reference: VersionReference | None = None
+    parent_run_id: str | None = Field(default=None, min_length=1, max_length=160)
+    retry_mode: str | None = Field(default=None, pattern=r"^(full|resume_failed)$")
+    resumed_from_node_id: str | None = Field(default=None, min_length=1, max_length=160)
 
     @field_validator("scope", mode="before")
     @classmethod
@@ -93,6 +96,12 @@ class WorkflowCreationReceipt(FrozenModel):
     request_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+class WorkflowExecutionAudit(FrozenModel):
+    event_type: str
+    payload: dict[str, object]
+    occurred_at: AwareDatetime
+
+
 class WorkflowRunRepository(Protocol):
     async def create_queued(
         self,
@@ -106,6 +115,9 @@ class WorkflowRunRepository(Protocol):
         requested_at: datetime,
         audit_payload: dict[str, object],
         outbox_payload: dict[str, object],
+        parent_run_id: str | None = None,
+        retry_mode: str | None = None,
+        resumed_from_node_id: str | None = None,
     ) -> tuple[WorkflowRun, bool]: ...
 
     async def get(self, run_id: str) -> WorkflowRun | None: ...
@@ -134,6 +146,23 @@ class WorkflowRunRepository(Protocol):
         correlation_id: str | None = None,
     ) -> None: ...
 
+    async def list_execution_audits(
+        self,
+        run_id: str,
+    ) -> tuple: ...
+
+    async def list_queued(
+        self,
+        *,
+        limit: int = 1,
+    ) -> tuple[tuple[str, str, str, str], ...]: ...
+
+    async def get_record(self, run_id: str) -> dict[str, object] | None: ...
+
+    async def list_records(
+        self, *, owner_id: str, limit: int, cursor: str | None, status: str | None
+    ) -> tuple[tuple[dict[str, object], ...], str | None]: ...
+
 
 class WorkflowCommandPort(Protocol):
     async def create(
@@ -144,6 +173,46 @@ class WorkflowCommandPort(Protocol):
     async def get(self, run_id: str) -> WorkflowRun | None: ...
 
     async def get_owner_id(self, run_id: str) -> str | None: ...
+
+    async def list_execution_audits(
+        self,
+        run_id: str,
+    ) -> tuple[WorkflowExecutionAudit, ...]: ...
+
+    async def claim(
+        self,
+        run_id: str,
+        *,
+        actor_id: str,
+        claimed_at: datetime,
+    ) -> WorkflowRun: ...
+
+    async def claim_next(
+        self,
+        *,
+        actor_id: str,
+        claimed_at: datetime,
+    ) -> WorkflowRun | None: ...
+
+    async def get_record(self, run_id: str) -> dict[str, object] | None: ...
+
+    async def list_records(
+        self, *, owner_id: str, limit: int, cursor: str | None, status: str | None
+    ) -> tuple[tuple[dict[str, object], ...], str | None]: ...
+
+    async def cancel(
+        self, run_id: str, *, actor_id: str, cancelled_at: datetime
+    ) -> WorkflowRun: ...
+
+    async def retry(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        mode: str,
+        requested_at: datetime,
+    ) -> WorkflowCreationReceipt: ...
 
 
 class RunIdFactory(Protocol):
@@ -218,6 +287,9 @@ class WorkflowCommandService:
                 "workflow_key": definition.workflow_key.value,
                 "status": WorkflowRunStatus.QUEUED.value,
             },
+            parent_run_id=command.parent_run_id,
+            retry_mode=command.retry_mode,
+            resumed_from_node_id=command.resumed_from_node_id,
         )
         return WorkflowCreationReceipt(
             run=persisted,
@@ -231,6 +303,182 @@ class WorkflowCommandService:
 
     async def get_owner_id(self, run_id: str) -> str | None:
         return await self._repository.get_owner_id(run_id)
+
+    async def get_record(self, run_id: str) -> dict[str, object] | None:
+        return await self._repository.get_record(run_id)
+
+    async def list_records(
+        self, *, owner_id: str, limit: int, cursor: str | None, status: str | None
+    ) -> tuple[tuple[dict[str, object], ...], str | None]:
+        return await self._repository.list_records(
+            owner_id=owner_id, limit=limit, cursor=cursor, status=status
+        )
+
+    async def cancel(
+        self, run_id: str, *, actor_id: str, cancelled_at: datetime
+    ) -> WorkflowRun:
+        run = await self._repository.get(run_id)
+        if run is None:
+            raise LookupError("workflow run was not found")
+        if run.status in {
+            WorkflowRunStatus.CANCEL_REQUESTED,
+            WorkflowRunStatus.CANCELLING,
+            WorkflowRunStatus.CANCELLED,
+        }:
+            return run
+        if run.status not in {WorkflowRunStatus.QUEUED, WorkflowRunStatus.RUNNING}:
+            raise ValueError(f"workflow run cannot be cancelled from {run.status.value}")
+        target = (
+            WorkflowRunStatus.CANCELLED
+            if run.status is WorkflowRunStatus.QUEUED
+            else WorkflowRunStatus.CANCEL_REQUESTED
+        )
+        from finance_god.domain.models import WorkflowCancellationReason
+        transitioned = run.transition(
+            target,
+            audit_reference=AuditReference(
+                audit_id=f"workflow:{run_id}:cancel:{run.revision + 1}",
+                actor_id=actor_id,
+                recorded_at=cancelled_at,
+            ),
+            cancellation_reason=WorkflowCancellationReason.USER_PAUSED,
+        )
+        return await self._repository.compare_and_append(
+            run=transitioned,
+            expected_revision=run.revision,
+            event_type="workflow_cancelled" if target is WorkflowRunStatus.CANCELLED else "workflow_cancel_requested",
+            event_payload={"run_id": run_id, "status": target.value},
+            outbox_topic=f"workflow.{target.value}",
+        )
+
+    async def retry(
+        self,
+        run_id: str,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        mode: str,
+        requested_at: datetime,
+    ) -> WorkflowCreationReceipt:
+        record = await self._repository.get_record(run_id)
+        run = await self._repository.get(run_id)
+        if record is None or run is None or record["owner_id"] != owner_id:
+            raise LookupError("workflow run was not found")
+        if mode not in {"full", "resume_failed"}:
+            raise ValueError("retry mode must be full or resume_failed")
+        if mode == "resume_failed" and run.status not in {
+            WorkflowRunStatus.FAILED,
+            WorkflowRunStatus.TIMED_OUT,
+            WorkflowRunStatus.ATTENTION_REQUIRED,
+        }:
+            raise ValueError("workflow run is not eligible to resume")
+        audits = await self._repository.list_execution_audits(run_id)
+        completed = {
+            str(row.payload_json.get("node_id"))
+            for row in audits
+            if row.event_type == "node_attempt_completed"
+        }
+        failed = next(
+            (
+                str(row.payload_json.get("node_id"))
+                for row in reversed(audits)
+                if row.event_type in {"node_attempt_failed", "node_attempt_timed_out"}
+            ),
+            None,
+        )
+        if mode == "resume_failed" and (not completed or not failed):
+            raise ValueError("completed node artifacts are insufficient to resume; use full retry")
+        if mode == "resume_failed":
+            current_definition = self._registry.get(WorkflowKey(run.workflow_key))
+            if current_definition.version != run.workflow_version:
+                raise ValueError("workflow version changed; use full retry")
+        return await self.create(
+            WorkflowCreateCommand(
+                idempotency_key=idempotency_key,
+                workflow_key=WorkflowKey(run.workflow_key),
+                request_intent=str(record["request_intent"]),
+                owner_id=owner_id,
+                scope=dict(record["scope"]),
+                input_versions=run.input_versions,
+                requested_at=requested_at,
+                parent_run_id=run_id,
+                retry_mode=mode,
+                resumed_from_node_id=failed if mode == "resume_failed" else None,
+            )
+        )
+
+    async def list_execution_audits(
+        self,
+        run_id: str,
+    ) -> tuple[WorkflowExecutionAudit, ...]:
+        rows = await self._repository.list_execution_audits(run_id)
+        return tuple(
+            WorkflowExecutionAudit(
+                event_type=row.event_type,
+                payload=dict(row.payload_json),
+                occurred_at=row.occurred_at,
+            )
+            for row in rows
+        )
+
+    async def claim(
+        self,
+        run_id: str,
+        *,
+        actor_id: str,
+        claimed_at: datetime,
+    ) -> WorkflowRun:
+        """Transition a queued run to running via domain CAS. No node execution."""
+
+        run = await self._repository.get(run_id)
+        if run is None:
+            raise LookupError("workflow run was not found")
+        if run.status is not WorkflowRunStatus.QUEUED:
+            if run.status is WorkflowRunStatus.RUNNING:
+                return run
+            raise ValueError(
+                f"workflow run cannot be claimed from status {run.status.value}"
+            )
+        actor = actor_id.strip()
+        if not actor:
+            raise ValueError("actor_id is required to claim a workflow run")
+        transitioned = run.transition(
+            WorkflowRunStatus.RUNNING,
+            audit_reference=AuditReference(
+                audit_id=f"workflow:{run.run_id}:started:{run.revision + 1}",
+                actor_id=actor,
+                recorded_at=claimed_at,
+            ),
+        )
+        return await self._repository.compare_and_append(
+            run=transitioned,
+            expected_revision=run.revision,
+            event_type="workflow_started",
+            event_payload={
+                "run_id": run.run_id,
+                "status": WorkflowRunStatus.RUNNING.value,
+                "claimed_by": actor,
+            },
+            outbox_topic="workflow.started",
+        )
+
+    async def claim_next(
+        self,
+        *,
+        actor_id: str,
+        claimed_at: datetime,
+    ) -> WorkflowRun | None:
+        """Claim the oldest queued run, if any. Worker-oriented; no ownership filter."""
+
+        queued = await self._repository.list_queued(limit=1)
+        if not queued:
+            return None
+        run_id, _owner_id, _intent, _workflow_key = queued[0]
+        return await self.claim(
+            run_id,
+            actor_id=actor_id,
+            claimed_at=claimed_at,
+        )
 
 
 class DataQualityWorkflowCreationPort:

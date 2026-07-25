@@ -273,7 +273,12 @@ class SubmissionTransport(Protocol):
 
 
 class BarProvider(Protocol):
-    async def next_bar(self, draft: OrderDraft) -> SimulationBar | None: ...
+    async def next_bar(
+        self,
+        draft: OrderDraft,
+        *,
+        submitted_at: datetime,
+    ) -> SimulationBar | None: ...
 
 
 class LedgerExecutionPort(Protocol):

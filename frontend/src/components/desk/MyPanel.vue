@@ -84,6 +84,22 @@ function formatTime(value: string | null | undefined): string {
   }).format(date)
 }
 
+function displayText(value: string | null | undefined, fallback = '—'): string {
+  if (value === null || value === undefined) return fallback
+  const text = String(value).trim()
+  return text === '' || text === '—' ? fallback : text
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  return `${value}%`
+}
+
+function formatCompleteness(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  return `${Math.round(value * 100)}%`
+}
+
 async function selectSection(next: MySection) {
   section.value = next
   settingMessage.value = null
@@ -142,17 +158,27 @@ function openWorkspace(next: DeskSection) {
 
     <section v-if="section === 'profile'" data-test="my-profile">
       <p class="chapter">只读画像</p>
-      <h3>{{ desk.profileSummary?.archetype_title ?? '画像尚未加载' }}</h3>
-      <dl v-if="desk.profileSummary">
-        <div><dt>风险偏好</dt><dd>{{ desk.profileSummary.risk_level }}</dd></div>
-        <div><dt>损失容忍</dt><dd>{{ desk.profileSummary.loss_tolerance_percent }}%</dd></div>
-        <div><dt>完整度</dt><dd>{{ Math.round(desk.profileSummary.completeness * 100) }}%</dd></div>
-        <div><dt>投资期限</dt><dd>{{ desk.profileSummary.objective_profile.fund_horizon }}</dd></div>
-        <div><dt>投资经验</dt><dd>{{ desk.profileSummary.objective_profile.investment_experience }}</dd></div>
-        <div><dt>版本</dt><dd>v{{ desk.profileSummary.version }}</dd></div>
-      </dl>
+      <template v-if="desk.profileSummary">
+        <h3>{{ displayText(desk.profileSummary.archetype_title, '画像摘要') }}</h3>
+        <dl>
+          <div><dt>风险偏好</dt><dd>{{ displayText(desk.profileSummary.risk_level) }}</dd></div>
+          <div><dt>损失容忍</dt><dd>{{ formatPercent(desk.profileSummary.loss_tolerance_percent) }}</dd></div>
+          <div><dt>完整度</dt><dd>{{ formatCompleteness(desk.profileSummary.completeness) }}</dd></div>
+          <div><dt>投资期限</dt><dd>{{ displayText(desk.profileSummary.objective_profile?.fund_horizon) }}</dd></div>
+          <div><dt>投资经验</dt><dd>{{ displayText(desk.profileSummary.objective_profile?.investment_experience) }}</dd></div>
+          <div><dt>版本</dt><dd>{{ desk.profileSummary.version == null ? '—' : `v${desk.profileSummary.version}` }}</dd></div>
+        </dl>
+        <p v-if="!desk.profile?.profile?.objective_profile" class="data-footnote">
+          期限与经验仅在完整画像可用时显示具体值；交易台投影不会下发原始问卷明细。
+        </p>
+        <RouterLink to="/app/profile-report">查看完整画像报告</RouterLink>
+      </template>
+      <div v-else-if="desk.profileError === 'PROFILE_NOT_FOUND' || desk.profileProjection?.available === false" class="my-empty-state">
+        <h3>尚未完成投资画像</h3>
+        <p class="my-empty-copy">交易台不会伪造画像。完成引导访谈后，此处会显示风险偏好、期限与完整度等只读摘要。</p>
+        <RouterLink class="ink-button" to="/app/exe">前往完成画像</RouterLink>
+      </div>
       <p v-else class="data-error" role="alert">{{ desk.profileError || '无法读取画像。' }}</p>
-      <RouterLink to="/app/profile-report">查看完整画像报告</RouterLink>
     </section>
 
     <section v-else-if="section === 'wallet'" data-test="my-wallet">

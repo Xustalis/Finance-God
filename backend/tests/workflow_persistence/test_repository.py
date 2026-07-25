@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from finance_god.domain import (
+    ActiveWorkflowConflict,
     AuditReference,
     ConcurrentCommandConflict,
     DomainInvariantViolation,
@@ -168,6 +169,49 @@ async def _same_scoped_key_with_different_hash_is_explicit_conflict(
                     digest=request_hash("different-payload"),
                 )
                 await uow.commit()
+    finally:
+        await engine.dispose()
+
+
+def test_owner_cannot_create_two_active_runs(database_url: str) -> None:
+    asyncio.run(_owner_cannot_create_two_active_runs(database_url))
+
+
+async def _owner_cannot_create_two_active_runs(database_url: str) -> None:
+    engine, factory = create_workflow_session_factory(database_url)
+    try:
+        async with WorkflowUnitOfWork(factory) as uow:
+            first = await create_run(uow, queued())
+            await uow.commit()
+
+        with pytest.raises(ActiveWorkflowConflict) as caught:
+            async with WorkflowUnitOfWork(factory) as uow:
+                await create_run(uow, queued("run-2"), key="request-2")
+                await uow.commit()
+        assert caught.value.active_run_id == first.run_id
+
+        failed = first.transition(
+            WorkflowRunStatus.FAILED,
+            audit_reference=audit(2),
+            errors=("explicit test failure",),
+        )
+        async with WorkflowUnitOfWork(factory) as uow:
+            await uow.workflows.compare_and_append(
+                run=failed,
+                expected_revision=first.revision,
+                event_type="workflow_failed",
+                event_payload={"run_id": first.run_id},
+                outbox_topic="workflow.failed",
+            )
+            await uow.commit()
+
+        async with WorkflowUnitOfWork(factory) as uow:
+            second_run = queued("run-2").model_copy(
+                update={"audit_reference": audit(3)}
+            )
+            second = await create_run(uow, second_run, key="request-2")
+            await uow.commit()
+        assert second.run_id == "run-2"
     finally:
         await engine.dispose()
 

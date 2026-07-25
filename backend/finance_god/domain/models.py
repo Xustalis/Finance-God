@@ -995,6 +995,7 @@ WORKFLOW_RUN_TRANSITIONS: Mapping[WorkflowRunStatus, frozenset[WorkflowRunStatus
                     WorkflowRunStatus.FAILED,
                     WorkflowRunStatus.TIMED_OUT,
                     WorkflowRunStatus.BLOCKED,
+                    WorkflowRunStatus.CANCELLED,
                 }
             ),
             WorkflowRunStatus.RUNNING: frozenset(

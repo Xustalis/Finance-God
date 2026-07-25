@@ -22,6 +22,15 @@ def test_non_development_accepts_explicit_strong_jwt_secret() -> None:
     assert settings.app_env == "production"
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["readiness_cache_ttl_seconds", "readiness_probe_timeout_seconds"],
+)
+def test_readiness_timing_configuration_must_be_positive(field: str) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: 0})
+
+
 def test_deepseek_configuration_rejects_unknown_model() -> None:
     with pytest.raises(ValidationError, match="Unsupported DeepSeek model"):
         AISettingsUpdate(

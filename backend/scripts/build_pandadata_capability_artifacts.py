@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import date
 from pathlib import Path
 
 from finance_god.market_data import (
@@ -27,6 +26,9 @@ def main() -> int:
     verification_path = _ARTIFACT_DIR / "verification-summary-v1.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     verification = json.loads(verification_path.read_text(encoding="utf-8"))
+    prior_verification = {
+        item["endpoint"]: item for item in verification["verified"]
+    }
     records = {item.endpoint: item for item in CATALOG.all()}
     master_metadata = {
         "instrument_master_identity": DEFAULT_INSTRUMENT_MASTER.identity,
@@ -59,6 +61,7 @@ def main() -> int:
     for record in records.values():
         if record.status != "verified_once_research":
             continue
+        prior = prior_verification[record.endpoint]
         verified.append(
             {
                 "endpoint": record.endpoint,
@@ -66,19 +69,9 @@ def main() -> int:
                     sorted(scope) for scope in record.verified_scope_sets
                 ],
                 "result": "verified_once_research",
-                "rows": {
-                    "classification": "non_empty_at_probe",
-                    "exact_count_retained": False,
-                },
-                "schema": {
-                    "classification": "accepted_at_probe",
-                    "field_names_retained": False,
-                },
-                "probe_time": {
-                    "value": date.today().isoformat(),
-                    "precision": "day",
-                    "exact_time_retained": False,
-                },
+                "rows": prior["rows"],
+                "schema": prior["schema"],
+                "probe_time": prior["probe_time"],
                 "sdk_version": manifest["sdk_version"],
                 "request_shape_sha256s": list(record.allowed_request_shape_hashes),
                 "trade_eligible": False,

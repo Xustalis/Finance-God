@@ -162,26 +162,55 @@ def evidence_content_from_agent_run(run: Any) -> dict[str, Any]:
     invalidations: list[str] = []
     sources: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
+    seen_claims: set[tuple[str, str, tuple[str, ...]]] = set()
 
-    for result in getattr(run, "results", []) or []:
+    results = list(getattr(run, "results", []) or [])
+    synthesis = next(
+        (
+            result
+            for result in reversed(results)
+            if _is_synthesis_agent(getattr(result, "agent_id", ""))
+        ),
+        None,
+    )
+    claim_results = [synthesis] if synthesis is not None else results
+
+    for result in claim_results:
         for claim in getattr(result, "claims", []) or []:
             kind = _enum_value(getattr(claim, "kind", "inference"))
+            statement = str(getattr(claim, "statement", "") or "")
+            evidence_ids = [
+                str(item)
+                for item in (getattr(claim, "evidence_ids", []) or [])
+            ]
+            claim_unknowns = [
+                str(item) for item in (getattr(claim, "unknowns", []) or [])
+            ]
+            claim_invalidations = [
+                str(item)
+                for item in (
+                    getattr(claim, "invalidation_conditions", []) or []
+                )
+            ]
             entry = {
                 "kind": kind,
-                "statement": getattr(claim, "statement", ""),
+                "statement": statement,
                 "author_agent_id": getattr(claim, "author_agent_id", None),
-                "evidence_ids": list(getattr(claim, "evidence_ids", []) or []),
-                "unknowns": list(getattr(claim, "unknowns", []) or []),
-                "invalidation_conditions": list(
-                    getattr(claim, "invalidation_conditions", []) or []
-                ),
+                "evidence_ids": evidence_ids,
+                "unknowns": claim_unknowns,
+                "invalidation_conditions": claim_invalidations,
             }
+            claim_key = (kind, " ".join(statement.casefold().split()), ())
+            if claim_key in seen_claims:
+                continue
+            seen_claims.add(claim_key)
             if kind == "fact":
                 facts.append(entry)
             else:
                 inferences.append(entry)
-            unknowns.extend(entry["unknowns"])
-            invalidations.extend(entry["invalidation_conditions"])
+            unknowns.extend(claim_unknowns)
+            invalidations.extend(claim_invalidations)
+    for result in results:
         for record in getattr(result, "evidence", []) or []:
             identifier = getattr(record, "identifier", "")
             if identifier in seen_sources:
@@ -226,11 +255,16 @@ def evidence_content_from_agent_run(run: Any) -> dict[str, Any]:
 
 
 def _agent_run_conclusion(run: Any) -> str | None:
-    for result in getattr(run, "results", []) or []:
+    for result in reversed(list(getattr(run, "results", []) or [])):
         summary = getattr(result, "summary", None)
         if summary:
             return str(summary)[:2000]
     return None
+
+
+def _is_synthesis_agent(agent_id: str) -> bool:
+    normalized = str(agent_id).casefold()
+    return "manager" in normalized or "governance" in normalized
 
 
 class EvidenceService:

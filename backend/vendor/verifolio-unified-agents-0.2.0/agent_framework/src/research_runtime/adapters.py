@@ -38,6 +38,30 @@ class _PromptPayload(BaseModel):
     proposed_actions: list[str] = Field(default_factory=list, max_length=20)
 
 
+def _normalize_prompt_payload(raw: str) -> str:
+    """Clamp model JSON that exceeds claim evidence_ids limits before validation."""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    claims = payload.get("claims")
+    if not isinstance(claims, list):
+        return raw
+    changed = False
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        evidence_ids = claim.get("evidence_ids")
+        if isinstance(evidence_ids, list) and len(evidence_ids) > 16:
+            claim["evidence_ids"] = evidence_ids[:16]
+            changed = True
+    if not changed:
+        return raw
+    return json.dumps(payload, ensure_ascii=False)
+
+
 class StructuredPromptAdapter:
     """Run one role with strict JSON and evidence-reference validation."""
 
@@ -54,14 +78,18 @@ class StructuredPromptAdapter:
             user_prompt=self._user_prompt(definition, context),
         )
         try:
-            payload = _PromptPayload.model_validate_json(raw)
+            payload = _PromptPayload.model_validate_json(_normalize_prompt_payload(raw))
         except ValidationError as error:
             raise ValueError(
                 f"invalid structured response from {definition.agent_id}: {error}"
             ) from error
-        if context.request.task_type == "research" and not payload.claims:
+        if (
+            context.request.task_type == "research"
+            and not payload.claims
+            and not context.previous_results
+        ):
             raise ValueError(
-                f"{definition.agent_id} must return at least one claim for research"
+                f"{definition.agent_id} must return at least one claim for initial research"
             )
         available_evidence = {item.identifier for item in context.evidence}
         claims = []
@@ -102,6 +130,7 @@ shows that change. Return only valid JSON matching the requested schema."""
         evidence = "\n".join(
             f"[{item.identifier}] {item.source}: {item.excerpt}" for item in context.evidence
         ) or "No evidence records were supplied."
+        example_evidence_id = context.evidence[0].identifier
         previous = json.dumps(
             [
                 {
@@ -125,14 +154,22 @@ Evidence:
 Previous agent results:
 {previous}
 
+Use the language named by Payload.response_language for every human-facing string in the
+response, including summary, claim statements, unknowns, invalidation conditions, and proposed
+actions. Follow Payload.response_requirements when present. Preserve identifiers, symbols, and
+source field names when translation would make them ambiguous.
+
 Return JSON with this exact top-level shape:
 {{"summary":"string","claims":[{{"kind":"fact|inference","statement":"string",
-"evidence_ids":["E1"],"unknowns":["string"],"invalidation_conditions":["string"]}}],
+"evidence_ids":[{json.dumps(example_evidence_id)}],"unknowns":["string"],
+"invalidation_conditions":["string"]}}],
 "proposed_actions":["string"]}}
 
-Claims may be empty when this role is producing a task plan or an artifact-oriented report.
-Every non-empty evidence_ids value must reference an identifier shown above. proposed_actions are
-reviewable requests only; never state that they were executed."""
+For the first research role, claims must be non-empty. When previous agent results already
+cover every evidence-supported point, return an empty claims list instead of paraphrasing an
+equivalent claim. Every non-empty claim must add a materially distinct fact or inference and
+include at least one evidence_ids value copied exactly from an identifier shown above.
+proposed_actions are reviewable requests only; never state that they were executed."""
 
 
 _MONITOR_AGENT_KINDS = {

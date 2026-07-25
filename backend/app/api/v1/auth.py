@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.response import ApiResponse
 from app.core.security import (
     create_access_token,
@@ -82,6 +83,25 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误",
+        )
+    return await _login_response(user, db)
+
+
+@router.post("/dev-login", response_model=ApiResponse[AuthData])
+async def dev_login(db: AsyncSession = Depends(get_db)):
+    if settings.app_env != "development":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    user = await db.scalar(
+        select(User).where(
+            User.email == settings.dev_test_user_email.strip().lower(),
+            User.role == "user",
+            User.status == "active",
+        )
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="本地测试账号尚未初始化，请先运行 make seed-dev-user",
         )
     return await _login_response(user, db)
 

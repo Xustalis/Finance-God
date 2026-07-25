@@ -1,6 +1,7 @@
 .PHONY: install install-backend install-frontend db migrate migrate-create \
 	backend frontend dev test lint clean migrate-legacy-env \
-	validate-production-config docker-up docker-down
+	validate-production-config seed-dev-admin seed-dev-user seed-dev-accounts \
+	docker-up docker-down
 
 install: install-backend install-frontend
 
@@ -26,6 +27,14 @@ backend:
 
 migrate-legacy-env:
 	cd backend && .venv/bin/python -m app.env_migration
+
+seed-dev-admin:
+	cd backend && .venv/bin/python -m scripts.seed_dev_admin
+
+seed-dev-user:
+	cd backend && .venv/bin/python -m scripts.seed_dev_user
+
+seed-dev-accounts: seed-dev-user seed-dev-admin
 
 frontend:
 	cd frontend && npm run dev

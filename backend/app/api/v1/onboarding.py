@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -472,6 +473,9 @@ async def add_message(
             asked_questions=asked_questions,
             emotion=emotion,
         )
+    except asyncio.CancelledError:
+        await release_message_claim(db, session_id, user_message.id)
+        raise
     except TimeoutError as exc:
         await release_message_claim(db, session_id, user_message.id)
         raise HTTPException(

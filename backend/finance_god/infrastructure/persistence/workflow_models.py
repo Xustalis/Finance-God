@@ -16,6 +16,7 @@ from sqlalchemy import (
     Table,
     UniqueConstraint,
     event,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +36,15 @@ _WORKFLOW_STATUSES = (
     "cancelled",
 )
 _STATUS_SQL = ",".join(f"'{status}'" for status in _WORKFLOW_STATUSES)
+_ACTIVE_WORKFLOW_STATUSES = (
+    "queued",
+    "running",
+    "cancel_requested",
+    "cancelling",
+)
+_ACTIVE_STATUS_SQL = ",".join(
+    f"'{status}'" for status in _ACTIVE_WORKFLOW_STATUSES
+)
 
 
 class WorkflowRunRow(Base):
@@ -60,8 +70,26 @@ class WorkflowRunRow(Base):
             "length(request_hash) = 64",
             name="ck_workflow_run_request_hash",
         ),
+        CheckConstraint(
+            "retry_mode IS NULL OR retry_mode IN ('full','resume_failed')",
+            name="ck_workflow_run_retry_mode",
+        ),
         Index("ix_workflow_runs_workflow_key", "workflow_key"),
         Index("ix_workflow_runs_status", "status"),
+        Index("ix_workflow_runs_owner_requested", "owner_id", "requested_at", "run_id"),
+        Index(
+            "uq_workflow_run_owner_active",
+            "owner_id",
+            unique=True,
+            sqlite_where=cast(
+                Any,
+                text(f"status IN ({_ACTIVE_STATUS_SQL})"),
+            ),
+            postgresql_where=cast(
+                Any,
+                text(f"status IN ({_ACTIVE_STATUS_SQL})"),
+            ),
+        ),
     )
 
     run_id: Mapped[str] = mapped_column(String(160), primary_key=True)
@@ -82,6 +110,11 @@ class WorkflowRunRow(Base):
     requested_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    parent_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflow_runs.run_id"), nullable=True
+    )
+    retry_mode: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    resumed_from_node_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
 
 class WorkflowEventRow(Base):

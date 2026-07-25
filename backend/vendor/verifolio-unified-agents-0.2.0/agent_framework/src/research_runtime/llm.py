@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Protocol
 
 from openai import OpenAI
@@ -11,6 +12,7 @@ from .config import Settings
 
 class ChatClient(Protocol):
     def complete(self, *, system_prompt: str, user_prompt: str) -> str: ...
+    def stream_complete(self, *, system_prompt: str, user_prompt: str) -> Iterator[str]: ...
 
 
 class OpenAICompatibleChat:
@@ -35,3 +37,22 @@ class OpenAICompatibleChat:
         if not content or not content.strip():
             raise RuntimeError("Model returned an empty response")
         return content.strip()
+
+    def stream_complete(self, *, system_prompt: str, user_prompt: str) -> Iterator[str]:
+        """Yield native Responses API text deltas without buffering the answer."""
+        emitted = False
+        with self._client.responses.stream(
+            model=self._model,
+            instructions=system_prompt,
+            input=user_prompt,
+        ) as stream:
+            for event in stream:
+                if event.type != "response.output_text.delta":
+                    continue
+                delta = event.delta
+                if not delta:
+                    continue
+                emitted = True
+                yield delta
+        if not emitted:
+            raise RuntimeError("Model returned an empty streamed response")

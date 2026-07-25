@@ -107,6 +107,7 @@ class InstrumentId(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     symbol: str = Field(min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$")
+    name: str | None = Field(default=None, min_length=1, max_length=96)
     provider_symbol: str = Field(min_length=1, max_length=32, pattern=r"^[A-Z0-9._-]+$")
     market: MarketType
     asset_class: AssetClass

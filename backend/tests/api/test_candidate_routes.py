@@ -10,7 +10,10 @@ from starlette.routing import Mount
 from starlette.testclient import TestClient
 
 from finance_god.api.workspace_routes import create_workspace_routes
-from finance_god.application.candidate_service import CandidateScoringService
+from finance_god.application.candidate_service import (
+    CandidateScoringService,
+    candidates_for_profile,
+)
 from finance_god.infrastructure.persistence.models import Base
 from finance_god.market_data.service import MarketQuote, QuoteBatch
 
@@ -119,6 +122,125 @@ def test_market_data_failure_degrades_explicitly() -> None:
     assert all(not c.tradable for c in response.candidates)
 
 
+def test_profile_selected_direction_filters_candidate_universe() -> None:
+    requested: list[list[str]] = []
+
+    async def quotes(symbols: list[str]) -> QuoteBatch:
+        requested.append(symbols)
+        return QuoteBatch(
+            requested_at=datetime(2026, 7, 24, 2, 31, tzinfo=UTC),
+            cache_hit=False,
+            quotes=tuple(
+                _quote(
+                    symbol,
+                    amount=Decimal("2000000000"),
+                    high=Decimal("10.10"),
+                    low=Decimal("9.95"),
+                )
+                for symbol in symbols
+            ),
+            errors={},
+        )
+
+    service = CandidateScoringService(
+        portfolio=_FakePortfolio(()),
+        quotes_provider=quotes,
+    )
+    response = asyncio.run(
+        candidates_for_profile(
+            service=service,
+            owner_id="user-1",
+            now=datetime.now(UTC),
+            profile={
+                "available": True,
+                "version": 7,
+                "education_only": False,
+                "selected_direction": "equities",
+                "recommended_directions": ["alternatives"],
+            },
+        )
+    )
+
+    assert response.profile_version == 7
+    assert response.directions == ("equities",)
+    assert {candidate.direction for candidate in response.candidates} == {"equities"}
+    assert requested == [["000001.SZ", "600519.SH", "000002.SZ"]]
+
+
+def test_education_only_profile_still_generates_research_candidates() -> None:
+    requested: list[list[str]] = []
+
+    async def quotes(symbols: list[str]) -> QuoteBatch:
+        requested.append(symbols)
+        return QuoteBatch(
+            requested_at=datetime(2026, 7, 24, 2, 31, tzinfo=UTC),
+            cache_hit=False,
+            quotes=tuple(
+                _quote(
+                    symbol,
+                    amount=Decimal("2000000000"),
+                    high=Decimal("10.10"),
+                    low=Decimal("9.95"),
+                )
+                for symbol in symbols
+            ),
+            errors={},
+        )
+
+    service = CandidateScoringService(
+        portfolio=_FakePortfolio(()),
+        quotes_provider=quotes,
+    )
+    response = asyncio.run(
+        candidates_for_profile(
+            service=service,
+            owner_id="user-1",
+            now=datetime.now(UTC),
+            profile={
+                "available": True,
+                "version": 8,
+                "education_only": True,
+                "selected_direction": "equities",
+                "recommended_directions": [],
+            },
+        )
+    )
+
+    assert response.unavailable_reason is None
+    assert response.profile_version == 8
+    assert response.directions == ("equities",)
+    assert response.candidates
+    assert requested == [["000001.SZ", "600519.SH", "000002.SZ"]]
+
+
+def test_profile_without_supported_stock_direction_is_explicitly_unavailable() -> None:
+    async def quotes(_symbols: list[str]) -> QuoteBatch:
+        raise AssertionError("unsupported direction must not request market data")
+
+    service = CandidateScoringService(
+        portfolio=_FakePortfolio(()),
+        quotes_provider=quotes,
+    )
+    response = asyncio.run(
+        candidates_for_profile(
+            service=service,
+            owner_id="user-1",
+            now=datetime.now(UTC),
+            profile={
+                "available": True,
+                "version": 2,
+                "education_only": False,
+                "selected_direction": "public_funds",
+                "recommended_directions": [],
+            },
+        )
+    )
+
+    assert response.candidates == ()
+    assert response.profile_version == 2
+    assert response.unavailable_reason == "NO_SUPPORTED_DIRECTION_CANDIDATES"
+
+
 def test_concentration_hard_limit_excludes_candidate() -> None:
     async def quotes(symbols: list[str]) -> QuoteBatch:
         return QuoteBatch(
@@ -180,6 +302,16 @@ def test_ignore_feedback_persists_without_deleting_evidence(tmp_path) -> None:
             portfolio=_FakePortfolio(()), quotes_provider=quotes
         )
 
+    async def profile_provider(owner_id: str) -> dict:
+        assert owner_id == "server-user"
+        return {
+            "available": True,
+            "version": 4,
+            "education_only": False,
+            "selected_direction": "equities",
+            "recommended_directions": ["equities", "alternatives"],
+        }
+
     app = Starlette(
         routes=[
             Mount(
@@ -188,6 +320,7 @@ def test_ignore_feedback_persists_without_deleting_evidence(tmp_path) -> None:
                     session_factory=session_factory,
                     owner_resolver=_resolve_server_user,
                     candidate_service_provider=provider,
+                    candidate_profile_provider=profile_provider,
                 ),
             )
         ]
@@ -197,6 +330,10 @@ def test_ignore_feedback_persists_without_deleting_evidence(tmp_path) -> None:
             listed = client.get("/api/v1/candidates")
             assert listed.status_code == 200
             assert listed.json()["candidates"]
+            assert listed.json()["profile_version"] == 4
+            assert {
+                item["direction"] for item in listed.json()["candidates"]
+            } == {"equities"}
 
             ignored = client.post(
                 "/api/v1/candidates/000001.SZ/ignore",

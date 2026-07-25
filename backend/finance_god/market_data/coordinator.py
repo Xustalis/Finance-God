@@ -114,12 +114,23 @@ class SnapshotCoordinator:
                     if entry.latest_diagnostic is not None:
                         immediate_diagnostics.append(entry.latest_diagnostic)
                     continue
+                if entry.refresh_state is RefreshState.ERROR:
+                    if self._should_refresh(key, entry, current):
+                        self._start_refresh(instrument)
+                    immediate_items.extend(
+                        _mark_stale(item, entry.latest_diagnostic)
+                        for item in entry.last_success
+                    )
+                    if entry.latest_diagnostic is not None:
+                        immediate_diagnostics.append(entry.latest_diagnostic)
+                    continue
                 if self._should_refresh(key, entry, current):
                     self._start_refresh(instrument)
-                immediate_items.extend(
-                    _mark_stale(item, entry.latest_diagnostic)
-                    for item in entry.last_success
-                )
+                # Cache age controls when to refresh; it is not market-data
+                # freshness. Preserve the upstream freshness while a healthy
+                # background refresh is in flight. Only an actual refresh
+                # failure may downgrade the retained value to stale.
+                immediate_items.extend(entry.last_success)
                 if entry.latest_diagnostic is not None:
                     immediate_diagnostics.append(entry.latest_diagnostic)
 

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Eye, EyeOff, Landmark, LoaderCircle } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { shouldAutoLoginLocalTestUser } from '@/services/localTestLogin'
 const auth=useAuthStore(),router=useRouter(),route=useRoute();const registering=ref(false),email=ref(''),password=ref(''),name=ref(''),showPassword=ref(false),error=ref(''),localPreviewEnabled=import.meta.env.DEV
 async function submit(){error.value='';try{if(registering.value)await auth.register(email.value,password.value,name.value);else await auth.login(email.value,password.value);const redirect=typeof route.query.redirect==='string'?route.query.redirect:(auth.isAdmin?'/admin/ai-settings':'/app/exe');await router.replace(redirect)}catch(e){error.value=e instanceof Error?e.message:'认证失败，请稍后再试'}}
+onMounted(async()=>{if(!shouldAutoLoginLocalTestUser(location.hostname,route.query.redirect))return;error.value='';try{await auth.devLogin();await router.replace(route.query.redirect as string)}catch(e){error.value=e instanceof Error?e.message:'本地测试登录失败'}})
 </script>
 <template>
   <main class="auth-page">

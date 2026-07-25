@@ -47,7 +47,6 @@ from tests.workflows.support import (
     SequenceRunIds,
 )
 
-
 INPUT = (
     VersionReference(
         object_type="market_snapshot",
@@ -379,50 +378,18 @@ class WorkflowExecutorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_same_dag_layer_runs_in_parallel(self) -> None:
         run_id = await self.make_run(WorkflowKey.COMPANY_RESEARCH, suffix="parallel")
-        base = self.plan(WorkflowKey.COMPANY_RESEARCH, suffix="parallel")
-        governed_index = next(
-            index
-            for index, node in enumerate(base.nodes)
-            if node.node_id == "governed_agents"
-        )
-        governed = base.nodes[governed_index]
-        midpoint = len(governed.agent_ids) // 2
-        left = governed.model_copy(
-            update={
-                "node_id": "governed_agents_a",
-                "agent_ids": governed.agent_ids[:midpoint],
-            }
-        )
-        right = governed.model_copy(
-            update={
-                "node_id": "governed_agents_b",
-                "agent_ids": governed.agent_ids[midpoint:],
-            }
-        )
-        nodes = list(base.nodes)
-        nodes[governed_index : governed_index + 1] = [left, right]
-        finalizer_index = next(
-            index for index, node in enumerate(nodes) if node.is_finalizer
-        )
-        nodes[finalizer_index] = nodes[finalizer_index].model_copy(
-            update={"dependencies": (left.node_id, right.node_id)}
-        )
-        plan = TaskPlan(
-            **{
-                **base.model_dump(),
-                "nodes": tuple(nodes),
-                "maximum_total_attempts": (
-                    base.maximum_total_attempts
-                    + governed.retry_budget.total_attempt_limit
-                ),
-                "dynamic": True,
-            }
-        )
+        plan = self.plan(WorkflowKey.COMPANY_RESEARCH, suffix="parallel")
+        dependency_groups: defaultdict[tuple[str, ...], list[str]] = defaultdict(list)
+        for node in plan.nodes:
+            if node.agent_ids and node.node_id != "planner":
+                dependency_groups[node.dependencies].append(node.node_id)
+        parallel_ids = next(
+            node_ids
+            for node_ids in dependency_groups.values()
+            if len(node_ids) >= 2
+        )[:2]
         runner = GovernedRunner(
-            sleeps={
-                left.node_id: 0.03,
-                right.node_id: 0.03,
-            }
+            sleeps={node_id: 0.03 for node_id in parallel_ids}
         )
         report = await self.executor(runner).execute(run_id=run_id, plan=plan)
         self.assertEqual(report.run.status, WorkflowRunStatus.COMPLETED)

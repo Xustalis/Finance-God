@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     # SQLAlchemy SQL 语句回显日志，与 app_debug 解耦，默认关闭
     sql_echo: bool = False
+    readiness_cache_ttl_seconds: float = Field(default=2.0, gt=0)
+    readiness_probe_timeout_seconds: float = Field(default=3.0, gt=0)
 
     # 数据库
     # 全环境统一使用 PostgreSQL；本地开发需先启动 postgres（docker compose up db
@@ -47,6 +49,8 @@ class Settings(BaseSettings):
     # 仅用于本地开发管理员初始化
     dev_admin_email: str = "admin@finance-god.local"
     dev_admin_password: str | None = None
+    dev_test_user_email: str = "test@finance-god.local"
+    dev_test_user_password: str | None = None
 
     # 服务端 AI 凭据，不得序列化到 API
     deepseek_api_key: SecretStr | None = None
@@ -69,6 +73,12 @@ class Settings(BaseSettings):
     market_alert_threshold: float = 0.05
     market_alert_escalate_threshold: float = 0.09
     market_poll_universe: str | None = None
+
+    # Workflow Worker（Phase 4）：领取 queued WorkflowRun 并执行到终态。
+    # 默认开启；测试通过 conftest 关闭。多 Worker 租约/SKIP LOCKED 延后。
+    workflow_worker_enabled: bool = True
+    workflow_worker_interval_seconds: float = 2.0
+    workflow_worker_batch_size: int = 1
 
     @model_validator(mode="after")
     def validate_production_secret(self):

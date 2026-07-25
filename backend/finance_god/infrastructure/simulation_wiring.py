@@ -9,6 +9,7 @@ implementations.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -61,6 +62,7 @@ from finance_god.infrastructure.persistence.simulation_uow import (
     SimulationUnitOfWork,
 )
 from finance_god.infrastructure.trade_plan_port import PersistentTradePlanPort
+from finance_god.market_data import MarketBar, MarketDataService
 from finance_god.trading.mandate import (
     InvestmentMandate,
     evaluate_order_authorization,
@@ -250,12 +252,57 @@ class SimulationSubmissionTransport:
 
 
 class MarketDataBarProvider:
-    """Return None — reconcile requires real PandaData bars which may be
-    unavailable.  The execution service will raise MARKET_DATA_MISSING,
-    which is the correct safe behaviour."""
+    """Adapt normalized PandaData bars into deterministic simulation bars."""
 
-    async def next_bar(self, draft: OrderDraft) -> SimulationBar | None:
-        return None
+    def __init__(self, market_data: MarketDataService) -> None:
+        self._market_data = market_data
+
+    async def next_bar(
+        self,
+        draft: OrderDraft,
+        *,
+        submitted_at: datetime,
+    ) -> SimulationBar | None:
+        result = await asyncio.to_thread(
+            self._market_data.read_bars,
+            draft.instrument_id,
+            limit=500,
+        )
+        candidates: list[tuple[datetime, MarketBar]] = []
+        for bar in result.bars:
+            observed_at = datetime.fromisoformat(bar.provider_time)
+            if observed_at.tzinfo is None:
+                continue
+            if observed_at > submitted_at:
+                candidates.append((observed_at, bar))
+        if not candidates:
+            return None
+        observed_at, selected = min(candidates, key=lambda item: item[0])
+        return SimulationBar(
+            instrument_id=draft.instrument_id,
+            market="CN",
+            trading_day=observed_at.date().isoformat(),
+            open=selected.open,
+            high=selected.high,
+            low=selected.low,
+            close=selected.close,
+            volume=selected.volume,
+            upstream_timestamp=observed_at,
+            ingested_at=datetime.now(UTC),
+            frequency=result.frequency,
+            evidence=VersionReference(
+                object_type="market_bar",
+                object_id=draft.instrument_id,
+                version=selected.provider_time,
+            ),
+            stale=selected.freshness in {
+                "stale",
+                "error",
+                "unavailable",
+                "missing",
+            },
+            conflict=False,
+        )
 
 
 class LedgerFillAdapter:
@@ -468,6 +515,7 @@ def build_simulation_services(
     uow_factory: UnitOfWorkFactory,
     simulation_session_factory: Callable[[], AsyncSession],
     ledger: SimulationLedgerService,
+    market_data: MarketDataService,
     authorization: PersistentAuthorizationProvider | None = None,
 ) -> tuple[SimulationExecutionService, SimulationAccountApplicationImpl]:
     """Wire all port adapters and return (execution, accounts) pair."""
@@ -483,7 +531,7 @@ def build_simulation_services(
         manual_review=AutoPassManualReview(),
         risk=SimulationRiskAdapter(clock, ids, authorization),
         transport=SimulationSubmissionTransport(),
-        bars=MarketDataBarProvider(),
+        bars=MarketDataBarProvider(market_data),
         ledger=LedgerFillAdapter(ledger, clock, ids),
         matcher=DeterministicMatcher(),
         clock=clock,

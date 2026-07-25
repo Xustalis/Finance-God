@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai_catalog import DEEPSEEK_BASE_URL, STEPFUN_BASE_URL
+from app.ai_catalog import (
+    DEEPSEEK_BASE_URL,
+    STEPFUN_BASE_URL,
+    STEPFUN_REALTIME_MODEL,
+    STEPFUN_REALTIME_URL,
+)
 from app.config import settings
 from app.core.response import ApiResponse
 from app.core.security import require_admin
@@ -33,6 +38,7 @@ DEFAULT_CONFIGS = {
     "text": {"provider": "mock", "model_name": "mock-structured-v1"},
     "stt": {"provider": "browser", "model_name": "web-speech-recognition"},
     "tts": {"provider": "browser", "model_name": "web-speech-synthesis"},
+    "realtime": {"provider": "stepfun", "model_name": STEPFUN_REALTIME_MODEL},
 }
 
 TEXT_PROVIDER_KEY_REFS = {
@@ -45,7 +51,9 @@ def safe_config(config: AIModelConfig | None, capability: str) -> dict:
     defaults = DEFAULT_CONFIGS[capability]
     provider = config.provider if config else defaults["provider"]
     base_url = None
-    if capability == "text":
+    if capability == "realtime":
+        base_url = STEPFUN_REALTIME_URL
+    elif capability == "text":
         if provider == "ark":
             base_url = settings.ark_base_url
         elif provider == "stepfun":

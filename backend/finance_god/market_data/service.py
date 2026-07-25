@@ -44,7 +44,6 @@ from .instruments import (
 from .quality import (
     DQTriggerRequest,
     DQWorkflowPort,
-    DQWorkflowReceipt,
     InMemoryScopeFreezeRepository,
     QualityContext,
     QualityDecision,
@@ -86,6 +85,9 @@ class MarketQuote(BaseModel):
     retrieved_at: datetime
     frequency: str
     freshness: str
+    session_alignment: Literal[
+        "current_session", "latest_released_session"
+    ] = "current_session"
     market_status: str
     source_endpoint: str
     capability_version: str
@@ -319,6 +321,49 @@ class MarketDataService:
             error_kind=_envelope_error_kind(envelope) if not envelope.items else None,
         )
 
+    def read_historical_daily_bars(
+        self,
+        symbol: str,
+        *,
+        start_date: str,
+        end_date: str,
+        limit: int = 1_000,
+    ) -> MarketBarsResult:
+        """Read a caller-bounded released daily series for research evidence."""
+
+        instrument = self.resolve(symbol)
+        envelope = self._adapter.fetch_bars(
+            instrument,
+            frequency=DataFrequency.DAILY,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            release_state=ReleaseState.RELEASED,
+        )
+        outcome = self.evaluate_quality(
+            envelope,
+            f"{instrument.symbol}:{DataFrequency.DAILY.value}",
+            category=DataCategory.BAR,
+            frequency=DataFrequency.DAILY,
+        )
+        error_message = (
+            (
+                envelope.diagnostics[-1].message
+                if envelope.diagnostics
+                else "PandaData returned no normalized daily bars"
+            )
+            if not envelope.items
+            else None
+        )
+        return MarketBarsResult(
+            frequency=_display_frequency(DataFrequency.DAILY),
+            bars=tuple(_bar(item) for item in envelope.items),
+            quality=outcome.decision,
+            dq_request=outcome.dq_request,
+            error_message=error_message,
+            error_kind=_envelope_error_kind(envelope) if not envelope.items else None,
+        )
+
     def read_information_facts(
         self,
         symbol: str,
@@ -402,24 +447,33 @@ class MarketDataService:
         return result
 
     def _probe_page_dependencies(self) -> None:
+        # Use the same publication-aware snapshot path as live quotes so the
+        # canary resolves the latest released session on weekends/holidays
+        # instead of querying an empty same-day realtime endpoint.
         instrument = self.resolve(_READINESS_CANARY_SYMBOL)
-        quote = self._adapter.fetch_snapshot(
-            instrument,
-            release_state=ReleaseState.RELEASED,
-        )
+        quote = self._fetch_snapshot(instrument)
         if quote.diagnostics or len(quote.items) != 1:
             raise MarketDataResponseError(
                 "quote readiness canary did not return one normalized item",
                 endpoint=_single_source_endpoint(quote),
             )
         trading_date = quote.items[0].source.trading_date
+        observed_at = self._aware_now()
+        publication = self._published_state.latest_released(
+            instrument=instrument,
+            category=DataCategory.BAR,
+            frequency=DataFrequency.MINUTE_1,
+            trading_date=trading_date,
+            observed_at=observed_at,
+        )
         bars = self._adapter.fetch_bars(
             instrument,
             frequency=DataFrequency.MINUTE_1,
-            start_date=trading_date,
-            end_date=trading_date,
+            start_date=publication.trading_date,
+            end_date=publication.trading_date,
             limit=1,
-            release_state=ReleaseState.RELEASED,
+            release_state=publication.state,
+            provider_published_at=publication.provider_published_at,
         )
         if bars.diagnostics or not bars.items:
             raise MarketDataResponseError(
@@ -580,39 +634,38 @@ class _QuoteCoordinator:
 
 
 class MarketDataApplication:
-    """Only async application boundary allowed to publish market-data results."""
+    """Async read boundary for market data.
+
+    Public GET requests return diagnostics but never create durable workflows.
+    Data-quality automation belongs to an explicit background/outbox path so a
+    browser refresh cannot mutate workflow state or overload the Worker.
+    """
 
     def __init__(
         self,
         service: MarketDataService,
         *,
-        dq_workflow: DQWorkflowPort | None,
+        dq_workflow: DQWorkflowPort | None = None,
     ) -> None:
         self._service = service
         self._quotes = _QuoteCoordinator(service)
-        self._dq_workflow = dq_workflow
-        self._latest_receipts: dict[str, DQWorkflowReceipt] = {}
+        # Kept in the constructor for compatibility with existing composition
+        # code; public reads deliberately do not call the command port.
+        del dq_workflow
 
     def probe_readiness(self) -> tuple[bool, str]:
-        if self._dq_workflow is None:
-            return False, "DQ_WORKFLOW_COMMAND_PORT_UNCONFIGURED"
         return self._service.probe_readiness()
 
     async def quotes(self, symbols: Iterable[str]) -> QuoteBatch:
-        self._require_workflow()
         execution = await self._quotes.get(symbols)
-        await self._dispatch(execution.dq_requests)
         return execution.batch
 
     async def bars(self, symbol: str, *, limit: int = 80) -> MarketBarsResult:
-        self._require_workflow()
         result = await asyncio.to_thread(
             self._service.read_bars,
             symbol,
             limit=limit,
         )
-        requests = (result.dq_request,) if result.dq_request is not None else ()
-        await self._dispatch(requests)
         if not result.bars:
             raise MarketDataError(
                 result.error_kind or ErrorKind.SCHEMA,
@@ -620,29 +673,60 @@ class MarketDataApplication:
             )
         return result
 
-    async def _dispatch(
+    async def historical_daily_bars(
         self,
-        requests: Iterable[DQTriggerRequest],
-    ) -> None:
-        pending = tuple(requests)
-        if not pending:
-            return
-        if self._dq_workflow is None:
-            raise MarketDataConfigurationError(
-                "data-quality workflow command port is not configured"
+        symbol: str,
+        *,
+        start_date: str,
+        end_date: str,
+        limit: int = 1_000,
+    ) -> MarketBarsResult:
+        result = await asyncio.to_thread(
+            self._service.read_historical_daily_bars,
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+        if not result.bars:
+            raise MarketDataError(
+                result.error_kind or ErrorKind.SCHEMA,
+                result.error_message
+                or "PandaData returned no normalized historical daily bars",
             )
-        for request in pending:
-            receipt = await self._dq_workflow.start(request)
-            if receipt.idempotency_key != request.idempotency_key:
-                raise ValueError("DQ workflow receipt idempotency key mismatch")
-            self._latest_receipts[request.idempotency_key] = receipt
+        return result
 
-    def _require_workflow(self) -> DQWorkflowPort:
-        if self._dq_workflow is None:
-            raise MarketDataConfigurationError(
-                "data-quality workflow command port is not configured"
-            )
-        return self._dq_workflow
+    async def information_facts(
+        self,
+        symbol: str,
+        *,
+        start_quarter: str,
+        end_quarter: str,
+        limit: int = 20,
+    ) -> MarketFactBatch:
+        return await asyncio.to_thread(
+            self._service.read_information_facts,
+            symbol,
+            start_quarter=start_quarter,
+            end_quarter=end_quarter,
+            limit=limit,
+        )
+
+    async def sentiment_facts(
+        self,
+        symbol: str,
+        *,
+        start_date: str,
+        end_date: str,
+        limit: int = 60,
+    ) -> MarketFactBatch:
+        return await asyncio.to_thread(
+            self._service.read_sentiment_facts,
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
 
 
 def _quote(item: NormalizedSnapshot) -> MarketQuote:
@@ -678,6 +762,12 @@ def _quote(item: NormalizedSnapshot) -> MarketQuote:
         retrieved_at=item.source.ingested_at,
         frequency=item.source.frequency.value,
         freshness=item.freshness.status.value,
+        session_alignment=(
+            "latest_released_session"
+            if item.source.data_time.date()
+            < item.source.ingested_at.astimezone(item.source.data_time.tzinfo).date()
+            else "current_session"
+        ),
         market_status=item.freshness.release_state.value,
         source_endpoint=item.source.endpoint,
         capability_version=item.source.capability_version,

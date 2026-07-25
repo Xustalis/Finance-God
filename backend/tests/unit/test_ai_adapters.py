@@ -663,6 +663,58 @@ async def test_stepfun_provider_uses_benchmarked_profile_configuration() -> None
     assert result.profile_delta == {ai.ProfileDimension.RISK_TOLERANCE: 0.6}
 
 
+@pytest.mark.asyncio
+async def test_stepfun_retries_one_invalid_structured_response() -> None:
+    valid = {
+        "reply": "已记录你的回答。",
+        "target_dimension": "risk_tolerance",
+        "profile_value": 0.4,
+        "confidence": 0.7,
+        "should_continue": True,
+        "next_question": "这笔钱多久后可能需要使用？",
+        "next_question_dimension": "liquidity_need",
+    }
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        if len(bodies) == 1:
+            return deepseek_raw_response("")
+        return deepseek_response(valid)
+
+    orchestrator = ai.StepFunTextProvider(
+        api_key="stepfun-secret",
+        transport=httpx.MockTransport(handler),
+    ).create(model_name=ai.STEPFUN_PROFILE_MODEL, system_prompt="system prompt")
+
+    result = await orchestrator.respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert len(bodies) == 2
+    assert "previous response contained no valid JSON object" in bodies[1]["messages"][-1]["content"]
+    assert result.reply == "已记录你的回答。"
+
+
+@pytest.mark.asyncio
+async def test_stepfun_stops_after_one_invalid_response_retry() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return deepseek_raw_response("")
+
+    orchestrator = ai.StepFunTextProvider(
+        api_key="stepfun-secret",
+        transport=httpx.MockTransport(handler),
+    ).create(model_name=ai.STEPFUN_PROFILE_MODEL, system_prompt="system prompt")
+
+    with pytest.raises(ai.AIProviderError) as raised:
+        await orchestrator.respond(**DEEPSEEK_RESPOND_ARGS)
+
+    assert calls == 2
+    assert raised.value.code == "STEPFUN_INVALID_RESPONSE"
+
+
 def test_stepfun_provider_only_accepts_benchmarked_profile_model() -> None:
     provider = ai.StepFunTextProvider(api_key="stepfun-secret")
 

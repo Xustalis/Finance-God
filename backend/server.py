@@ -6,14 +6,15 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 from decimal import Decimal
 from threading import Lock
+from time import monotonic
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -30,6 +31,7 @@ from finance_god.api.agent_routes import (
 )
 from finance_god.api.auth import AuthenticationError
 from finance_god.api.crawler_routes import create_crawler_routes
+from finance_god.api.desk_routes import create_desk_routes, project_suitability_profile
 from finance_god.api.evidence_routes import create_evidence_routes
 from finance_god.api.mandate_routes import create_mandate_routes
 from finance_god.api.simulation import create_simulation_routes
@@ -39,16 +41,21 @@ from finance_god.api.workflow_routes import (
     create_workflow_routes,
 )
 from finance_god.api.workspace_routes import create_workspace_routes
-from finance_god.application.candidate_service import CandidateScoringService
+from finance_god.application.candidate_service import (
+    CandidateResponse,
+    CandidateScoringService,
+    candidates_for_profile,
+)
 from finance_god.application.decision_inbox import DecisionInboxService
 from finance_god.application.evidence_service import EvidenceService
 from finance_god.application.ledger_service import SimulationLedgerService
 from finance_god.application.mandate_service import MandateService
-from finance_god.application.market_overview import build_market_overview
 from finance_god.application.market_poller import MarketPoller
 from finance_god.application.portfolio_query import PortfolioQueryService
 from finance_god.application.trade_plan_service import TradePlanService
-from finance_god.domain import Notification
+from finance_god.application.workflow_worker import MarketAlertContext, WorkflowWorker
+from finance_god.crawler.service import get_crawler_service
+from finance_god.domain import Notification, VersionReference
 from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
 from finance_god.infrastructure.mandate_provider import (
     PersistentAuthorizationProvider,
@@ -57,6 +64,7 @@ from finance_god.infrastructure.persistence.market_monitor_repository import (
     MarketMonitorUnitOfWork,
 )
 from finance_god.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
+from finance_god.infrastructure.persistence.workflow_uow import WorkflowUnitOfWork
 from finance_god.infrastructure.persistence.workspace_uow import WorkspaceUnitOfWork
 from finance_god.infrastructure.simulation_wiring import (
     SystemClock,
@@ -81,6 +89,7 @@ from finance_god.orchestration.workflows import (
 )
 
 if TYPE_CHECKING:
+    from finance_god.crawler.service import CrawlerService
     from finance_god.learning.context import VerifiedKnowledgeReader
 
 _LOGGER = logging.getLogger(__name__)
@@ -97,10 +106,17 @@ agent_runtime_reason: str | None = None
 learning_context_reader: VerifiedKnowledgeReader | None = None
 market_poller_task: asyncio.Task[None] | None = None
 market_poller_stop: asyncio.Event | None = None
+workflow_worker_task: asyncio.Task[None] | None = None
+workflow_worker_stop: asyncio.Event | None = None
+workflow_worker_wakeup: asyncio.Event | None = None
 _agent_lock = Lock()
 _learning_lock = Lock()
 _service_lock = Lock()
 _crawler_service: "CrawlerService | None" = None
+_desk_decision_contexts: dict[str, tuple[str, str, float]] = {}
+_DESK_DECISION_CONTEXT_TTL_SECONDS = 1_800.0
+_readiness_cache: tuple[float, bool, str] | None = None
+_readiness_lock = asyncio.Lock()
 
 
 def _crawler_service_instance() -> "CrawlerService":
@@ -205,6 +221,9 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     global agent_runtime, agent_runtime_reason
     global learning_context_reader
     global market_poller_task, market_poller_stop
+    global workflow_worker_task, workflow_worker_stop, workflow_worker_wakeup
+    global _readiness_cache
+    _readiness_cache = None
     market_data = None
     market_application = None
     workflow_commands = None
@@ -217,6 +236,9 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
     learning_context_reader = None
     market_poller_task = None
     market_poller_stop = None
+    workflow_worker_task = None
+    workflow_worker_stop = None
+    workflow_worker_wakeup = None
     try:
         workflow_runtime = create_workflow_command_runtime_from_environment(
             database_url=settings.database_url
@@ -229,12 +251,19 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         )
         workflow_runtime_readiness_reason = "DQ_WORKFLOW_RUNTIME_UNAVAILABLE"
     market_poller_stop, market_poller_task = _start_market_poller()
+    (
+        workflow_worker_stop,
+        workflow_worker_wakeup,
+        workflow_worker_task,
+    ) = _start_workflow_worker()
     try:
         yield
     finally:
         runtime = workflow_runtime
         stop_event = market_poller_stop
         poller_task = market_poller_task
+        worker_stop = workflow_worker_stop
+        worker_task = workflow_worker_task
         workflow_commands = None
         workflow_runtime = None
         simulation_execution = None
@@ -246,13 +275,23 @@ async def lifespan(_: Starlette) -> AsyncIterator[None]:
         learning_context_reader = None
         market_poller_task = None
         market_poller_stop = None
+        workflow_worker_task = None
+        workflow_worker_stop = None
+        workflow_worker_wakeup = None
         if stop_event is not None:
             stop_event.set()
+        if worker_stop is not None:
+            worker_stop.set()
         if poller_task is not None:
             try:
                 await poller_task
             except Exception:  # noqa: BLE001 - shutdown must not raise
                 _LOGGER.warning("market poller task did not shut down cleanly")
+        if worker_task is not None:
+            try:
+                await worker_task
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                _LOGGER.warning("workflow worker task did not shut down cleanly")
         if runtime is not None:
             await runtime.close()
 
@@ -302,7 +341,7 @@ async def live(_: Request) -> JSONResponse:
     return _json({"liveness": "live"}, status_code=200)
 
 
-async def _readiness() -> tuple[bool, str]:
+async def _probe_readiness() -> tuple[bool, str]:
     if workflow_commands is None:
         return (
             False,
@@ -317,12 +356,76 @@ async def _readiness() -> tuple[bool, str]:
         )
         return False, "DQ_WORKFLOW_DEPENDENCY_UNAVAILABLE"
     try:
+        async with create_db_session() as session:
+            connection = await session.connection()
+            table_names = set(
+                await connection.run_sync(
+                    lambda sync_connection: inspect(
+                        sync_connection
+                    ).get_table_names()
+                )
+            )
+    except Exception as error:  # noqa: BLE001 - stable readiness boundary
+        _LOGGER.error(
+            "database schema readiness probe failed: %s",
+            type(error).__name__,
+        )
+        return False, "DATABASE_SCHEMA_UNAVAILABLE"
+    required_tables = {"market_snapshots", "market_alerts"}
+    if not required_tables.issubset(table_names):
+        return False, "DATABASE_SCHEMA_OUT_OF_DATE"
+    if settings.market_poll_enabled and (
+        market_poller_task is None or market_poller_task.done()
+    ):
+        return False, "MARKET_POLLER_UNAVAILABLE"
+    if settings.workflow_worker_enabled and (
+        workflow_worker_task is None or workflow_worker_task.done()
+    ):
+        return False, "WORKFLOW_WORKER_UNAVAILABLE"
+    try:
         _service, application = _services()
         return await asyncio.to_thread(application.probe_readiness)
     except MarketDataError as error:
         return False, error.public_code.value
     except Exception:  # noqa: BLE001 - readiness must remain a safe boundary
         return False, "MARKET_DATA_INTERNAL_ERROR"
+
+
+async def _readiness() -> tuple[bool, str]:
+    """Return a bounded, coalesced readiness result.
+
+    The probe performs database reflection and upstream checks. A short cache
+    prevents orchestrator and reverse-proxy health checks from multiplying that
+    dependency load, while the lock collapses concurrent cache misses.
+    """
+    global _readiness_cache
+    now = monotonic()
+    cached = _readiness_cache
+    if cached is not None and cached[0] > now:
+        return cached[1], cached[2]
+
+    async with _readiness_lock:
+        now = monotonic()
+        cached = _readiness_cache
+        if cached is not None and cached[0] > now:
+            return cached[1], cached[2]
+        try:
+            result = await asyncio.wait_for(
+                _probe_readiness(),
+                timeout=settings.readiness_probe_timeout_seconds,
+            )
+        except TimeoutError:
+            _LOGGER.error(
+                "readiness probe exceeded %.2fs",
+                settings.readiness_probe_timeout_seconds,
+            )
+            result = (False, "READINESS_PROBE_TIMEOUT")
+        _readiness_cache = (
+            now + settings.readiness_cache_ttl_seconds,
+            result[0],
+            result[1],
+        )
+        return result
 
 
 async def ready(_: Request) -> JSONResponse:
@@ -546,8 +649,6 @@ async def sentiment_facts(request: Request) -> JSONResponse:
     Replaces PandaData margin-balance facts with richer multi-dimensional
     sentiment data: score, level, breadth, north_flow, sector_flows.
     """
-    from finance_god.crawler.service import CrawlerService
-
     try:
         sentiment = await _crawler_service_instance().get_sentiment()
         data = sentiment.model_dump(mode="json")
@@ -701,9 +802,130 @@ def _workflow_definition(workflow_key: str):
     return workflow_runtime.definition(workflow_key)
 
 
+async def _desk_capability_probe() -> dict[str, bool]:
+    """Report only capabilities backed by a live runtime dependency.
+
+    Config flags alone never flip True. workflow_create requires a durable
+    command port that answers a probe; workflow_worker requires the in-process
+    worker task to be running; market_data requires a successful readiness probe.
+    """
+    workflow_create = False
+    if workflow_commands is not None:
+        try:
+            await workflow_commands.get("readiness-probe")
+            workflow_create = True
+        except Exception:  # noqa: BLE001 - unavailable runtime must stay False
+            _LOGGER.error(
+                "desk capability probe: workflow runtime unavailable (%s)",
+                type(workflow_commands).__name__,
+            )
+            workflow_create = False
+
+    worker_task = workflow_worker_task
+    workflow_worker = (
+        settings.workflow_worker_enabled
+        and worker_task is not None
+        and not worker_task.done()
+    )
+
+    market_data_ready = False
+    try:
+        _service, application = _services()
+        market_data_ready, _reason = await asyncio.to_thread(application.probe_readiness)
+    except Exception:  # noqa: BLE001 - market probe must not break bootstrap
+        market_data_ready = False
+
+    agent_answer = False
+    try:
+        await _agent_runtime_provider()
+        agent_answer = True
+    except AgentRuntimeUnavailable:
+        agent_answer = False
+
+    return {
+        "workflow_create": workflow_create,
+        "workflow_worker": bool(workflow_worker),
+        "workflow_list": workflow_create,
+        "workflow_cancel": workflow_create,
+        "workflow_retry": workflow_create,
+        "workflow_resume": workflow_create,
+        "agent_answer": agent_answer,
+        "market_data": bool(market_data_ready),
+        "ui_actions": True,
+        "settings_excluded": True,
+        "workflow_claim": False,
+        "order_submit": False,
+        "order_cancel": False,
+        "fund_transfer": False,
+    }
+
+
 async def _candidate_quotes(symbols: list[str]):
     _, application = _services()
     return await application.quotes(symbols)
+
+
+async def _workflow_market_history(
+    symbol: str,
+    *,
+    start_date: str,
+    end_date: str,
+    limit: int,
+):
+    _, application = _services()
+    return await application.historical_daily_bars(
+        symbol,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+async def _workflow_information_facts(
+    symbol: str,
+    *,
+    start_quarter: str,
+    end_quarter: str,
+    limit: int,
+):
+    _, application = _services()
+    return await application.information_facts(
+        symbol,
+        start_quarter=start_quarter,
+        end_quarter=end_quarter,
+        limit=limit,
+    )
+
+
+async def _workflow_sentiment_facts(
+    symbol: str,
+    *,
+    start_date: str,
+    end_date: str,
+    limit: int,
+):
+    _, application = _services()
+    return await application.sentiment_facts(
+        symbol,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+async def _workflow_crawler_context():
+    return await get_crawler_service().get_full_report(news_limit=20)
+
+
+async def _market_alert_context(symbol: str) -> MarketAlertContext:
+    async with _market_monitor_uow() as uow:
+        snapshot = await uow.monitor.get_snapshot(symbol)
+        latest_alert = await uow.monitor.latest_alert(symbol)
+    return MarketAlertContext(
+        snapshot=snapshot,
+        latest_alert=latest_alert,
+        observed_at=datetime.now(UTC),
+    )
 
 
 def _market_monitor_uow() -> MarketMonitorUnitOfWork:
@@ -806,6 +1028,107 @@ def _start_market_poller() -> tuple[asyncio.Event | None, asyncio.Task[None] | N
     return stop_event, task
 
 
+def _start_workflow_worker() -> tuple[
+    asyncio.Event | None,
+    asyncio.Event | None,
+    asyncio.Task[None] | None,
+]:
+    """Start the Workflow Worker when enabled and the runtime is available."""
+    if not settings.workflow_worker_enabled:
+        return None, None, None
+    runtime = workflow_runtime
+    if runtime is None:
+        _LOGGER.info("workflow worker idle: workflow runtime unavailable")
+        return None, None, None
+    session_factory = runtime.session_factory
+    registry = runtime.registry
+
+    def uow_factory() -> WorkflowUnitOfWork:
+        return WorkflowUnitOfWork(session_factory)
+
+    wake_event = asyncio.Event()
+    worker = WorkflowWorker(
+        uow_factory=uow_factory,
+        runtime_provider=_agent_runtime_provider,
+        evidence_recorder=_record_workflow_evidence,
+        profile_provider=_workflow_profile_context,
+        candidate_provider=_workflow_candidates,
+        market_context_provider=_candidate_quotes,
+        market_history_provider=_workflow_market_history,
+        information_facts_provider=_workflow_information_facts,
+        sentiment_facts_provider=_workflow_sentiment_facts,
+        crawler_context_provider=_workflow_crawler_context,
+        market_alert_context_provider=_market_alert_context,
+        portfolio_provider=_workflow_portfolio,
+        trade_plan_provider=_workflow_trade_plan,
+        order_draft_provider=_workflow_order_draft,
+        order_draft_review_provider=_workflow_order_draft_review,
+        registry=registry,
+        batch_size=settings.workflow_worker_batch_size,
+        wake_event=wake_event,
+    )
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(
+        worker.run_forever(
+            interval_seconds=settings.workflow_worker_interval_seconds,
+            stop_event=stop_event,
+        )
+    )
+    _LOGGER.info(
+        "workflow worker started at %.1fs interval (batch=%d)",
+        settings.workflow_worker_interval_seconds,
+        settings.workflow_worker_batch_size,
+    )
+    return stop_event, wake_event, task
+
+
+async def _workflow_portfolio(owner_id: str):
+    return await PortfolioQueryService(
+        uow_factory=_simulation_uow_factory,
+        clock=SystemClock(),
+        rule_version=SIMULATION_RULE_VERSION,
+    ).positions(owner_id=owner_id)
+
+
+async def _workflow_trade_plan(
+    owner_id: str,
+    symbol: str,
+    idempotency_key: str,
+):
+    return await _trade_plan_service().create_from_candidate(
+        owner_id=owner_id,
+        instrument_id=symbol,
+        idempotency_key=idempotency_key,
+    )
+
+
+async def _workflow_order_draft(owner_id: str, draft_id: str):
+    if simulation_execution is None:
+        _simulation_routes()
+    if simulation_execution is None:
+        raise RuntimeError("simulation execution service is unavailable")
+    return await simulation_execution.get_draft(
+        owner_id=owner_id,
+        draft_id=draft_id,
+    )
+
+
+async def _workflow_order_draft_review(
+    owner_id: str,
+    draft_id: str,
+    expected_revision: int,
+):
+    if simulation_execution is None:
+        _simulation_routes()
+    if simulation_execution is None:
+        raise RuntimeError("simulation execution service is unavailable")
+    return await simulation_execution.review(
+        owner_id=owner_id,
+        draft_id=draft_id,
+        expected_revision=expected_revision,
+    )
+
+
 def _candidate_service() -> CandidateScoringService:
     """Build the deterministic candidate scoring service on demand."""
     portfolio = PortfolioQueryService(
@@ -817,6 +1140,62 @@ def _candidate_service() -> CandidateScoringService:
         portfolio=portfolio,
         quotes_provider=_candidate_quotes,
         rule_version=SIMULATION_RULE_VERSION,
+    )
+
+
+async def _workflow_candidates(
+    owner_id: str,
+    now,
+    profile: dict | None,
+) -> CandidateResponse:
+    """Use the same candidate scorer and persisted ignore state as `/workspace`."""
+
+    async with WorkspaceUnitOfWork(_workspace_session) as uow:
+        ignores = await uow.candidate_ignores.list(owner_id)
+    return await candidates_for_profile(
+        service=_candidate_service(),
+        owner_id=owner_id,
+        now=now,
+        profile=profile,
+        ignored={row.instrument_id: row.reason for row in ignores},
+    )
+
+
+async def _trusted_simulation_market_reference(
+    symbol: str,
+) -> tuple[Decimal, VersionReference]:
+    """Bind a draft to a server-read PandaData quote, never browser input."""
+
+    requested_symbol = symbol.strip().upper()
+    _service, application = _services()
+    batch = await application.quotes((requested_symbol,))
+    quote = next(
+        (item for item in batch.quotes if item.symbol == requested_symbol),
+        None,
+    )
+    if quote is None:
+        message = (
+            batch.errors.get(requested_symbol)
+            or "trusted PandaData quote is unavailable"
+        )
+        raise ValueError(message)
+    if quote.last <= 0:
+        raise ValueError("trusted PandaData quote has no positive latest price")
+    if quote.market_status not in {"in_session", "released"}:
+        raise ValueError(
+            f"trusted PandaData quote market status is {quote.market_status}"
+        )
+    if quote.freshness in {"error", "unavailable", "missing"}:
+        raise ValueError(
+            f"trusted PandaData quote freshness is {quote.freshness}"
+        )
+    return (
+        quote.last,
+        VersionReference(
+            object_type="market_quote",
+            object_id=quote.symbol,
+            version=quote.provider_time,
+        ),
     )
 
 
@@ -856,11 +1235,52 @@ def _evidence_service() -> EvidenceService:
 
 
 async def _record_agent_evidence(owner_id: str, subject: str, run) -> None:
-    """Persist evidence for a completed agent run (best-effort, non-blocking)."""
+    """Persist evidence for a completed direct Agent run before responding."""
     await _evidence_service().record_agent_run(
         owner_id=owner_id,
         run=run,
         subject=subject,
+    )
+
+
+async def _record_workflow_evidence(
+    *,
+    owner_id: str,
+    subject: str,
+    run,
+    object_type: str,
+    object_id: str,
+    version: str,
+    content: dict[str, object] | None = None,
+    conclusion: str | None = None,
+    provider: str = "multi-agent-runtime",
+    generated_at=None,
+) -> None:
+    """Persist a real AgentRun or deterministic artifact before completion."""
+
+    evidence = _evidence_service()
+    if content is not None:
+        await evidence.record(
+            owner_id=owner_id,
+            object_type=object_type,
+            object_id=object_id,
+            version=version,
+            subject=subject,
+            conclusion=conclusion,
+            content=content,
+            provider=provider,
+            generated_at=generated_at,
+        )
+        return
+    if run is None:
+        raise ValueError("workflow evidence requires an AgentRun or content")
+    await evidence.record_agent_run(
+        owner_id=owner_id,
+        run=run,
+        subject=subject,
+        object_type=object_type,
+        object_id=object_id,
+        version=version,
     )
 
 
@@ -904,6 +1324,16 @@ async def _investor_profile_context(owner_id: str) -> dict | None:
     if selected is not None:
         context["selected_direction"] = selected
     return context
+
+
+async def _workflow_profile_context(owner_id: str) -> dict | None:
+    """Return only the approved suitability projection to workflow Agents."""
+
+    raw = await _investor_profile_context(owner_id)
+    if raw is None:
+        return None
+    projection = project_suitability_profile(raw)
+    return projection.model_dump(mode="json") if projection.available else None
 
 
 def _verified_knowledge_reader() -> VerifiedKnowledgeReader:
@@ -963,6 +1393,7 @@ def _assemble_simulation_routes() -> list:
         portfolio=portfolio,
         decision_inbox=decision_inbox,
         owner_resolver=_authenticated_owner,
+        market_reference_provider=_trusted_simulation_market_reference,
     )
 
 
@@ -988,6 +1419,7 @@ def _simulation_routes() -> list:
             uow_factory=_simulation_uow_factory,
             simulation_session_factory=_workspace_session,
             ledger=ledger,
+            market_data=_services()[0],
             authorization=PersistentAuthorizationProvider(_mandate_service()),
         )
         _LOGGER.info("simulation services initialized successfully")
@@ -1049,6 +1481,87 @@ async def _agent_runtime_provider() -> MultiAgentRuntime:
     return agent_runtime
 
 
+async def _generate_desk_quick_commands(
+    _owner_id: str,
+    stage: str,
+    section: str,
+    symbol: str,
+    instrument_name: str,
+    projection,
+    answer_text: str | None,
+    workflow_evidence: dict | None,
+) -> tuple[str, str, str]:
+    runtime = await _agent_runtime_provider()
+    return await runtime.generate_desk_quick_commands(
+        stage=stage,
+        section=section,
+        symbol=symbol,
+        instrument_name=instrument_name,
+        profile_projection=projection.model_dump(mode="json"),
+        answer_text=answer_text,
+        workflow_evidence=workflow_evidence,
+    )
+
+
+async def _record_desk_decision(
+    owner_id: str,
+    decision_id: str,
+    answer_text: str,
+) -> None:
+    now = monotonic()
+    expired = [
+        key
+        for key, (_, _, created_at) in _desk_decision_contexts.items()
+        if now - created_at > _DESK_DECISION_CONTEXT_TTL_SECONDS
+    ]
+    for key in expired:
+        _desk_decision_contexts.pop(key, None)
+    if len(_desk_decision_contexts) >= 512:
+        oldest = min(
+            _desk_decision_contexts,
+            key=lambda key: _desk_decision_contexts[key][2],
+        )
+        _desk_decision_contexts.pop(oldest, None)
+    _desk_decision_contexts[decision_id] = (owner_id, answer_text, now)
+
+
+async def _desk_quick_command_context(
+    owner_id: str,
+    stage: str,
+    reference: str,
+) -> str | dict:
+    if stage == "after_answer":
+        stored = _desk_decision_contexts.get(reference)
+        if stored is None or stored[0] != owner_id:
+            raise LookupError("direct-answer context is unavailable")
+        if monotonic() - stored[2] > _DESK_DECISION_CONTEXT_TTL_SECONDS:
+            _desk_decision_contexts.pop(reference, None)
+            raise LookupError("direct-answer context has expired")
+        return stored[1]
+    commands = _workflow_command_provider()
+    if await commands.get_owner_id(reference) != owner_id:
+        raise LookupError("workflow is unavailable")
+    run = await commands.get(reference)
+    if (
+        run is None
+        or run.status.value != "completed"
+        or run.final_artifact is None
+    ):
+        raise ValueError("workflow has not produced final evidence")
+    evidence = await _evidence_service().get(
+        owner_id=owner_id,
+        object_type=run.final_artifact.object_type,
+        object_id=run.final_artifact.object_id,
+        version=run.final_artifact.version,
+    )
+    return evidence.model_dump(mode="json", exclude={"error_trace"})
+
+
+def _desk_instrument_name(symbol: str) -> str:
+    instrument = _services()[0].resolve(symbol)
+    return instrument.name or instrument.symbol
+
+
 finance_routes = [
     Route("/live", live),
     Route("/ready", ready),
@@ -1068,6 +1581,7 @@ finance_routes = [
             session_factory=_workspace_session,
             owner_resolver=_authenticated_owner,
             candidate_service_provider=_candidate_service,
+            candidate_profile_provider=_workflow_profile_context,
         ),
         name="workspace",
     ),
@@ -1107,6 +1621,21 @@ finance_routes = [
         commands_provider=_workflow_command_provider,
         definition_provider=_workflow_definition,
         owner_resolver=_authenticated_owner,
+        instrument_validator=lambda symbol: _services()[0].resolve(symbol),
+        work_available=lambda: (
+            workflow_worker_wakeup.set()
+            if workflow_worker_wakeup is not None
+            else None
+        ),
+    ),
+    *create_desk_routes(
+        owner_resolver=_authenticated_owner,
+        profile_provider=_investor_profile_context,
+        workflow_worker_enabled=settings.workflow_worker_enabled,
+        capability_provider=_desk_capability_probe,
+        quick_command_provider=_generate_desk_quick_commands,
+        quick_command_context_provider=_desk_quick_command_context,
+        instrument_name_provider=_desk_instrument_name,
     ),
     Mount(
         "/agent",
@@ -1115,7 +1644,10 @@ finance_routes = [
             owner_resolver=_authenticated_owner,
             evidence_recorder=_record_agent_evidence,
             profile_provider=_investor_profile_context,
+            portfolio_provider=_workflow_portfolio,
             learning_context_provider=_verified_learning_context,
+            workflow_definition_provider=_workflow_definition,
+            decision_recorder=_record_desk_decision,
         ),
         name="agent",
     ),

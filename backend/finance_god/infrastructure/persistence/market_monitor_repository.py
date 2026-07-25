@@ -81,6 +81,15 @@ class MarketMonitorRepository:
         )
         return [_alert(row) for row in rows]
 
+    async def latest_alert(self, symbol: str) -> MarketAlert | None:
+        row = await self._session.scalar(
+            select(MarketAlertRow)
+            .where(MarketAlertRow.symbol == symbol)
+            .order_by(MarketAlertRow.detected_at.desc(), MarketAlertRow.id.desc())
+            .limit(1)
+        )
+        return _alert(row) if row is not None else None
+
 
 def _snapshot(row: MarketSnapshotRow) -> MarketSnapshot:
     return MarketSnapshot(

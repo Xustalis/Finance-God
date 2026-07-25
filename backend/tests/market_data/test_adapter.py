@@ -15,12 +15,13 @@ from finance_god.market_data import (
 )
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
-from .conftest import US_NOW, FakeSDK, adapter, bar
+from .conftest import US_NOW, FakeSDK, adapter, bar, stock_snapshot
 
 
 def test_a_share_snapshot_daily_and_1m_use_verified_endpoints() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_daily"] = [bar("20260723")]
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     sdk.responses["get_stock_rt_min"] = [
         bar("20260723 10:31:00"),
         bar("20260723 10:30:00"),
@@ -59,7 +60,7 @@ def test_a_share_snapshot_daily_and_1m_use_verified_endpoints() -> None:
     assert minute.items[-1].source.frequency is DataFrequency.MINUTE_1
     called = [name for name, _ in sdk.calls]
     assert called.count("init_token") == 1
-    assert "get_stock_rt_daily" not in called
+    assert called.count("get_stock_rt_daily") == 1
     assert "get_stock_daily" in called
     assert "get_stock_rt_min" in called
 
@@ -201,6 +202,9 @@ def test_snapshot_rejects_any_wrong_symbol_without_selecting_a_matching_row() ->
 def test_snapshot_without_expected_date_uses_the_provider_trading_date() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [bar("20260723 15:00:00")]
+    sdk.responses["get_stock_daily"] = [
+        stock_snapshot(data_time="20260723", close=10.2)
+    ]
     subject = adapter(sdk, now=US_NOW)
 
     result = subject.fetch_snapshot(
@@ -217,6 +221,9 @@ def test_snapshot_for_prior_authoritative_date_uses_historical_minute_endpoint()
 ):
     sdk = FakeSDK()
     sdk.responses["get_stock_min"] = [bar("20260723 15:00:00")]
+    sdk.responses["get_stock_daily"] = [
+        stock_snapshot(data_time="20260723", close=10.2)
+    ]
     subject = adapter(sdk, now=US_NOW)
 
     result = subject.fetch_snapshot(
@@ -237,6 +244,23 @@ def test_snapshot_for_prior_authoritative_date_uses_historical_minute_endpoint()
         }
     ]
     assert not any(name == "get_stock_rt_min" for name, _ in sdk.calls)
+
+
+def test_snapshot_fails_explicitly_when_daily_previous_close_is_missing() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    sdk.responses["get_stock_rt_daily"] = [bar("20260723 10:31:00")]
+    subject = adapter(sdk)
+
+    result = subject.fetch_snapshot(
+        DEFAULT_INSTRUMENT_MASTER.resolve("000001.SZ"),
+        release_state=ReleaseState.RELEASED,
+        expected_date="20260723",
+    )
+
+    assert result.items == ()
+    assert result.diagnostics[0].code is DiagnosticCode.SCHEMA_DRIFT
+    assert "previous_close" in result.diagnostics[0].message
 
 
 def test_master_and_calendar_normalizers_validate_schema() -> None:

@@ -64,15 +64,21 @@ def adapter(
     )
 
 
-def stock_snapshot(symbol: str = "000001.SZ") -> dict[str, object]:
+def stock_snapshot(
+    symbol: str = "000001.SZ",
+    *,
+    data_time: str = "20260723 10:31:00",
+    previous_close: float = 10.0,
+    close: float = 10.3,
+) -> dict[str, object]:
     return {
         "symbol": symbol,
-        "date": "20260723 10:31:00",
-        "pre_close": 10.0,
+        "date": data_time,
+        "pre_close": previous_close,
         "open": 10.0,
         "high": 10.5,
         "low": 9.9,
-        "close": 10.3,
+        "close": close,
         "volume": 1000,
         "amount": 10_300,
     }

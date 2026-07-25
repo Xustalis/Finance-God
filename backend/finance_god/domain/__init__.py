@@ -1,5 +1,6 @@
 from .accounts import AccountStatus, SimulationAccount
 from .errors import (
+    ActiveWorkflowConflict,
     ConcurrentCommandConflict,
     DomainInvariantViolation,
     InvalidStateTransition,
@@ -85,6 +86,7 @@ __all__ = [
     "AccountOpenedPayload",
     "AccountResetClosedPayload",
     "AuditReference",
+    "ActiveWorkflowConflict",
     "CashReleasedPayload",
     "CashReservedPayload",
     "ConcurrentCommandConflict",

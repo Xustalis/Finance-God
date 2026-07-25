@@ -23,7 +23,6 @@ from finance_god.orchestration.workflow_registry import (
     WorkflowNodeKind,
 )
 
-
 INPUT = (
     VersionReference(
         object_type="snapshot",
@@ -33,6 +32,7 @@ INPUT = (
 )
 
 EXPECTED = {
+    WorkflowKey.RESEARCH_CANDIDATES: ("WF-RC-01", "ResearchCandidateSet"),
     WorkflowKey.COMPANY_RESEARCH: ("WF-CR-01", "ResearchMemo"),
     WorkflowKey.MARKET_CONTEXT: ("WF-MC-01", "MarketContext"),
     WorkflowKey.PORTFOLIO_STRESS: ("WF-PS-01", "PortfolioRiskReview"),
@@ -59,9 +59,9 @@ class FormalWorkflowRegistryTest(unittest.TestCase):
         self.catalog = AgentGovernanceCatalog()
         self.registry = FormalWorkflowRegistry.build_default(self.catalog)
 
-    def test_registry_has_exactly_the_fifteen_prd_workflows(self) -> None:
+    def test_registry_has_every_product_workflow(self) -> None:
         self.assertEqual(set(self.registry.as_mapping()), set(WorkflowKey))
-        self.assertEqual(len(self.registry.list()), 15)
+        self.assertEqual(len(self.registry.list()), len(WorkflowKey))
         for key, (prd_id, artifact) in EXPECTED.items():
             with self.subTest(workflow=key.value):
                 definition = self.registry.get(key)
@@ -75,6 +75,18 @@ class FormalWorkflowRegistryTest(unittest.TestCase):
                     len([node for node in definition.nodes if node.is_finalizer]),
                     1,
                 )
+
+    def test_research_candidates_is_read_only_and_uses_candidate_service(self) -> None:
+        definition = self.registry.get(WorkflowKey.RESEARCH_CANDIDATES)
+        service_nodes = {
+            node.service_id: node
+            for node in definition.nodes
+            if node.service_id
+        }
+        services = set(service_nodes)
+        self.assertIn("candidate.score", services)
+        self.assertTrue(service_nodes["candidate.score"].is_quality_gate)
+        self.assertFalse(definition.allows_trade_eligibility)
 
     def test_agent_sets_come_only_from_governance_catalog(self) -> None:
         for definition in self.registry.list():
@@ -90,6 +102,77 @@ class FormalWorkflowRegistryTest(unittest.TestCase):
                 for agent_id in node.agent_ids
             }
             self.assertEqual(actual, expected)
+
+    def test_phased_agent_nodes_keep_each_governed_timeout_budget(self) -> None:
+        definition = self.registry.get(WorkflowKey.MARKET_CONTEXT)
+        agent_nodes = [node for node in definition.nodes if node.agent_ids]
+        self.assertGreater(len(agent_nodes), 1)
+        for node in agent_nodes:
+            entry = self.catalog.get(node.agent_ids[0])
+            self.assertEqual(node.timeout_seconds, entry.timeout_seconds)
+            self.assertEqual(
+                node.retry_budget.total_duration_seconds,
+                entry.failure_policy.total_duration_seconds,
+            )
+
+    def test_available_data_services_run_before_dependent_agents(self) -> None:
+        expected = {
+            WorkflowKey.COMPANY_RESEARCH: {
+                "market_context.snapshot",
+                "crawler.context",
+            },
+            WorkflowKey.MARKET_CONTEXT: {
+                "market_context.snapshot",
+                "crawler.context",
+            },
+            WorkflowKey.PORTFOLIO_STRESS: {"portfolio.stress_calculate"},
+            WorkflowKey.TRADE_PLAN_GENERATION: {"trade_plan.calculate"},
+            WorkflowKey.ORDER_REVIEW: {"order_review.calculate"},
+            WorkflowKey.EVENT_IMPACT: {
+                "market_context.snapshot",
+                "crawler.context",
+                "market_alert_context.resolve",
+            },
+        }
+        for key, service_ids in expected.items():
+            with self.subTest(workflow=key.value):
+                nodes = self.registry.get(key).nodes
+                first_agent = min(
+                    index
+                    for index, node in enumerate(nodes)
+                    if node.agent_ids
+                    and node.agent_ids != ("financegod:planner",)
+                )
+                service_indexes = {
+                    node.service_id: index
+                    for index, node in enumerate(nodes)
+                    if node.service_id in service_ids
+                }
+                self.assertEqual(set(service_indexes), service_ids)
+                self.assertTrue(
+                    all(index < first_agent for index in service_indexes.values())
+                )
+
+    def test_independent_research_context_services_share_the_same_dependency(self) -> None:
+        definition = self.registry.get(WorkflowKey.COMPANY_RESEARCH)
+        services = {
+            node.service_id: node
+            for node in definition.nodes
+            if node.service_id in {"market_context.snapshot", "crawler.context"}
+        }
+        self.assertEqual(
+            services["market_context.snapshot"].dependencies,
+            services["crawler.context"].dependencies,
+        )
+        first_research_phase = next(
+            node
+            for node in definition.nodes
+            if node.agent_ids and node.agent_ids != ("financegod:planner",)
+        )
+        self.assertEqual(
+            set(first_research_phase.dependencies),
+            {node.node_id for node in services.values()},
+        )
 
     def test_nontrading_workflows_cannot_be_trade_eligible(self) -> None:
         self.assertFalse(

@@ -138,7 +138,7 @@ class AgentGovernanceCatalogTest(unittest.TestCase):
             self.assertEqual(capability.agent_id, definition.agent_id)
             self.assertFalse(hasattr(entry, "vendor_definition"))
 
-    def test_independent_prd_fixture_verifies_all_660_matrix_cells(self) -> None:
+    def test_independent_prd_fixture_verifies_every_matrix_cell(self) -> None:
         self.assertEqual(
             set(PRD_AGENT_MATRIX), {entry.agent_id for entry in self.catalog.list()}
         )
@@ -158,7 +158,7 @@ class AgentGovernanceCatalogTest(unittest.TestCase):
                     f"{agent_id}/{workflow}",
                 )
                 checked += 1
-        self.assertEqual(checked, 44 * 15)
+        self.assertEqual(checked, 44 * len(WORKFLOWS))
 
     def test_every_conditional_cell_has_exact_prd_condition_and_default_denies(
         self,

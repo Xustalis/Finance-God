@@ -26,7 +26,6 @@ function profileCompleted(): boolean {
 const LEGACY_TRADING_PATHS = [
   '/markets',
   '/watchlist',
-  '/desk',
   '/overview',
   '/portfolio',
   '/trade-plans/:planId',

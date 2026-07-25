@@ -67,6 +67,11 @@ class WorkflowRepositoryProtocol(Protocol):
         run_id: str,
     ) -> tuple[WorkflowExecutionAuditRow, ...]: ...
     async def list_outbox(self, run_id: str) -> tuple[WorkflowOutboxRow, ...]: ...
+    async def list_queued(
+        self,
+        *,
+        limit: int = 1,
+    ) -> tuple[tuple[str, str, str, str], ...]: ...
 
 
 def create_workflow_session_factory(

@@ -38,6 +38,11 @@ fi
 grep -q '^  learning:$' "$COMPOSE_FILE"
 grep -q 'learning_data:/app/artifacts/knowledge:ro' "$COMPOSE_FILE"
 grep -q 'python -m scripts.run_self_iteration_loop' "$COMPOSE_FILE"
+grep -Eq "proxy:.*ws: true" "$PROJECT_DIR/frontend/vite.config.ts"
+grep -Fq 'proxy_set_header Upgrade $http_upgrade;' "$PROJECT_DIR/frontend/nginx.conf"
+grep -Fq 'proxy_set_header Connection "upgrade";' "$PROJECT_DIR/frontend/nginx.conf"
+grep -Fq 'proxy_set_header Upgrade $http_upgrade;' "$PROJECT_DIR/deploy/nginx/finance-god.conf"
+grep -Fq 'proxy_set_header Connection "upgrade";' "$PROJECT_DIR/deploy/nginx/finance-god.conf"
 
 write_base_env "$TEST_DIR/deepseek.env"
 printf '%s\n' "DEEPSEEK_API_KEY=test-deepseek-key" >>"$TEST_DIR/deepseek.env"

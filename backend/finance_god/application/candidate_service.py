@@ -15,10 +15,10 @@ order will later face; nothing here is fabricated.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -85,6 +85,8 @@ class CandidateResponse(StrictModel):
     generated_at: AwareDatetime
     rule_version: str
     purpose_summary: str
+    profile_version: int | None = None
+    directions: tuple[str, ...] = ()
     candidates: tuple[Candidate, ...] = ()
     unavailable_reason: str | None = None
 
@@ -101,11 +103,6 @@ _UNIVERSE: tuple[_DirectionEntry, ...] = (
     _DirectionEntry(symbol="000001.SZ", direction="equities", direction_label="权益股票"),
     _DirectionEntry(symbol="600519.SH", direction="equities", direction_label="权益股票"),
     _DirectionEntry(symbol="000002.SZ", direction="equities", direction_label="权益股票"),
-    _DirectionEntry(symbol="601318.SH", direction="cash_fixed_income", direction_label="现金固收"),
-    _DirectionEntry(symbol="600036.SH", direction="cash_fixed_income", direction_label="现金固收"),
-    _DirectionEntry(symbol="000858.SZ", direction="alternatives", direction_label="另类配置"),
-    _DirectionEntry(symbol="300750.SZ", direction="alternatives", direction_label="另类配置"),
-    _DirectionEntry(symbol="002594.SZ", direction="alternatives", direction_label="另类配置"),
 )
 
 
@@ -136,10 +133,29 @@ class CandidateScoringService:
         owner_id: str,
         now: datetime,
         ignored: Mapping[str, str] | None = None,
+        directions: Iterable[str] | None = None,
+        profile_version: int | None = None,
     ) -> CandidateResponse:
         ignored = dict(ignored or {})
+        normalized_directions = _normalize_directions(directions)
+        universe = (
+            tuple(
+                entry
+                for entry in _UNIVERSE
+                if entry.direction in normalized_directions
+            )
+            if directions is not None
+            else _UNIVERSE
+        )
+        if directions is not None and not universe:
+            return self.unavailable_response(
+                now=now,
+                reason="NO_SUPPORTED_DIRECTION_CANDIDATES",
+                profile_version=profile_version,
+                directions=normalized_directions,
+            )
         held_weights, missing_portfolio = await self._held_weights(owner_id)
-        symbols = [entry.symbol for entry in _UNIVERSE]
+        symbols = [entry.symbol for entry in universe]
         quotes_by_symbol: dict[str, MarketQuote] = {}
         quote_errors: dict[str, str] = {}
         unavailable_reason: str | None = None
@@ -159,7 +175,7 @@ class CandidateScoringService:
                 missing_portfolio=missing_portfolio,
                 ignored=ignored,
             )
-            for entry in _UNIVERSE
+            for entry in universe
         )
         return CandidateResponse(
             generated_at=now,
@@ -168,8 +184,29 @@ class CandidateScoringService:
                 "系统依据目标方向标的池与当前仿真持仓生成待研究候选；"
                 "候选不是买入指令，各维度独立解释，不输出单一综合分。"
             ),
+            profile_version=profile_version,
+            directions=normalized_directions,
             candidates=candidates,
             unavailable_reason=unavailable_reason,
+        )
+
+    def unavailable_response(
+        self,
+        *,
+        now: datetime,
+        reason: str,
+        profile_version: int | None = None,
+        directions: Iterable[str] = (),
+    ) -> CandidateResponse:
+        return CandidateResponse(
+            generated_at=now,
+            rule_version=self._rule_version,
+            purpose_summary=(
+                "当前条件不足，未生成可研究候选；候选不是买入指令。"
+            ),
+            profile_version=profile_version,
+            directions=_normalize_directions(directions),
+            unavailable_reason=reason,
         )
 
     async def _held_weights(self, owner_id: str) -> tuple[dict[str, Decimal], bool]:
@@ -239,6 +276,195 @@ class CandidateScoringService:
             as_of=quote.provider_time if quote else None,
             provider=quote.provider if quote else None,
         )
+
+
+async def candidates_for_profile(
+    *,
+    service: CandidateScoringService,
+    owner_id: str,
+    now: datetime,
+    profile: Mapping[str, object] | None,
+    ignored: Mapping[str, str] | None = None,
+) -> CandidateResponse:
+    """Generate candidates from the approved suitability projection only."""
+
+    if not profile or profile.get("available") is False:
+        return service.unavailable_response(now=now, reason="PROFILE_REQUIRED")
+    profile_version = _profile_version(profile.get("version"))
+    selected_direction = _clean_text(profile.get("selected_direction"))
+    recommended = profile.get("recommended_directions")
+    directions = (
+        (selected_direction,)
+        if selected_direction
+        else _normalize_directions(
+            recommended if isinstance(recommended, (list, tuple)) else ()
+        )
+    )
+    if not directions:
+        return service.unavailable_response(
+            now=now,
+            reason="PROFILE_DIRECTIONS_REQUIRED",
+            profile_version=profile_version,
+        )
+    return await service.candidates(
+        owner_id=owner_id,
+        now=now,
+        ignored=ignored,
+        directions=directions,
+        profile_version=profile_version,
+    )
+
+
+def evidence_content_from_candidate_response(
+    response: CandidateResponse,
+) -> dict[str, Any]:
+    """Project deterministic candidate output into the Evidence bundle schema."""
+
+    facts: list[dict[str, Any]] = []
+    inferences: list[dict[str, Any]] = []
+    counterpoints: list[str] = []
+    unknowns: list[str] = []
+    invalidations = [
+        "画像版本、仿真持仓或 PandaData 行情时间变化后，候选需要重新计算。"
+    ]
+    sources: list[dict[str, str | None]] = []
+    if response.unavailable_reason:
+        unknowns.append(_unavailable_reason_text(response.unavailable_reason))
+    for candidate in response.candidates:
+        evidence_id = f"candidate-{candidate.symbol}"
+        dimension_summary = "；".join(
+            f"{dimension.label}={dimension.rating}（{dimension.detail}）"
+            for dimension in candidate.dimensions
+        )
+        facts.append(
+            {
+                "kind": "fact",
+                "statement": (
+                    f"{candidate.symbol}（{candidate.name or '名称未知'}）的候选输入："
+                    f"{dimension_summary}"
+                ),
+                "author_agent_id": "financegod:candidate-scoring",
+                "evidence_ids": [evidence_id],
+                "unknowns": [
+                    field
+                    for dimension in candidate.dimensions
+                    for field in dimension.missing_fields
+                ],
+                "invalidation_conditions": invalidations,
+            }
+        )
+        status = "可进入后续研究" if candidate.tradable else "暂不可进入交易计划"
+        ignored = "；用户已忽略" if candidate.ignored else ""
+        inferences.append(
+            {
+                "kind": "inference",
+                "statement": (
+                    f"{candidate.symbol} · {candidate.direction_label}："
+                    f"{candidate.purpose} 当前状态为“{status}”{ignored}。"
+                ),
+                "author_agent_id": "financegod:candidate-scoring",
+                "evidence_ids": [evidence_id],
+                "unknowns": [
+                    field
+                    for dimension in candidate.dimensions
+                    for field in dimension.missing_fields
+                ],
+                "invalidation_conditions": invalidations,
+            }
+        )
+        counterpoints.extend(
+            f"{candidate.symbol}：{exclusion.detail}"
+            for exclusion in candidate.exclusions
+        )
+        unknowns.extend(
+            f"{candidate.symbol} 缺少 {field}"
+            for dimension in candidate.dimensions
+            for field in dimension.missing_fields
+        )
+        sources.append(
+            {
+                "identifier": evidence_id,
+                "source": (
+                    f"{candidate.provider or 'PandaData unavailable'}:"
+                    f"{candidate.symbol}"
+                ),
+                "excerpt": (
+                    f"upstream_time={candidate.as_of or 'unknown'}; "
+                    f"profile_version={response.profile_version or 'unknown'}; "
+                    f"rule_version={response.rule_version}"
+                ),
+            }
+        )
+    return {
+        "facts": facts,
+        "inferences": inferences,
+        "counterpoints": _dedupe_text(counterpoints),
+        "unknowns": _dedupe_text(unknowns),
+        "invalidation_conditions": invalidations,
+        "sources": sources,
+        "agent_nodes": [],
+        "notices": [],
+    }
+
+
+def candidate_response_conclusion(response: CandidateResponse) -> str:
+    if response.unavailable_reason:
+        return _unavailable_reason_text(response.unavailable_reason)
+    available = [
+        candidate
+        for candidate in response.candidates
+        if candidate.tradable and not candidate.ignored
+    ]
+    return (
+        f"已按画像版本 {response.profile_version or '未知'} 与方向"
+        f"（{'、'.join(response.directions) or '未限定'}）生成 "
+        f"{len(available)} 个可继续研究的候选。候选不是买入建议，"
+        "不包含自动下单。"
+    )
+
+
+def _normalize_directions(values: Iterable[object] | None) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    normalized: list[str] = []
+    for value in values:
+        item = _clean_text(value)
+        if item and item not in normalized:
+            normalized.append(item)
+    return tuple(normalized)
+
+
+def _clean_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _profile_version(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _unavailable_reason_text(reason: str) -> str:
+    return {
+        "PROFILE_REQUIRED": "需要先完成投资画像，当前没有生成股票候选。",
+        "PROFILE_DIRECTIONS_REQUIRED": "画像没有可用的选定或推荐方向，未生成股票候选。",
+        "NO_SUPPORTED_DIRECTION_CANDIDATES": (
+            "画像方向在当前 PandaData 股票候选池中没有受支持标的。"
+        ),
+        "MARKET_DATA_UNAVAILABLE": (
+            "PandaData 行情不可用，候选仅保留缺失状态，不能进入交易计划。"
+        ),
+    }.get(reason, f"候选生成不可用：{reason}")
+
+
+def _dedupe_text(values: Iterable[str]) -> list[str]:
+    return list(dict.fromkeys(value for value in values if value))
 
 
 def _portfolio_fit(

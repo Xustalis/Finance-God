@@ -1,5 +1,5 @@
 export type UserRole = 'user' | 'admin'
-export type Capability = 'text' | 'stt' | 'tts'
+export type Capability = 'text' | 'stt' | 'tts' | 'realtime'
 export type ProfileDimension = 'risk_tolerance' | 'liquidity_need' | 'investment_goal' | 'loss_behavior' | 'investment_knowledge' | 'income_stability'
 export type InvestmentDirection = 'cash_fixed_income' | 'public_funds' | 'equities' | 'alternatives' | 'long_term_insurance'
 export type InputMode = 'text' | 'voice'

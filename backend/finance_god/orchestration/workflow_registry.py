@@ -1,4 +1,4 @@
-"""Versioned registry for the fifteen product workflows."""
+"""Versioned registry for the product workflows."""
 
 from __future__ import annotations
 
@@ -17,10 +17,15 @@ from finance_god.agents.contracts import (
     WorkflowKey,
 )
 
-WORKFLOW_REGISTRY_VERSION: Final = "finance-god-workflows-v1"
-MAX_NODE_TIMEOUT_SECONDS: Final = 300
+WORKFLOW_REGISTRY_VERSION: Final = "finance-god-workflows-v2"
+# Multi-agent research nodes run governed roles sequentially so later reviewers
+# can consume earlier evidence. Company research alone sums to 17×60s catalogs;
+# keep a hard ceiling, but do not clamp the group to a single-agent budget.
+MAX_NODE_TIMEOUT_SECONDS: Final = 1_800
 MAX_WORKFLOW_DURATION_SECONDS: Final = 3_600
 MAX_WORKFLOW_ATTEMPTS: Final = 192
+MAX_NODE_RETRY_DURATION_SECONDS: Final = 3_600
+AGENT_COORDINATION_OVERHEAD_SECONDS: Final = 15
 
 
 class FrozenModel(BaseModel):
@@ -52,7 +57,7 @@ class InputQualityGate(StrEnum):
 class RetryBudget(FrozenModel):
     retry_limits: dict[FailureKind, int]
     total_attempt_limit: int = Field(ge=1, le=8)
-    total_duration_seconds: int = Field(ge=1, le=900)
+    total_duration_seconds: int = Field(ge=1, le=MAX_NODE_RETRY_DURATION_SECONDS)
 
     @model_validator(mode="after")
     def validate_complete_policy(self) -> Self:
@@ -186,6 +191,10 @@ DETERMINISTIC_SERVICE_POLICIES: Final[
         for policy in (
             _service_policy("workflow.input_quality_gate"),
             _service_policy("workflow.artifact_finalize"),
+            _service_policy("candidate.score"),
+            _service_policy("market_context.snapshot"),
+            _service_policy("crawler.context"),
+            _service_policy("market_alert_context.resolve"),
             _service_policy("portfolio.stress_calculate"),
             _service_policy("portfolio.optimize"),
             _service_policy("trade_plan.calculate"),
@@ -207,13 +216,22 @@ DETERMINISTIC_SERVICE_POLICIES: Final[
 
 _PRD_WORKFLOWS: Final = (
     (
+        "WF-RC-01",
+        WorkflowKey.RESEARCH_CANDIDATES,
+        "可研究候选",
+        "ResearchCandidateSet",
+        InputQualityGate.ALLOW_DEGRADED_READ_ONLY,
+        ("画像方向校验", "候选五维评分", "证据化候选集"),
+        ("candidate.score",),
+    ),
+    (
         "WF-CR-01",
         WorkflowKey.COMPANY_RESEARCH,
         "公司研究",
         "ResearchMemo",
         InputQualityGate.ALLOW_DEGRADED_READ_ONLY,
         ("事实审阅", "正反观点与风险辩论", "研究治理汇总"),
-        (),
+        ("market_context.snapshot", "crawler.context"),
     ),
     (
         "WF-MC-01",
@@ -222,7 +240,7 @@ _PRD_WORKFLOWS: Final = (
         "MarketContext",
         InputQualityGate.REQUIRE_USABLE,
         ("市场监控", "新闻与情绪解释", "治理复核"),
-        (),
+        ("market_context.snapshot", "crawler.context"),
     ),
     (
         "WF-PS-01",
@@ -327,7 +345,11 @@ _PRD_WORKFLOWS: Final = (
         "EventImpactReport",
         InputQualityGate.REQUIRE_USABLE,
         ("事件事实", "影响路径", "正反情景", "组合影响", "治理"),
-        (),
+        (
+            "market_context.snapshot",
+            "crawler.context",
+            "market_alert_context.resolve",
+        ),
     ),
     (
         "WF-CM-01",
@@ -379,7 +401,9 @@ class FormalWorkflowRegistry:
         rows = tuple(definitions)
         by_key = {row.workflow_key: row for row in rows}
         if set(by_key) != set(WorkflowKey) or len(rows) != len(WorkflowKey):
-            raise ValueError("formal workflow registry must contain exactly 15 keys")
+            raise ValueError(
+                "formal workflow registry must contain every WorkflowKey exactly once"
+            )
         prd_ids = [row.prd_id for row in rows]
         if len(prd_ids) != len(set(prd_ids)):
             raise ValueError("formal workflow PRD IDs must be unique")
@@ -513,52 +537,102 @@ def _definition_from_prd(
         ),
     ]
     previous = "input_quality_gate"
-    if governed_agents:
-        tools = set(governed_agents[0].tool_allowlist)
-        permissions = set(governed_agents[0].data_permission_allowlist)
-        for entry in governed_agents[1:]:
-            tools.intersection_update(entry.tool_allowlist)
-            permissions.intersection_update(entry.data_permission_allowlist)
-        agent_timeout = max(entry.timeout_seconds for entry in governed_agents)
+    pre_agent_services = tuple(
+        service_id
+        for service_id in service_ids
+        if service_id in {
+            "market_context.snapshot",
+            "crawler.context",
+            "market_alert_context.resolve",
+            "portfolio.stress_calculate",
+            "trade_plan.calculate",
+            "order_review.calculate",
+        }
+    )
+    post_agent_services = tuple(
+        service_id
+        for service_id in service_ids
+        if service_id not in pre_agent_services
+    )
+    pre_service_dependencies = (previous,)
+    pre_service_node_ids: list[str] = []
+    for index, service_id in enumerate(pre_agent_services, start=1):
+        node_id = f"pre_service_{index}"
         nodes.append(
-            WorkflowNodeDefinition(
-                node_id="governed_agents",
-                title="治理目录要求的 Agent 协作",
-                kind=WorkflowNodeKind.AGENT,
-                agent_ids=tuple(entry.agent_id for entry in governed_agents),
-                dependencies=(previous,),
+            _service_node(
+                node_id=node_id,
+                title=f"准备 Agent 输入：{service_id}",
+                service_id=service_id,
+                dependencies=pre_service_dependencies,
                 requirement=NodeRequirement.REQUIRED,
-                timeout_seconds=min(agent_timeout, MAX_NODE_TIMEOUT_SECONDS),
-                retry_budget=_retry_budget(),
-                tool_allowlist=frozenset(tools),
-                data_permissions=frozenset(permissions),
+                is_quality_gate=True,
             )
         )
-        previous = "governed_agents"
-    for index, service_id in enumerate(service_ids, start=1):
+        pre_service_node_ids.append(node_id)
+    if pre_service_node_ids:
+        previous_dependencies = tuple(pre_service_node_ids)
+    else:
+        previous_dependencies = (previous,)
+    if governed_agents:
+        phase_dependencies = previous_dependencies
+        for phase in _agent_phases(governed_agents):
+            phase_node_ids: list[str] = []
+            for entry in phase:
+                node_id = f"agent_{len([node for node in nodes if node.agent_ids])}"
+                nodes.append(
+                    WorkflowNodeDefinition(
+                        node_id=node_id,
+                        title=entry.chinese_responsibility,
+                        kind=WorkflowNodeKind.AGENT,
+                        agent_ids=(entry.agent_id,),
+                        dependencies=phase_dependencies,
+                        requirement=NodeRequirement.REQUIRED,
+                        timeout_seconds=entry.timeout_seconds,
+                        retry_budget=_retry_budget(
+                            attempts=entry.failure_policy.total_attempt_limit,
+                            duration=entry.failure_policy.total_duration_seconds,
+                        ),
+                        tool_allowlist=entry.tool_allowlist,
+                        data_permissions=entry.data_permission_allowlist,
+                    )
+                )
+                phase_node_ids.append(node_id)
+            phase_dependencies = tuple(phase_node_ids)
+        previous = phase_dependencies[0] if len(phase_dependencies) == 1 else ""
+        if len(phase_dependencies) > 1:
+            # Downstream nodes may depend on a complete parallel phase.
+            previous_dependencies = phase_dependencies
+        else:
+            previous_dependencies = (previous,)
+    elif not pre_service_node_ids:
+        previous_dependencies = (previous,)
+    for index, service_id in enumerate(post_agent_services, start=1):
         is_monitor = service_id == "simulation.execution_monitor"
-        node_id = f"service_{index}"
+        node_id = f"post_service_{index}"
         nodes.append(
             _service_node(
                 node_id=node_id,
                 title=service_id,
                 service_id=service_id,
-                dependencies=(previous,),
+                dependencies=previous_dependencies,
                 requirement=(
                     NodeRequirement.NON_BLOCKING
                     if is_monitor
                     else NodeRequirement.REQUIRED
                 ),
-                is_quality_gate=service_id == "risk.pre_submit",
+                is_quality_gate=service_id in {
+                    "candidate.score",
+                    "risk.pre_submit",
+                },
             )
         )
-        previous = node_id
+        previous_dependencies = (node_id,)
     nodes.append(
         _service_node(
             node_id="artifact_finalize",
             title="版本化最终产物",
             service_id="workflow.artifact_finalize",
-            dependencies=(previous,),
+            dependencies=previous_dependencies,
             is_finalizer=True,
         )
     )
@@ -578,8 +652,37 @@ def _definition_from_prd(
             node.retry_budget.total_attempt_limit for node in nodes
         ),
         allows_trade_eligibility=workflow_key
-        not in {WorkflowKey.REVIEW_ONLY, WorkflowKey.DATA_QUALITY_REVIEW},
+        not in {
+            WorkflowKey.RESEARCH_CANDIDATES,
+            WorkflowKey.REVIEW_ONLY,
+            WorkflowKey.DATA_QUALITY_REVIEW,
+        },
     )
+
+
+def _agent_phases(governed_agents) -> tuple[tuple, ...]:
+    """Run evidence producers before debate, synthesis and portfolio review."""
+
+    phases: dict[int, list] = {0: [], 1: [], 2: [], 3: []}
+    for entry in governed_agents:
+        agent_id = entry.agent_id.lower()
+        if "portfolio_manager" in agent_id:
+            phase = 3
+        elif "manager" in agent_id:
+            phase = 2
+        elif "debator" in agent_id or "researcher" in agent_id:
+            phase = 1
+        else:
+            phase = 0
+        phases[phase].append(entry)
+    bounded: list[tuple] = []
+    for index in range(4):
+        entries = phases[index]
+        bounded.extend(
+            tuple(entries[offset : offset + 4])
+            for offset in range(0, len(entries), 4)
+        )
+    return tuple(bounded)
 
 
 def _service_node(

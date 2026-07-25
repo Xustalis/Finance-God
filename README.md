@@ -14,6 +14,18 @@ recommend specific funds.
 - [Backend architecture](backend/docs/architecture-overview.md)：后端组合与路径约定
 - [Finance API reference](backend/docs/finance-api-reference.md)：行情、工作区与仿真 API
 
+## Current desk capabilities (2026-07-25)
+
+- Formal trading desk at `/desk` with left workspace + right Agent panel.
+- `GET /api/desk/bootstrap` and `POST /api/desk/ui-actions` (catalog-gated semantic UI only).
+- Workflow Worker advances `queued` runs in-process or via `backend/scripts/run_workflow_worker.py`.
+- Market observation: `GET /api/market/snapshots`, `GET /api/market/alerts`.
+- Notification history: `GET /api/workspace/notifications/history` (toast dismiss ≠ read).
+- Account/order/execution paths remain simulation-labeled; PandaData credentials stay server-side.
+- Not online: workflow event stream, cancel API, multi-worker `SKIP LOCKED` lease.
+
+See [`docs/项目索引.md`](docs/项目索引.md) and [`docs/page-design/02_前后端职责与数据合同.md`](docs/page-design/02_前后端职责与数据合同.md).
+
 ## Stack
 
 - Frontend: Vue 3, TypeScript, Vite, Pinia, Vue Router
@@ -42,7 +54,8 @@ Start PostgreSQL and apply the existing schema:
 docker compose up -d db
 cd backend
 .venv/bin/alembic upgrade head
-make seed-dev-admin
+cd ..
+make seed-dev-accounts
 ```
 
 Start the services in separate terminals:
@@ -132,6 +145,7 @@ Important environment variables:
 | `DATABASE_URL` | Async application database URL |
 | `DATABASE_URL_SYNC` | Synchronous Alembic and guarded reset URL |
 | `SECRET_KEY` | JWT signing secret; the development default is rejected outside development |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Bearer token lifetime; the local example uses 30 days for test convenience, while production should set a shorter policy explicitly |
 | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
 | `DEEPSEEK_API_KEY` | Server-only DeepSeek credential; never exposed to the frontend or admin API |
 | `STEPFUN_API_KEY` | Server-only StepFun credential for the controlled `step-3.5-flash-2603` profile model |
@@ -139,6 +153,8 @@ Important environment variables:
 | `PANDA_DATA_USERNAME` / `PANDA_DATA_PASSWORD` | Server-only PandaData credentials required by production readiness |
 | `DEV_ADMIN_EMAIL` | Development administrator email, default `admin@finance-god.local` |
 | `DEV_ADMIN_PASSWORD` | Development-only seed password; required by `make seed-dev-admin`, minimum 12 characters |
+| `DEV_TEST_USER_EMAIL` | Development test-user email, default `test@finance-god.local` |
+| `DEV_TEST_USER_PASSWORD` | Development-only test-user password; required by `make seed-dev-user`, minimum 12 characters |
 | `VITE_WORKBENCH_ORIGIN` | Browser build variable containing the exact target origin for the profile completion handoff |
 | `WORKBENCH_ORIGIN` | Compatible alias used by Vite when `VITE_WORKBENCH_ORIGIN` is absent |
 
@@ -154,8 +170,9 @@ select only `deepseek-v4-flash` or `deepseek-v4-pro`. User and administrator
 browser sessions use separate credentials, so both areas can stay signed in in
 the same browser.
 
-The development admin seed command refuses to run outside `APP_ENV=development`.
-Keep its password in the ignored local `.env`, then open `/admin/login`.
+The development account seed commands refuse to run outside
+`APP_ENV=development`. Keep passwords in the ignored local `.env`, run
+`make seed-dev-accounts`, then use `/login` or `/admin/login`.
 
 ## Production deployment
 

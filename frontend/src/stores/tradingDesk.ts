@@ -2,6 +2,7 @@ import { computed, onScopeDispose, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   addWatchlistInstrument,
+  applyDeskUiAction,
   confirmSimulationDraft,
   confirmSimulationSoftRisk,
   confirmTradePlan,
@@ -11,10 +12,14 @@ import {
   createTradePlanFromPortfolioDeviation,
   createWatchlistGroup,
   createWorkflow,
+  cancelWorkflow,
   deleteWatchlistGroup,
+  fetchDeskBootstrap,
+  fetchDeskQuickCommands,
   fetchInformationFacts,
   fetchBars,
   fetchMarketOverview,
+  fetchNotificationHistory,
   fetchNotifications,
   fetchProfile,
   fetchResearchCandidates,
@@ -27,19 +32,35 @@ import {
   fetchWatchlistGroups,
   fetchWatchlistInstruments,
   fetchWorkflow,
+  fetchWorkflowHistory,
+  fetchWorkflowEvidence,
+  fetchWorkflowProgress,
+  retryWorkflow,
   ignoreResearchCandidate,
+  isDeskCapabilityEnabled,
   markNotificationRead,
+  previewDeskAgent,
+  reconcileSimulationOrder,
   removeWatchlistInstrument,
   reviewSimulationDraft,
   reviseTradePlan,
   submitSimulationDraft,
+  streamDeskAgentDecision,
   unignoreResearchCandidate,
   updateWatchlistGroup,
+  type DeskBootstrap,
+  type DeskAgentDecision,
+  type DeskAgentPreview,
+  DeskApiError,
+  type DeskEvidenceBundle,
   type DeskFactBatch,
   type DeskBar,
   type DeskNotification,
   type DeskQuote,
+  type DeskUiActionReceipt,
   type DeskWorkflowRun,
+  type DeskWorkflowProgress,
+  type QuickCommandStage,
   type ResearchCandidateResponse,
   type SimulationAccount,
   type SimulationDraft,
@@ -55,22 +76,82 @@ import {
 import type { ProfileWithRecommendations } from '@/types/api'
 
 export type DeskSection = 'information' | 'portfolio' | 'watchlist' | 'trading'
-export type AgentWorkflow = 'market_context' | 'company_research' | 'portfolio_stress' | 'trade_plan_generation' | 'strategy_validation' | 'event_impact'
+export type DeskAccountState = 'unknown' | 'absent' | 'available' | 'error'
+export type DeskBootstrapStatus = 'loading' | 'ready' | 'error'
+export interface QueuedWorkflowIntent {
+  id: string
+  intent: string
+  createdAt: string
+}
+export type AgentThreadMessage =
+  | { id: string; role: 'user'; kind: 'text'; createdAt: string; text: string; status?: never; chunks?: never }
+  | { id: string; role: 'assistant'; kind: 'text'; createdAt: string; text: string; status: 'pending' | 'complete'; chunks?: string[] }
+  | { id: string; role: 'assistant'; kind: 'workflow'; createdAt: string; runId: string; intent: string; status: DeskWorkflowRun['status'] }
+  | { id: string; role: 'assistant'; kind: 'research_report'; createdAt: string; runId: string; evidence: DeskEvidenceBundle }
+  | { id: string; role: 'assistant'; kind: 'order_draft'; createdAt: string; draft: SimulationDraft }
+  | { id: string; role: 'assistant'; kind: 'order_receipt'; createdAt: string; order: SimulationOrder }
+  | { id: string; role: 'assistant'; kind: 'error'; createdAt: string; text: string }
 
 const BASELINE_SYMBOLS = ['000001.SH', '399001.SZ', '000300.SH'] as const
 const POLL_INTERVAL_MS = 60_000
+const AGENT_THREAD_STORAGE_KEY = 'finance-god:agent-thread:v1'
+const WORKFLOW_QUEUE_STORAGE_KEY = 'finance-god:workflow-queue:v1'
+const DESK_CONTEXT_STORAGE_PREFIX = 'finance-god:desk-context:v1'
+const DESK_SECTIONS = new Set<DeskSection>(['information', 'portfolio', 'watchlist', 'trading'])
+const ACTIVE_WORKFLOW_STATUSES = new Set<DeskWorkflowRun['status']>([
+  'queued',
+  'running',
+  'cancel_requested',
+  'cancelling',
+])
 
 function failureText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
+}
+
+function isMissingSimulationAccount(errorMessage: string): boolean {
+  return /not found|账户不存在|simulation account (?:does not exist|was not found|not found)/i.test(errorMessage)
 }
 
 function newIdempotencyKey(scope: string): string {
   return `${scope}-${crypto.randomUUID()}`
 }
 
+function deskContextStorageKey(): string {
+  try {
+    const user = JSON.parse(localStorage.getItem('finance-god-user') || 'null') as { id?: unknown } | null
+    return `${DESK_CONTEXT_STORAGE_PREFIX}:${typeof user?.id === 'string' ? user.id : 'anonymous'}`
+  } catch {
+    return `${DESK_CONTEXT_STORAGE_PREFIX}:anonymous`
+  }
+}
+
+function restoreDeskContext(): { section: DeskSection; symbol: string } {
+  const fallback = { section: 'information' as DeskSection, symbol: BASELINE_SYMBOLS[0] }
+  try {
+    const saved = JSON.parse(localStorage.getItem(deskContextStorageKey()) || 'null') as {
+      section?: unknown
+      symbol?: unknown
+    } | null
+    if (
+      !saved
+      || typeof saved.section !== 'string'
+      || !DESK_SECTIONS.has(saved.section as DeskSection)
+      || typeof saved.symbol !== 'string'
+      || saved.symbol.length < 1
+      || saved.symbol.length > 32
+    ) return fallback
+    return { section: saved.section as DeskSection, symbol: saved.symbol }
+  } catch {
+    localStorage.removeItem(deskContextStorageKey())
+    return fallback
+  }
+}
+
 export const useTradingDeskStore = defineStore('trading-desk', () => {
-  const section = ref<DeskSection>('information')
-  const symbol = ref<string>(BASELINE_SYMBOLS[0])
+  const restoredContext = restoreDeskContext()
+  const section = ref<DeskSection>(restoredContext.section)
+  const symbol = ref<string>(restoredContext.symbol)
   const quotes = ref<DeskQuote[]>([])
   const profile = ref<ProfileWithRecommendations | null>(null)
   const informationFacts = ref<DeskFactBatch | null>(null)
@@ -101,50 +182,330 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const fillsError = ref<string | null>(null)
   const watchlistError = ref<string | null>(null)
   const candidateError = ref<string | null>(null)
-  const tradeError = ref<string | null>(null)
+  const orderError = ref<string | null>(null)
+  const tradePlanError = ref<string | null>(null)
   const loadingMarket = ref(false)
+  const marketLoadedAt = ref<string | null>(null)
   const loadingSimulation = ref(false)
   const simulationLoadedAt = ref<string | null>(null)
   const loadingWatchlists = ref(false)
   const loadingCandidates = ref(false)
   const hasSimulationAccount = ref<boolean | null>(null)
+  const accountState = ref<DeskAccountState>('unknown')
   const activeWorkflow = ref<DeskWorkflowRun | null>(null)
+  const workflowHistory = ref<DeskWorkflowRun[]>([])
+  const workflowHistoryCursor = ref<string | null>(null)
+  const workflowHistoryLoading = ref(false)
+  const workflowHistoryError = ref<string | null>(null)
+  const selectedHistoricalWorkflow = ref<DeskWorkflowRun | null>(null)
+  const selectedHistoricalProgress = ref<DeskWorkflowProgress | null>(null)
+  const selectedHistoricalEvidence = ref<DeskEvidenceBundle | null>(null)
+  const queuedWorkflowIntents = ref<QueuedWorkflowIntent[]>([])
+  const agentMessages = ref<AgentThreadMessage[]>([])
+  const activeWorkflowProgress = ref<DeskWorkflowProgress | null>(null)
+  const activeWorkflowEvidence = ref<DeskEvidenceBundle | null>(null)
+  const agentDecision = ref<DeskAgentDecision | null>(null)
+  const agentPreview = ref<DeskAgentPreview | null>(null)
+  const agentPreviewLoading = ref(false)
+  const agentPreviewError = ref<string | null>(null)
+  const directReply = ref<string | null>(null)
+  const directAnswerError = ref<string | null>(null)
+  const agentRequestCount = ref(0)
+  const workflowIntent = ref<string | null>(null)
   const workflowError = ref<string | null>(null)
+  const workflowEvidenceError = ref<string | null>(null)
+  const workflowSubmitting = ref(false)
   const contextVersion = ref(0)
+  const serverContextVersion = ref<string | null>(null)
+  const serverQuickCommands = ref<readonly string[]>([])
+  const quickCommandsError = ref<string | null>(null)
+  const quickCommandsLoading = ref(false)
+  const uiActionCatalog = ref<DeskBootstrap['ui_action_catalog']>([])
+  const deskCapabilities = ref<Record<string, boolean>>({})
+  const profileProjection = ref<DeskBootstrap['profile_projection'] | null>(null)
+  const bootstrapStatus = ref<DeskBootstrapStatus>('loading')
+  const bootstrapError = ref<string | null>(null)
+  const notificationHistory = ref<DeskNotification[]>([])
+  const uiActionError = ref<string | null>(null)
+  const lastUiActionReceipt = ref<DeskUiActionReceipt | null>(null)
+  const workspaceControl = ref<{ section: DeskSection; kind: 'filter' | 'sort'; field: string; value: string } | null>(null)
+  const openedRecord = ref<{ type: string; id: string } | null>(null)
+  const candidateLocation = ref<{ symbol: string; target: 'watchlist' | 'research' } | null>(null)
+  const tradeDraftPrefill = ref<{ side: 'buy' | 'sell'; quantity: string; priceType: 'market' | 'limit'; limitPrice: string | null } | null>(null)
+  const requestedArtifactId = ref<string | null>(null)
+  const requestedReminderId = ref<string | null>(null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let workflowObserver: AbortController | null = null
+  let bootstrapRequestId = 0
+  let agentPreviewRequestId = 0
+
+  function persistDeskContext() {
+    localStorage.setItem(deskContextStorageKey(), JSON.stringify({
+      section: section.value,
+      symbol: symbol.value,
+    }))
+  }
+
+  function persistAgentMessages() {
+    sessionStorage.setItem(AGENT_THREAD_STORAGE_KEY, JSON.stringify(agentMessages.value.slice(-80)))
+  }
+
+  function persistWorkflowQueue() {
+    sessionStorage.setItem(WORKFLOW_QUEUE_STORAGE_KEY, JSON.stringify(queuedWorkflowIntents.value))
+  }
+
+  function restoreWorkflowQueue() {
+    const raw = sessionStorage.getItem(WORKFLOW_QUEUE_STORAGE_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      queuedWorkflowIntents.value = Array.isArray(parsed) ? parsed : []
+    } catch {
+      sessionStorage.removeItem(WORKFLOW_QUEUE_STORAGE_KEY)
+    }
+  }
+
+  function restoreAgentMessages() {
+    const raw = sessionStorage.getItem(AGENT_THREAD_STORAGE_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      agentMessages.value = Array.isArray(parsed) ? parsed : []
+    } catch {
+      sessionStorage.removeItem(AGENT_THREAD_STORAGE_KEY)
+    }
+  }
+
+  function appendAgentMessage(message: AgentThreadMessage) {
+    agentMessages.value = [...agentMessages.value, message]
+    persistAgentMessages()
+  }
+
+  function replaceAgentMessage(id: string, message: AgentThreadMessage) {
+    agentMessages.value = agentMessages.value.map((item) => item.id === id ? message : item)
+    persistAgentMessages()
+  }
+
+  function nextMessageId(kind: string) {
+    return `${kind}-${crypto.randomUUID()}`
+  }
 
   const portfolioSymbols = computed(() => portfolio.value?.positions.map((item) => item.instrument_id) ?? [])
   const watchlistSymbols = computed(() => Object.values(watchlistInstruments.value).flat().map((item) => item.instrument_id))
-  const quoteSymbols = computed(() => [...new Set([...BASELINE_SYMBOLS, ...portfolioSymbols.value, ...watchlistSymbols.value])])
+  const extraQuoteSymbols = ref<string[]>([])
+  const quoteSymbols = computed(() => [...new Set([
+    ...BASELINE_SYMBOLS,
+    symbol.value,
+    ...portfolioSymbols.value,
+    ...watchlistSymbols.value,
+    ...extraQuoteSymbols.value,
+  ].filter(Boolean))])
   const selectedQuote = computed(() => quotes.value.find((item) => item.symbol === symbol.value) ?? null)
   const unreadCount = computed(() => notifications.value.filter((item) => item.status !== 'read').length)
-  const profileSummary = computed(() => profile.value?.profile ?? null)
+  const agentSubmitting = computed(() => agentRequestCount.value > 0)
+  const workflowActive = computed(() => (
+    workflowSubmitting.value
+    || (activeWorkflow.value ? ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status) : false)
+  ))
+  const profileSummary = computed(() => {
+    // Prefer desensitized desk projection for shell fields. objective_profile is
+    // never part of the projection contract; only attach real full-profile values.
+    if (profileProjection.value?.available) {
+      return {
+        version: profileProjection.value.version,
+        archetype_code: profileProjection.value.archetype_code,
+        archetype_title: profileProjection.value.archetype_title,
+        risk_level: profileProjection.value.risk_level,
+        loss_tolerance_percent: profileProjection.value.loss_tolerance_percent,
+        confidence: profileProjection.value.confidence,
+        completeness: profileProjection.value.completeness,
+        education_only: profileProjection.value.education_only,
+        selected_direction: profileProjection.value.selected_direction,
+        recommended_directions: profileProjection.value.recommended_directions,
+        objective_profile: profile.value?.profile?.objective_profile ?? null,
+      }
+    }
+    return profile.value?.profile ?? null
+  })
   const selectedWatchlist = computed(() => watchlistGroups.value.find((item) => item.group_id === selectedWatchlistId.value) ?? null)
   const selectedWatchlistInstruments = computed(() => selectedWatchlistId.value ? watchlistInstruments.value[selectedWatchlistId.value] ?? [] : [])
-  const quickCommands = computed<readonly [string, string, string]>(() => {
-    if (section.value === 'portfolio') return ['分析当前持仓的集中度与回撤风险', '解释持仓标的的最新异动', '为当前标的生成研究任务']
-    if (section.value === 'watchlist') return ['分析当前自选标的行情', '比较自选标的的风险', '为当前标的生成研究任务']
-    if (section.value === 'trading') return ['帮我制定当前标的交易方案', '检查仿真订单草稿的风险', '解释计划与画像约束是否匹配']
-    return profileSummary.value
-      ? ['分析当前标的行情', '结合我的画像生成研究候选', '查看当前标的重大行情提醒']
-      : ['查看当前标的行情', '开始完成投资画像', '查看当前标的重大行情提醒']
-  })
+  const quickCommands = computed<readonly string[]>(() => serverQuickCommands.value)
+  let quickCommandRequestId = 0
+  let quickCommandStage: QuickCommandStage = 'initial'
+  let quickCommandReference: string | null = null
+
+  function applyBootstrap(bootstrap: DeskBootstrap) {
+    serverContextVersion.value = bootstrap.context_version
+    uiActionCatalog.value = bootstrap.ui_action_catalog
+    deskCapabilities.value = { ...bootstrap.capabilities }
+    profileProjection.value = bootstrap.profile_projection
+    quickCommandStage = 'initial'
+    quickCommandReference = null
+    if (bootstrap.section && bootstrap.section !== section.value) {
+      section.value = bootstrap.section
+    }
+    if (bootstrap.symbol && bootstrap.symbol !== symbol.value) {
+      symbol.value = bootstrap.symbol
+    }
+    bootstrapStatus.value = 'ready'
+    bootstrapError.value = null
+  }
+
+  function resetBootstrapFacts() {
+    quickCommandRequestId += 1
+    serverContextVersion.value = null
+    agentDecision.value = null
+    agentPreviewRequestId += 1
+    agentPreview.value = null
+    agentPreviewLoading.value = false
+    agentPreviewError.value = null
+    serverQuickCommands.value = []
+    quickCommandsError.value = null
+    quickCommandsLoading.value = false
+    uiActionCatalog.value = []
+    profileProjection.value = null
+    // Missing keys must not be treated as enabled.
+    deskCapabilities.value = {
+      workflow_create: false,
+      workflow_worker: false,
+      agent_answer: false,
+      market_data: false,
+      ui_actions: false,
+      order_submit: false,
+      order_cancel: false,
+      fund_transfer: false,
+    }
+  }
+
+  async function previewAgentIntent(intent: string) {
+    const message = intent.trim()
+    const requestId = ++agentPreviewRequestId
+    agentPreview.value = null
+    agentPreviewError.value = null
+    if (!message || !serverContextVersion.value) {
+      agentPreviewLoading.value = false
+      return
+    }
+    agentPreviewLoading.value = true
+    const requestedContext = serverContextVersion.value
+    try {
+      const preview = await previewDeskAgent({
+        message,
+        section: section.value,
+        symbol: symbol.value,
+        contextVersion: requestedContext,
+        activeWorkflow: workflowActive.value,
+        orderDraft: activeDraft.value
+          ? {
+              id: activeDraft.value.draft.draft_id,
+              version: String(activeDraft.value.draft.revision),
+            }
+          : undefined,
+      })
+      if (
+        requestId !== agentPreviewRequestId
+        || serverContextVersion.value !== requestedContext
+      ) return
+      agentPreview.value = preview
+    } catch (error) {
+      if (requestId !== agentPreviewRequestId) return
+      agentPreviewError.value = failureText(error, '执行方式预览失败')
+    } finally {
+      if (requestId === agentPreviewRequestId) agentPreviewLoading.value = false
+    }
+  }
+
+  function clearBootstrapState(reason: string) {
+    resetBootstrapFacts()
+    bootstrapStatus.value = 'error'
+    bootstrapError.value = reason
+  }
+
+  async function refreshQuickCommands(
+    stage: QuickCommandStage = quickCommandStage,
+    reference: string | null = quickCommandReference,
+    force = false,
+  ) {
+    if (
+      !serverContextVersion.value
+      || (
+        activeWorkflow.value
+        && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)
+      )
+    ) return
+    if (!force && stage === quickCommandStage && reference === quickCommandReference) {
+      return
+    }
+    const requestId = ++quickCommandRequestId
+    const requestedContext = serverContextVersion.value
+    const requestedSection = section.value
+    const requestedSymbol = symbol.value
+    quickCommandsLoading.value = true
+    serverQuickCommands.value = []
+    quickCommandsError.value = null
+    try {
+      const response = await fetchDeskQuickCommands({
+        stage,
+        section: requestedSection,
+        symbol: requestedSymbol,
+        contextVersion: requestedContext,
+        ...(stage === 'after_answer' && reference
+          ? { decisionId: reference }
+          : {}),
+        ...(stage === 'after_workflow' && reference
+          ? { runId: reference }
+          : {}),
+      })
+      if (
+        requestId !== quickCommandRequestId
+        || serverContextVersion.value !== requestedContext
+        || section.value !== requestedSection
+        || symbol.value !== requestedSymbol
+      ) return
+      serverQuickCommands.value = response.quick_commands
+      quickCommandsError.value = response.quick_commands_error
+      quickCommandStage = stage
+      quickCommandReference = reference
+    } catch (error) {
+      if (requestId !== quickCommandRequestId) return
+      serverQuickCommands.value = []
+      quickCommandsError.value = failureText(error, '快捷指令生成暂时不可用，请直接输入任务。')
+    } finally {
+      if (requestId === quickCommandRequestId) quickCommandsLoading.value = false
+    }
+  }
+
+  function rerollQuickCommands() {
+    return refreshQuickCommands(quickCommandStage, quickCommandReference, true)
+  }
 
   function setSection(next: DeskSection) {
+    quickCommandRequestId += 1
     section.value = next
+    persistDeskContext()
     contextVersion.value += 1
+    serverQuickCommands.value = []
+    quickCommandsError.value = null
+    quickCommandsLoading.value = false
     if (next === 'portfolio') void loadSimulationData()
     if (next === 'watchlist') void Promise.all([loadWatchlists(), loadCandidates()])
-    if (next === 'trading') void Promise.all([loadSimulationData(), loadOrders()])
+    if (next === 'trading') void loadSimulationData()
+    void refreshBootstrap()
   }
 
   const barsFrequency = ref<string | undefined>(undefined)
 
   function setSymbol(next: string) {
+    quickCommandRequestId += 1
     symbol.value = next
+    persistDeskContext()
     contextVersion.value += 1
+    serverQuickCommands.value = []
+    quickCommandsError.value = null
+    quickCommandsLoading.value = false
     void loadMarketFacts()
     void loadBars()
+    void refreshBootstrap()
   }
 
   function setBarsFrequency(freq: string | undefined) {
@@ -157,7 +518,10 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   async function refreshMarket(options: { withBars?: boolean } = {}) {
     loadingMarket.value = true
     marketError.value = null
-    try { quotes.value = await fetchMarketOverview(quoteSymbols.value) }
+    try {
+      quotes.value = await fetchMarketOverview(quoteSymbols.value)
+      marketLoadedAt.value = new Date().toISOString()
+    }
     catch (error) { marketError.value = failureText(error, '真实行情不可用') }
     finally { loadingMarket.value = false }
     // 轮询只刷新快照；K线仅在显式要求（手动刷新、切换标的/频率、初始化）时重拉。
@@ -183,25 +547,63 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     catch (error) { barsError.value = failureText(error, 'K线数据不可用') }
   }
 
+  async function ensureQuoteSymbol(next: string) {
+    const symbolId = next.trim()
+    if (!symbolId) return
+    if (!extraQuoteSymbols.value.includes(symbolId)) {
+      extraQuoteSymbols.value = [...extraQuoteSymbols.value, symbolId]
+    }
+    if (!quotes.value.some((item) => item.symbol === symbolId)) {
+      await refreshMarket()
+    }
+  }
+
+  async function refreshPortfolioWorkspace() {
+    await Promise.all([loadSimulationData(), refreshMarket()])
+  }
+
+  async function refreshTradingWorkspace() {
+    await Promise.all([loadSimulationData(), refreshMarket()])
+  }
+
   async function loadProfile() {
     profileError.value = null
-    try { profile.value = await fetchProfile() }
-    catch (error) { profileError.value = failureText(error, '画像不可用') }
+    try {
+      profile.value = await fetchProfile()
+    } catch (error) {
+      profile.value = null
+      const message = failureText(error, '画像不可用')
+      profileError.value = message === 'PROFILE_NOT_FOUND' || /PROFILE_NOT_FOUND/.test(message)
+        ? 'PROFILE_NOT_FOUND'
+        : message
+    }
   }
 
   async function loadMarketFacts() {
     const requestedSymbol = symbol.value
     informationFactsError.value = null
     sentimentFactsError.value = null
+    if (informationFacts.value?.symbol !== requestedSymbol) informationFacts.value = null
+    if (sentimentFacts.value?.symbol !== requestedSymbol) sentimentFacts.value = null
     const [information, sentiment] = await Promise.allSettled([
       fetchInformationFacts(requestedSymbol),
       fetchSentimentFacts(requestedSymbol),
     ])
     if (symbol.value !== requestedSymbol) return
-    if (information.status === 'fulfilled') informationFacts.value = information.value
-    else informationFactsError.value = failureText(information.reason, '市场资讯不可用')
-    if (sentiment.status === 'fulfilled') sentimentFacts.value = sentiment.value
-    else sentimentFactsError.value = failureText(sentiment.reason, '市场情绪事实不可用')
+    if (information.status === 'fulfilled' && information.value.symbol === requestedSymbol) {
+      informationFacts.value = information.value
+    } else {
+      informationFactsError.value = information.status === 'rejected'
+        ? failureText(information.reason, '市场资讯不可用')
+        : `服务端返回了其他标的的披露事实（${information.value.symbol || '未知标的'}）。`
+    }
+    if (sentiment.status === 'fulfilled' && sentiment.value.symbol === requestedSymbol) {
+      sentimentFacts.value = sentiment.value
+    } else {
+      sentimentFactsError.value = sentiment.status === 'rejected'
+        ? failureText(sentiment.reason, '市场情绪事实不可用')
+        : `服务端返回了其他标的的融资事实（${sentiment.value.symbol || '未知标的'}）。`
+    }
   }
 
   async function loadNotifications() {
@@ -210,11 +612,130 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     catch (error) { notificationError.value = failureText(error, '提醒不可用') }
   }
 
+  async function loadNotificationHistory(limit = 50) {
+    notificationError.value = null
+    try {
+      notificationHistory.value = await fetchNotificationHistory({ limit, includeRead: true })
+    } catch (error) {
+      notificationError.value = failureText(error, '提醒历史不可用')
+    }
+  }
+
   async function dismissNotification(notification: DeskNotification) {
+    // Toast hide is client-only; this path is explicit read (≠ toast dismiss).
     try {
       await markNotificationRead(notification.notification_id)
       notifications.value = notifications.value.map((item) => item.notification_id === notification.notification_id ? { ...item, status: 'read' } : item)
+      notificationHistory.value = notificationHistory.value.map((item) => item.notification_id === notification.notification_id ? { ...item, status: 'read' } : item)
     } catch (error) { notificationError.value = failureText(error, '无法标记提醒') }
+  }
+
+  async function applyUiAction(
+    actionId: string,
+    parameters: Record<string, string> = {},
+    actionContextVersion = serverContextVersion.value,
+  ): Promise<DeskUiActionReceipt> {
+    uiActionError.value = null
+    lastUiActionReceipt.value = null
+    const allowed = uiActionCatalog.value.some((item) => item.id === actionId)
+    if (!allowed) {
+      const receipt: DeskUiActionReceipt = {
+        receipt: 'rejected',
+        action_id: actionId,
+        reason: 'action_not_in_catalog',
+        owner_id: '',
+        parameters,
+        applied_at: new Date().toISOString(),
+      }
+      lastUiActionReceipt.value = receipt
+      uiActionError.value = '动作不在交易台白名单'
+      return receipt
+    }
+    const context = serverContextVersion.value
+    if (!context) {
+      uiActionError.value = '缺少服务端 context_version，无法应用动作'
+      const receipt: DeskUiActionReceipt = {
+        receipt: 'stale_context', action_id: actionId, reason: 'missing_context',
+        owner_id: '', parameters, applied_at: new Date().toISOString(),
+      }
+      lastUiActionReceipt.value = receipt
+      return receipt
+    }
+    if (actionContextVersion !== context) {
+      const receipt: DeskUiActionReceipt = {
+        receipt: 'stale_context', action_id: actionId, reason: 'context_version_mismatch',
+        owner_id: '', parameters, applied_at: new Date().toISOString(),
+      }
+      lastUiActionReceipt.value = receipt
+      uiActionError.value = '页面上下文已经变化，动作未应用'
+      return receipt
+    }
+    try {
+      const receipt = await applyDeskUiAction({
+        actionId,
+        contextVersion: context,
+        parameters,
+      })
+      lastUiActionReceipt.value = receipt
+      if (receipt.receipt === 'applied') {
+        if (actionId === 'select_symbol' && parameters.symbol) {
+          setSymbol(parameters.symbol)
+        } else if (actionId.startsWith('navigate_')) {
+          const next = actionId.replace('navigate_', '') as DeskSection
+          if (['information', 'portfolio', 'watchlist', 'trading'].includes(next)) {
+            setSection(next)
+          }
+        } else if (actionId === 'refresh_market') {
+          await refreshMarket()
+        } else if (actionId === 'set_workspace_filter' || actionId === 'set_workspace_sort') {
+          workspaceControl.value = {
+            section: parameters.section as DeskSection,
+            kind: actionId === 'set_workspace_filter' ? 'filter' : 'sort',
+            field: parameters.field,
+            value: parameters.value,
+          }
+          if (parameters.section !== section.value) setSection(parameters.section as DeskSection)
+        } else if (actionId === 'open_record') {
+          openedRecord.value = { type: parameters.record_type, id: parameters.record_id }
+        } else if (actionId === 'locate_candidate') {
+          candidateLocation.value = {
+            symbol: parameters.symbol,
+            target: parameters.target as 'watchlist' | 'research',
+          }
+          setSymbol(parameters.symbol)
+          setSection('watchlist')
+        } else if (actionId === 'fill_trade_draft') {
+          tradeDraftPrefill.value = {
+            side: parameters.side as 'buy' | 'sell',
+            quantity: parameters.quantity,
+            priceType: parameters.price_type as 'market' | 'limit',
+            limitPrice: parameters.limit_price || null,
+          }
+          setSection('trading')
+        } else if (actionId === 'open_workflow_artifact') {
+          requestedArtifactId.value = parameters.artifact_id
+        } else if (actionId === 'open_reminder') {
+          requestedReminderId.value = parameters.reminder_id
+        } else if (actionId === 'open_trade_plan') {
+          await loadTradePlan(parameters.plan_id)
+          setSection('trading')
+        }
+      } else if (receipt.receipt === 'stale_context') {
+        uiActionError.value = '上下文已过期，请刷新交易台后再试'
+        void refreshBootstrap()
+      } else {
+        uiActionError.value = receipt.reason ?? '动作被拒绝'
+      }
+      return receipt
+    } catch (error) {
+      uiActionError.value = failureText(error, 'UI 动作请求失败')
+      const receipt: DeskUiActionReceipt = {
+        receipt: 'rejected', action_id: actionId, reason: 'request_failed',
+        owner_id: '', parameters, applied_at: new Date().toISOString(),
+      }
+      lastUiActionReceipt.value = receipt
+      return receipt
+    }
   }
 
   async function loadSimulationData() {
@@ -229,11 +750,16 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     if (accountResult.status === 'fulfilled') {
       account.value = accountResult.value
       hasSimulationAccount.value = accountResult.value !== null
+      accountState.value = accountResult.value ? 'available' : 'absent'
     } else {
-      account.value = null
-      hasSimulationAccount.value = false
       const message = failureText(accountResult.reason, '仿真账户不可用')
-      if (!/not found|账户不存在|simulation account/i.test(message)) {
+      if (isMissingSimulationAccount(message)) {
+        account.value = null
+        hasSimulationAccount.value = false
+        accountState.value = 'absent'
+      } else {
+        hasSimulationAccount.value = account.value ? true : null
+        accountState.value = 'error'
         accountError.value = message
         simulationError.value = message
       }
@@ -244,6 +770,13 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     else if (hasSimulationAccount.value) simulationError.value ||= failureText(portfolioResult.reason, '持仓投影不可用')
     if (orderResult.status === 'fulfilled') {
       orders.value = orderResult.value
+      activeOrder.value = (
+        activeOrder.value
+          ? orderResult.value.find(
+            (item) => item.order_id === activeOrder.value?.order_id,
+          )
+          : null
+      ) ?? orderResult.value[0] ?? null
     } else if (hasSimulationAccount.value) {
       ordersError.value = failureText(orderResult.reason, '订单记录不可用')
       simulationError.value ||= ordersError.value
@@ -260,15 +793,6 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     loadingSimulation.value = false
     // 持仓标的变化后立即补一次快照行情，市值/浮盈无需等待下个轮询周期。
     void refreshMarket()
-  }
-
-  async function loadOrders() {
-    ordersError.value = null
-    try { orders.value = await fetchSimulationOrders() }
-    catch (error) {
-      ordersError.value = failureText(error, '订单记录不可用')
-      simulationError.value = ordersError.value
-    }
   }
 
   async function loadWatchlists() {
@@ -299,46 +823,80 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     try {
       account.value = await createSimulationAccount(initialCashRmb, newIdempotencyKey('simulation-account'))
       hasSimulationAccount.value = true
+      accountState.value = 'available'
       await loadSimulationData()
       return account.value
     } catch (error) { simulationError.value = failureText(error, '建立仿真账户失败'); throw error }
   }
 
   async function createDraft(input: SimulationDraftInput) {
-    tradeError.value = null
-    try { activeDraft.value = await createSimulationDraft(input, newIdempotencyKey('simulation-draft')); return activeDraft.value }
-    catch (error) { tradeError.value = failureText(error, '创建订单草稿失败'); throw error }
+    orderError.value = null
+    try {
+      activeDraft.value = await createSimulationDraft(input, newIdempotencyKey('simulation-draft'))
+      appendAgentMessage({
+        id: nextMessageId('order-draft'),
+        role: 'assistant',
+        kind: 'order_draft',
+        createdAt: new Date().toISOString(),
+        draft: activeDraft.value,
+      })
+      return activeDraft.value
+    }
+    catch (error) { orderError.value = failureText(error, '创建订单草稿失败'); throw error }
   }
 
   async function reviewDraft() {
     if (!activeDraft.value) throw new Error('没有可复核的订单草稿')
-    tradeError.value = null
+    orderError.value = null
     try { activeDraft.value = await reviewSimulationDraft(activeDraft.value.draft.draft_id, activeDraft.value.record_revision, newIdempotencyKey('simulation-review')); return activeDraft.value }
-    catch (error) { tradeError.value = failureText(error, '风控复核失败'); throw error }
+    catch (error) { orderError.value = failureText(error, '风控复核失败'); throw error }
   }
 
   async function acknowledgeSoftRisk(seenReasonHash: string) {
     if (!activeDraft.value) throw new Error('没有可确认的订单草稿')
-    tradeError.value = null
+    orderError.value = null
     try { activeDraft.value = await confirmSimulationSoftRisk(activeDraft.value.draft.draft_id, seenReasonHash, newIdempotencyKey('simulation-soft-risk')); return activeDraft.value }
-    catch (error) { tradeError.value = failureText(error, '软风险确认失败'); throw error }
+    catch (error) { orderError.value = failureText(error, '软风险确认失败'); throw error }
   }
 
   async function confirmDraft(seenSummaryHash: string) {
     if (!activeDraft.value) throw new Error('没有可确认的订单草稿')
-    tradeError.value = null
+    orderError.value = null
     try { activeDraft.value = await confirmSimulationDraft(activeDraft.value.draft.draft_id, activeDraft.value.record_revision, seenSummaryHash, newIdempotencyKey('simulation-confirm')); return activeDraft.value }
-    catch (error) { tradeError.value = failureText(error, '订单确认失败'); throw error }
+    catch (error) { orderError.value = failureText(error, '订单确认失败'); throw error }
   }
 
   async function submitDraft() {
     if (!activeDraft.value) throw new Error('没有可提交的订单草稿')
-    tradeError.value = null
+    orderError.value = null
     try {
-      activeOrder.value = await submitSimulationDraft(activeDraft.value.draft.draft_id, newIdempotencyKey('simulation-submit'))
-      await Promise.all([loadSimulationData(), loadOrders()])
+      activeOrder.value = await submitSimulationDraft(
+        activeDraft.value.draft.draft_id,
+        newIdempotencyKey('simulation-submit'),
+      )
+      appendAgentMessage({
+        id: nextMessageId('order-receipt'),
+        role: 'assistant',
+        kind: 'order_receipt',
+        createdAt: new Date().toISOString(),
+        order: activeOrder.value,
+      })
+      await loadSimulationData()
       return activeOrder.value
-    } catch (error) { tradeError.value = failureText(error, '提交仿真订单失败'); throw error }
+    } catch (error) { orderError.value = failureText(error, '提交仿真订单失败'); throw error }
+  }
+
+  async function reconcileOrder() {
+    if (!activeOrder.value) throw new Error('没有可撮合的仿真订单')
+    orderError.value = null
+    try {
+      activeOrder.value = await reconcileSimulationOrder(activeOrder.value.order_id)
+      await loadSimulationData()
+      return activeOrder.value
+    } catch (error) {
+      orderError.value = failureText(error, '仿真订单撮合失败')
+      throw error
+    }
   }
 
   async function createWatchlist(name: string, description: string | null) {
@@ -404,64 +962,496 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   }
 
   async function startCandidateTradePlan(instrumentId: string) {
-    tradeError.value = null
+    tradePlanError.value = null
     try { activeTradePlan.value = await createTradePlanFromCandidate(instrumentId, newIdempotencyKey('plan-candidate')); return activeTradePlan.value }
-    catch (error) { tradeError.value = failureText(error, '创建候选交易计划失败'); throw error }
+    catch (error) { tradePlanError.value = failureText(error, '创建候选交易计划失败'); throw error }
   }
 
   async function startPortfolioDeviationTradePlan() {
-    tradeError.value = null
+    tradePlanError.value = null
     try { activeTradePlan.value = await createTradePlanFromPortfolioDeviation(newIdempotencyKey('plan-portfolio')); return activeTradePlan.value }
-    catch (error) { tradeError.value = failureText(error, '创建持仓偏离计划失败'); throw error }
+    catch (error) { tradePlanError.value = failureText(error, '创建持仓偏离计划失败'); throw error }
   }
 
   async function loadTradePlan(planId: string) {
-    tradeError.value = null
+    tradePlanError.value = null
     try { activeTradePlan.value = await fetchTradePlan(planId); return activeTradePlan.value }
-    catch (error) { tradeError.value = failureText(error, '读取交易计划失败'); throw error }
+    catch (error) { tradePlanError.value = failureText(error, '读取交易计划失败'); throw error }
   }
 
   async function reviseActiveTradePlan(actions: TradePlanActionRevision[]) {
     if (!activeTradePlan.value) throw new Error('没有可修订的交易计划')
-    tradeError.value = null
+    tradePlanError.value = null
     try {
       activeTradePlan.value = await reviseTradePlan(activeTradePlan.value.object.plan_id, activeTradePlan.value.object.revision, actions, newIdempotencyKey('plan-revise'))
       return activeTradePlan.value
-    } catch (error) { tradeError.value = failureText(error, '修订交易计划失败'); throw error }
+    } catch (error) { tradePlanError.value = failureText(error, '修订交易计划失败'); throw error }
   }
 
   async function confirmActiveTradePlan() {
     if (!activeTradePlan.value) throw new Error('没有可确认的交易计划')
-    tradeError.value = null
+    tradePlanError.value = null
     try {
       activeTradePlan.value = await confirmTradePlan(activeTradePlan.value.object.plan_id, activeTradePlan.value.object.revision, newIdempotencyKey('plan-confirm'))
       return activeTradePlan.value
-    } catch (error) { tradeError.value = failureText(error, '确认交易计划失败'); throw error }
-  }
-
-  function workflowFor(text: string): AgentWorkflow {
-    if (/(持仓|组合|回撤|集中)/.test(text)) return 'portfolio_stress'
-    if (/(交易方案|订单|计划)/.test(text)) return 'trade_plan_generation'
-    if (/(策略)/.test(text)) return 'strategy_validation'
-    if (/(异动|提醒|事件)/.test(text)) return 'event_impact'
-    if (/(研究|画像|公司)/.test(text)) return 'company_research'
-    return 'market_context'
+    } catch (error) { tradePlanError.value = failureText(error, '确认交易计划失败'); throw error }
   }
 
   async function runWorkflow(intent: string) {
+    const normalizedIntent = intent.trim()
+    if (!normalizedIntent) return
+    if (workflowActive.value) {
+      workflowError.value = '当前任务仍在运行，请等待终态后再创建新任务。'
+      return
+    }
+    if (!serverContextVersion.value) {
+      workflowError.value = '缺少服务端 context_version，无法创建可审计工作流。'
+      return
+    }
+    if (!isDeskCapabilityEnabled(deskCapabilities.value, 'workflow_create')) {
+      workflowError.value = '服务端未确认工作流创建能力（需实际连接 workflow runtime）。'
+      return
+    }
+    if (!isDeskCapabilityEnabled(deskCapabilities.value, 'workflow_worker')) {
+      workflowError.value = '服务端未确认 Workflow Worker 正在运行，当前不能执行新任务。'
+      return
+    }
     workflowError.value = null
+    workflowEvidenceError.value = null
+    workflowSubmitting.value = true
+    activeWorkflowEvidence.value = null
+    activeWorkflowProgress.value = null
     try {
       activeWorkflow.value = await createWorkflow({
-        workflowKey: workflowFor(intent), intent, symbol: symbol.value,
-        contextVersion: String(contextVersion.value), idempotencyKey: newIdempotencyKey('desk'),
+        intent: normalizedIntent,
+        section: section.value,
+        symbol: symbol.value,
+        contextVersion: serverContextVersion.value,
+        idempotencyKey: newIdempotencyKey('desk'),
+        orderDraft: activeDraft.value
+          ? {
+              id: activeDraft.value.draft.draft_id,
+              version: String(activeDraft.value.draft.revision),
+            }
+          : undefined,
       })
-    } catch (error) { workflowError.value = failureText(error, '工作流请求失败') }
+      workflowIntent.value = normalizedIntent
+      await refreshWorkflow()
+      if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+        startWorkflowPolling()
+      }
+    } catch (error) {
+      if (
+        error instanceof DeskApiError
+        && error.code === 'WORKFLOW_ALREADY_ACTIVE'
+        && error.activeRunId
+      ) {
+        activeWorkflow.value = await fetchWorkflow(error.activeRunId)
+        workflowIntent.value = normalizedIntent
+        await refreshWorkflow()
+        if (ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+          startWorkflowPolling()
+        }
+        return
+      }
+      workflowError.value = failureText(error, '工作流请求失败')
+      activeWorkflow.value = null
+      workflowIntent.value = null
+    } finally {
+      workflowSubmitting.value = false
+    }
+  }
+
+  async function submitAgentIntent(intent: string) {
+    const normalizedIntent = intent.trim()
+    if (!normalizedIntent) return
+    if (!serverContextVersion.value) {
+      workflowError.value = '缺少服务端 context_version，无法判断执行方式。'
+      return
+    }
+
+    const createdAt = new Date().toISOString()
+    const pendingId = nextMessageId('assistant')
+    appendAgentMessage({ id: nextMessageId('user'), role: 'user', kind: 'text', createdAt, text: normalizedIntent })
+    appendAgentMessage({ id: pendingId, role: 'assistant', kind: 'text', createdAt, text: '正在生成回复…', status: 'pending' })
+    quickCommandRequestId += 1
+    serverQuickCommands.value = []
+    quickCommandsError.value = null
+    quickCommandsLoading.value = true
+    agentRequestCount.value += 1
+    agentDecision.value = null
+    directReply.value = null
+    directAnswerError.value = null
+    workflowError.value = null
+    try {
+      let streamedText = ''
+      const streamedChunks: string[] = []
+      const decision = await streamDeskAgentDecision({
+        message: normalizedIntent,
+        section: section.value,
+        symbol: symbol.value,
+        contextVersion: serverContextVersion.value,
+        activeWorkflow: workflowActive.value,
+        orderDraft: activeDraft.value
+          ? {
+              id: activeDraft.value.draft.draft_id,
+              version: String(activeDraft.value.draft.revision),
+            }
+          : undefined,
+      }, (delta) => {
+        streamedText += delta
+        streamedChunks.push(delta)
+        replaceAgentMessage(pendingId, {
+          id: pendingId,
+          role: 'assistant',
+          kind: 'text',
+          createdAt,
+          text: streamedText,
+          status: 'pending',
+          chunks: [...streamedChunks],
+        })
+      })
+      agentDecision.value = decision
+      const actionReceipts = await Promise.all(
+        decision.ui_actions.map((action) => applyUiAction(
+          action.action_id,
+          action.parameters,
+          action.context_version,
+        )),
+      )
+      const failedAction = actionReceipts.find((receipt) => receipt.receipt !== 'applied')
+      if (failedAction) {
+        throw new Error(
+          failedAction.receipt === 'stale_context'
+            ? '页面上下文已经变化，Agent 动作未执行'
+            : `Agent 动作未执行：${failedAction.reason ?? '服务端拒绝'}`,
+        )
+      }
+      if (decision.mode === 'answer') {
+        if (!decision.answer_text?.trim()) {
+          throw new Error('Agent 未返回可展示的直接回复')
+        }
+        directReply.value = decision.answer_text.trim()
+        replaceAgentMessage(pendingId, { id: pendingId, role: 'assistant', kind: 'text', createdAt, text: directReply.value, status: 'complete' })
+        quickCommandsLoading.value = false
+        await refreshQuickCommands('after_answer', decision.decision_id)
+        return
+      }
+      if (decision.mode === 'workflow' && workflowActive.value) {
+        queuedWorkflowIntents.value = [
+          ...queuedWorkflowIntents.value,
+          { id: crypto.randomUUID(), intent: normalizedIntent, createdAt },
+        ]
+        persistWorkflowQueue()
+        replaceAgentMessage(pendingId, {
+          id: pendingId,
+          role: 'assistant',
+          kind: 'text',
+          createdAt,
+          text: '这需要正式工作流，已加入待办；当前任务完成后会自动开始。',
+          status: 'complete',
+        })
+        quickCommandsLoading.value = false
+        return
+      }
+      if (!decision.can_start) {
+        workflowError.value = decision.message
+        replaceAgentMessage(pendingId, { id: pendingId, role: 'assistant', kind: 'error', createdAt, text: decision.message })
+        quickCommandsLoading.value = false
+        return
+      }
+      replaceAgentMessage(pendingId, { id: pendingId, role: 'assistant', kind: 'text', createdAt, text: '正在创建研究任务…', status: 'complete' })
+    } catch (error) {
+      directAnswerError.value = failureText(error, 'Agent 执行方式判断失败')
+      replaceAgentMessage(pendingId, { id: pendingId, role: 'assistant', kind: 'error', createdAt, text: directAnswerError.value })
+      quickCommandsLoading.value = false
+      return
+    } finally {
+      agentRequestCount.value = Math.max(0, agentRequestCount.value - 1)
+    }
+    await runWorkflow(normalizedIntent)
+    if (!activeWorkflow.value) {
+      quickCommandsLoading.value = false
+      replaceAgentMessage(pendingId, {
+        id: pendingId,
+        role: 'assistant',
+        kind: 'error',
+        createdAt,
+        text: workflowError.value || '研究任务创建失败',
+      })
+    }
+    if (activeWorkflow.value) {
+      replaceAgentMessage(pendingId, {
+        id: pendingId,
+        role: 'assistant',
+        kind: 'text',
+        createdAt,
+        text: '研究任务已创建，以下状态来自服务端。',
+        status: 'complete',
+      })
+      appendAgentMessage({
+        id: `workflow-${activeWorkflow.value.run_id}`,
+        role: 'assistant',
+        kind: 'workflow',
+        createdAt: new Date().toISOString(),
+        runId: activeWorkflow.value.run_id,
+        intent: normalizedIntent,
+        status: activeWorkflow.value.status,
+      })
+    }
   }
 
   async function refreshWorkflow() {
     if (!activeWorkflow.value) return
-    try { activeWorkflow.value = await fetchWorkflow(activeWorkflow.value.run_id) }
-    catch (error) { workflowError.value = failureText(error, '工作流状态不可用') }
+    const runId = activeWorkflow.value.run_id
+    workflowError.value = null
+    try {
+      const [run, progress] = await Promise.all([
+        fetchWorkflow(runId),
+        fetchWorkflowProgress(runId),
+      ])
+      if (activeWorkflow.value?.run_id !== runId) return
+      await applyWorkflowSnapshot(run, progress)
+    } catch (error) {
+      workflowError.value = failureText(error, '工作流状态不可用')
+    }
+  }
+
+  async function applyWorkflowSnapshot(run: DeskWorkflowRun, progress: DeskWorkflowProgress) {
+    const runId = run.run_id
+    activeWorkflow.value = run
+    activeWorkflowProgress.value = progress
+    const workflowMessage = agentMessages.value.find((item) => item.kind === 'workflow' && item.runId === runId)
+    if (workflowMessage?.kind === 'workflow') {
+      replaceAgentMessage(workflowMessage.id, { ...workflowMessage, status: run.status })
+    }
+    if (ACTIVE_WORKFLOW_STATUSES.has(run.status)) return
+    stopWorkflowPolling()
+    if (run.status === 'completed' && run.final_artifact) {
+      await Promise.all([
+        loadWorkflowEvidence(run.final_artifact),
+        ...(run.workflow_key === 'research_candidates' ? [loadCandidates()] : []),
+      ])
+      if (activeWorkflowEvidence.value && !agentMessages.value.some((item) => item.kind === 'research_report' && item.runId === runId)) {
+        appendAgentMessage({
+          id: `report-${runId}`,
+          role: 'assistant',
+          kind: 'research_report',
+          createdAt: new Date().toISOString(),
+          runId,
+          evidence: activeWorkflowEvidence.value,
+        })
+      }
+      quickCommandsLoading.value = false
+      void refreshQuickCommands('after_workflow', runId)
+      void startNextQueuedWorkflow()
+      return
+    }
+    activeWorkflowEvidence.value = null
+    quickCommandsLoading.value = false
+    serverQuickCommands.value = []
+    quickCommandsError.value = null
+    void startNextQueuedWorkflow()
+  }
+
+  async function startNextQueuedWorkflow() {
+    if (workflowActive.value || !queuedWorkflowIntents.value.length) return
+    const [next, ...remaining] = queuedWorkflowIntents.value
+    queuedWorkflowIntents.value = remaining
+    persistWorkflowQueue()
+    await runWorkflow(next.intent)
+    if (!activeWorkflow.value || !ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+      queuedWorkflowIntents.value = [next, ...queuedWorkflowIntents.value]
+      persistWorkflowQueue()
+      return
+    }
+    appendAgentMessage({
+      id: `workflow-${activeWorkflow.value.run_id}`,
+      role: 'assistant',
+      kind: 'workflow',
+      createdAt: new Date().toISOString(),
+      runId: activeWorkflow.value.run_id,
+      intent: next.intent,
+      status: activeWorkflow.value.status,
+    })
+  }
+
+  function removeQueuedWorkflow(id: string) {
+    queuedWorkflowIntents.value = queuedWorkflowIntents.value.filter((item) => item.id !== id)
+    persistWorkflowQueue()
+  }
+
+  async function loadWorkflowEvidence(reference: { object_type: string; object_id: string; version: string }) {
+    workflowEvidenceError.value = null
+    try {
+      activeWorkflowEvidence.value = await fetchWorkflowEvidence(reference)
+    } catch (error) {
+      activeWorkflowEvidence.value = null
+      workflowEvidenceError.value = failureText(error, '工作流产物不可用')
+    }
+  }
+
+  async function restoreActiveWorkflow() {
+    try {
+      const page = await fetchWorkflowHistory({ limit: 20 })
+      workflowHistory.value = page.items
+      workflowHistoryCursor.value = page.next_cursor
+      activeWorkflow.value = page.items.find((item) => ACTIVE_WORKFLOW_STATUSES.has(item.status)) ?? null
+      workflowIntent.value = activeWorkflow.value?.request_intent?.trim() || null
+      if (!activeWorkflow.value) {
+        return
+      }
+      await refreshWorkflow()
+      if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+        startWorkflowPolling()
+      }
+    } catch (error) {
+      activeWorkflow.value = null
+      activeWorkflowProgress.value = null
+      activeWorkflowEvidence.value = null
+      workflowIntent.value = null
+      agentDecision.value = null
+      if (error instanceof Error && !/not found|404/i.test(error.message)) {
+        workflowError.value = failureText(error, '无法恢复上次工作流')
+      }
+    }
+  }
+
+  async function loadWorkflowHistory(reset = true, status: DeskWorkflowRun['status'] | '' = '') {
+    workflowHistoryLoading.value = true
+    workflowHistoryError.value = null
+    try {
+      const page = await fetchWorkflowHistory({
+        cursor: reset ? null : workflowHistoryCursor.value,
+        limit: 20,
+        status,
+      })
+      workflowHistory.value = reset ? page.items : [...workflowHistory.value, ...page.items]
+      workflowHistoryCursor.value = page.next_cursor
+    } catch (error) {
+      workflowHistoryError.value = failureText(error, '任务历史不可用')
+    } finally {
+      workflowHistoryLoading.value = false
+    }
+  }
+
+  async function openHistoricalWorkflow(run: DeskWorkflowRun) {
+    selectedHistoricalWorkflow.value = await fetchWorkflow(run.run_id)
+    selectedHistoricalProgress.value = await fetchWorkflowProgress(run.run_id)
+    selectedHistoricalEvidence.value = null
+    if (selectedHistoricalWorkflow.value.final_artifact) {
+      selectedHistoricalEvidence.value = await fetchWorkflowEvidence(selectedHistoricalWorkflow.value.final_artifact)
+    }
+  }
+
+  function closeHistoricalWorkflow() {
+    selectedHistoricalWorkflow.value = null
+    selectedHistoricalProgress.value = null
+    selectedHistoricalEvidence.value = null
+  }
+
+  async function cancelActiveWorkflow() {
+    if (!activeWorkflow.value) return
+    workflowSubmitting.value = true
+    workflowError.value = null
+    try {
+      activeWorkflow.value = await cancelWorkflow(
+        activeWorkflow.value.run_id,
+        newIdempotencyKey('workflow-cancel'),
+      )
+      await refreshWorkflow()
+      await loadWorkflowHistory()
+    } catch (error) {
+      workflowError.value = failureText(error, '取消任务失败')
+    } finally {
+      workflowSubmitting.value = false
+    }
+  }
+
+  async function retryHistoricalWorkflow(mode: 'full' | 'resume_failed') {
+    if (!selectedHistoricalWorkflow.value) return
+    workflowSubmitting.value = true
+    workflowError.value = null
+    try {
+      activeWorkflow.value = await retryWorkflow(
+        selectedHistoricalWorkflow.value.run_id,
+        mode,
+        newIdempotencyKey(`workflow-retry-${mode}`),
+      )
+      workflowIntent.value = activeWorkflow.value.request_intent ?? selectedHistoricalWorkflow.value.request_intent ?? null
+      closeHistoricalWorkflow()
+      await refreshWorkflow()
+      startWorkflowPolling()
+      await loadWorkflowHistory()
+    } catch (error) {
+      workflowHistoryError.value = failureText(error, '重试任务失败')
+    } finally {
+      workflowSubmitting.value = false
+    }
+  }
+
+  function startWorkflowPolling() {
+    stopWorkflowPolling()
+    const controller = new AbortController()
+    workflowObserver = controller
+    void observeWorkflow(controller)
+  }
+
+  function stopWorkflowPolling() {
+    workflowObserver?.abort()
+    workflowObserver = null
+  }
+
+  async function observeWorkflow(controller: AbortController) {
+    while (
+      !controller.signal.aborted
+      && !document.hidden
+      && activeWorkflow.value
+      && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)
+    ) {
+      const runId = activeWorkflow.value.run_id
+      const revision = activeWorkflowProgress.value?.revision ?? activeWorkflow.value.revision
+      try {
+        const progress = await fetchWorkflowProgress(runId, {
+          afterRevision: revision,
+          waitSeconds: 20,
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted || activeWorkflow.value?.run_id !== runId) return
+        const run = await fetchWorkflow(runId)
+        if (controller.signal.aborted || activeWorkflow.value?.run_id !== runId) return
+        await applyWorkflowSnapshot(run, progress)
+      } catch (error) {
+        if (controller.signal.aborted) return
+        workflowError.value = failureText(error, '工作流状态不可用')
+        return
+      }
+    }
+  }
+
+  async function refreshBootstrap() {
+    const requestId = ++bootstrapRequestId
+    resetBootstrapFacts()
+    bootstrapStatus.value = 'loading'
+    bootstrapError.value = null
+    const requestedSection = section.value
+    const requestedSymbol = symbol.value
+    try {
+      const bootstrap = await fetchDeskBootstrap({
+        section: requestedSection,
+        symbol: requestedSymbol,
+      })
+      if (
+        requestId !== bootstrapRequestId
+        || section.value !== requestedSection
+        || symbol.value !== requestedSymbol
+      ) return
+      applyBootstrap(bootstrap)
+      void refreshQuickCommands('initial', null, true)
+    } catch (error) {
+      if (requestId !== bootstrapRequestId) return
+      clearBootstrapState(failureText(error, '交易台引导状态不可用'))
+    }
   }
 
   function startPolling() {
@@ -470,33 +1460,66 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   }
 
   function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null }
-  function onVisibilityChange() { if (!document.hidden) void refreshMarket() }
+  function onVisibilityChange() {
+    if (document.hidden) {
+      stopWorkflowPolling()
+      return
+    }
+    void refreshMarket()
+    if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+      void refreshWorkflow().finally(() => {
+        if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+          startWorkflowPolling()
+        }
+      })
+    }
+  }
 
   async function initialize() {
+    sessionStorage.removeItem('finance-god:active-workflow:v1')
+    restoreAgentMessages()
+    restoreWorkflowQueue()
+    // Shell state only after a successful bootstrap response — never declare capabilities locally.
+    await refreshBootstrap()
     await Promise.all([refreshMarket({ withBars: true }), loadProfile(), loadNotifications(), loadMarketFacts()])
+    await restoreActiveWorkflow()
     startPolling()
     document.addEventListener('visibilitychange', onVisibilityChange)
   }
 
   function dispose() {
     stopPolling()
+    stopWorkflowPolling()
     document.removeEventListener('visibilitychange', onVisibilityChange)
   }
   onScopeDispose(dispose)
 
   return {
     section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, bars, notifications,
-    account, portfolio, orders, fills, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
+    account, accountState, portfolio, orders, fills, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
     selectedWatchlistInstruments, candidates, activeDraft, activeOrder, activeTradePlan, hasSimulationAccount,
     marketError, profileError, informationFactsError, sentimentFactsError, barsError, notificationError, simulationError,
-    accountError, ordersError, fillsError, simulationLoadedAt, watchlistError, candidateError, tradeError,
+    accountError, ordersError, fillsError, marketLoadedAt, simulationLoadedAt, watchlistError, candidateError,
+    orderError, tradePlanError,
     loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates,
-    activeWorkflow, workflowError, contextVersion, selectedQuote, unreadCount, profileSummary, quickCommands,
-    setSection, setSymbol, setBarsFrequency, refreshMarket, ensureQuote, loadProfile, loadMarketFacts, loadNotifications, dismissNotification,
-    loadSimulationData, loadOrders, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
-    acknowledgeSoftRisk, confirmDraft, submitDraft, createWatchlist, renameWatchlist, removeWatchlist,
+    activeWorkflow, activeWorkflowProgress, activeWorkflowEvidence, workflowIntent, agentMessages, queuedWorkflowIntents,
+    workflowHistory, workflowHistoryCursor, workflowHistoryLoading, workflowHistoryError,
+    selectedHistoricalWorkflow, selectedHistoricalProgress, selectedHistoricalEvidence,
+    agentDecision, agentPreview, agentPreviewLoading, agentPreviewError, directReply, directAnswerError, agentSubmitting,
+    workflowError, workflowEvidenceError, workflowSubmitting, workflowActive,
+    contextVersion, serverContextVersion, serverQuickCommands, quickCommandsError, quickCommandsLoading, uiActionCatalog,
+    deskCapabilities, profileProjection, bootstrapStatus, bootstrapError, notificationHistory, uiActionError, lastUiActionReceipt,
+    workspaceControl, openedRecord, candidateLocation, tradeDraftPrefill, requestedArtifactId, requestedReminderId,
+    selectedQuote, unreadCount, profileSummary, quickCommands,
+    setSection, setSymbol, setBarsFrequency, refreshMarket, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace,
+    loadProfile, loadMarketFacts, loadNotifications, loadNotificationHistory,
+    dismissNotification, applyUiAction,
+    loadSimulationData, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
+    acknowledgeSoftRisk, confirmDraft, submitDraft, reconcileOrder, createWatchlist, renameWatchlist, removeWatchlist,
     addToWatchlist, removeFromWatchlist, ignoreCandidate, restoreCandidate, startCandidateTradePlan,
     startPortfolioDeviationTradePlan, loadTradePlan, reviseActiveTradePlan, confirmActiveTradePlan,
-    runWorkflow, refreshWorkflow, initialize, dispose,
+    runWorkflow, submitAgentIntent, previewAgentIntent, appendAgentMessage, removeQueuedWorkflow, refreshWorkflow, refreshBootstrap, refreshQuickCommands, rerollQuickCommands,
+    loadWorkflowHistory, openHistoricalWorkflow, closeHistoricalWorkflow, cancelActiveWorkflow, retryHistoricalWorkflow,
+    initialize, dispose,
   }
 })

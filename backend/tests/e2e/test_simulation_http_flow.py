@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 import server as finance_server
@@ -52,6 +54,23 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
 ) -> None:
     asyncio.run(_create_finance_schema(session_factory))
     monkeypatch.setattr(finance_server, "create_db_session", session_factory)
+    trusted_quote = SimpleNamespace(
+        symbol="000001.SZ",
+        last=Decimal("11.10"),
+        provider_time="2026-07-24T08:00:00Z",
+        market_status="released",
+        freshness="current",
+    )
+    trusted_market = SimpleNamespace(
+        quotes=lambda _symbols: _async_result(
+            SimpleNamespace(quotes=[trusted_quote], errors={})
+        )
+    )
+    monkeypatch.setattr(
+        finance_server,
+        "_services",
+        lambda: (SimpleNamespace(), trusted_market),
+    )
     first_headers, first_user_id = _register(client, "e2e-first@example.com")
     second_headers, _ = _register(client, "e2e-second@example.com")
 
@@ -146,3 +165,7 @@ async def _create_finance_schema(
 ) -> None:
     async with session_factory.kw["bind"].begin() as connection:
         await connection.run_sync(FinanceBase.metadata.create_all)
+
+
+async def _async_result(value: object) -> object:
+    return value

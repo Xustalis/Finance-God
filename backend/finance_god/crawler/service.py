@@ -17,6 +17,7 @@ _CST = ZoneInfo("Asia/Shanghai")
 # 缓存有效期
 _NEWS_CACHE_TTL = timedelta(minutes=5)
 _SENTIMENT_CACHE_TTL = timedelta(minutes=1)
+_SHARED_CRAWLER_SERVICE: CrawlerService | None = None
 
 
 class CrawlerService:
@@ -159,3 +160,12 @@ class CrawlerService:
         self._news_cache_time = None
         self._sentiment_cache = None
         self._sentiment_cache_time = None
+
+
+def get_crawler_service() -> CrawlerService:
+    """Return the process-wide crawler cache used by HTTP and workflows."""
+
+    global _SHARED_CRAWLER_SERVICE
+    if _SHARED_CRAWLER_SERVICE is None:
+        _SHARED_CRAWLER_SERVICE = CrawlerService()
+    return _SHARED_CRAWLER_SERVICE

@@ -13,7 +13,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from finance_god.api.auth import AuthenticationError, OwnerResolver
-from finance_god.application.candidate_service import CandidateScoringService
+from finance_god.application.candidate_service import (
+    CandidateScoringService,
+    candidates_for_profile,
+)
 from finance_god.domain.errors import (
     ConcurrentCommandConflict,
     DomainInvariantViolation,
@@ -63,6 +66,7 @@ class NotificationPreferenceUpdate(APIModel):
 
 
 CandidateServiceProvider = Callable[[], CandidateScoringService]
+CandidateProfileProvider = Callable[[str], Awaitable[dict | None]]
 Model = TypeVar("Model", bound=APIModel)
 
 
@@ -71,6 +75,7 @@ def create_workspace_routes(
     session_factory: Callable[[], AsyncSession],
     owner_resolver: OwnerResolver,
     candidate_service_provider: CandidateServiceProvider | None = None,
+    candidate_profile_provider: CandidateProfileProvider | None = None,
 ) -> list[Route]:
     """Create routes bound to authenticated server-side identity resolution.
 
@@ -201,6 +206,14 @@ def create_workspace_routes(
                 ignores = await uow.candidate_ignores.list(owner_user_id)
             ignored = {row.instrument_id: row.reason for row in ignores}
             service = candidate_service_provider()
+            if candidate_profile_provider is not None:
+                return await candidates_for_profile(
+                    service=service,
+                    owner_id=owner_user_id,
+                    now=datetime.now(UTC),
+                    profile=await candidate_profile_provider(owner_user_id),
+                    ignored=ignored,
+                )
             return await service.candidates(
                 owner_id=owner_user_id,
                 now=datetime.now(UTC),
@@ -245,6 +258,36 @@ def create_workspace_routes(
             owner_user_id = await _owner(owner_resolver, request)
             async with WorkspaceUnitOfWork(session_factory) as uow:
                 return await uow.notifications.list_unread(owner_user_id)
+
+        return await _respond(action)
+
+    async def list_notification_history(request: Request) -> JSONResponse:
+        """Return recent notifications including read ones.
+
+        Query params:
+        - limit: 1..200 (default 50)
+        - include_read: true|false (default true)
+
+        Toast hide ≠ read ≠ handled. History only exposes persisted unread|read.
+        """
+
+        async def action() -> object:
+            owner_user_id = await _owner(owner_resolver, request)
+            raw_limit = request.query_params.get("limit", "50")
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError) as error:
+                raise ValueError("limit must be an integer") from error
+            include_read_raw = request.query_params.get("include_read", "true").strip().lower()
+            if include_read_raw not in {"true", "false", "1", "0"}:
+                raise ValueError("include_read must be true or false")
+            include_read = include_read_raw in {"true", "1"}
+            async with WorkspaceUnitOfWork(session_factory) as uow:
+                return await uow.notifications.list_history(
+                    owner_user_id,
+                    limit=limit,
+                    include_read=include_read,
+                )
 
         return await _respond(action)
 
@@ -323,6 +366,11 @@ def create_workspace_routes(
             methods=["DELETE"],
         ),
         Route("/notifications", list_unread_notifications, methods=["GET"]),
+        Route(
+            "/notifications/history",
+            list_notification_history,
+            methods=["GET"],
+        ),
         Route(
             "/notifications/{notification_id:str}/read",
             mark_notification_read,

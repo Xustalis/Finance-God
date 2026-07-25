@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -14,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from finance_god.domain import (
+    ActiveWorkflowConflict,
     ConcurrentCommandConflict,
     DomainInvariantViolation,
     WorkflowRun,
@@ -71,6 +73,9 @@ class WorkflowRepository:
         requested_at: datetime,
         audit_payload: Mapping[str, object],
         outbox_payload: Mapping[str, object],
+        parent_run_id: str | None = None,
+        retry_mode: str | None = None,
+        resumed_from_node_id: str | None = None,
     ) -> tuple[WorkflowRun, bool]:
         """Create a queued run, or replay the stored run for the same request."""
 
@@ -85,6 +90,9 @@ class WorkflowRepository:
                 requested_at=requested_at,
                 audit_payload=audit_payload,
                 outbox_payload=outbox_payload,
+                parent_run_id=parent_run_id,
+                retry_mode=retry_mode,
+                resumed_from_node_id=resumed_from_node_id,
             )
 
     async def _create_queued_unlocked(
@@ -99,6 +107,9 @@ class WorkflowRepository:
         requested_at: datetime,
         audit_payload: Mapping[str, object],
         outbox_payload: Mapping[str, object],
+        parent_run_id: str | None = None,
+        retry_mode: str | None = None,
+        resumed_from_node_id: str | None = None,
     ) -> tuple[WorkflowRun, bool]:
         if run.status is not WorkflowRunStatus.QUEUED:
             raise DomainInvariantViolation("create_queued requires a queued workflow")
@@ -133,6 +144,9 @@ class WorkflowRepository:
         )
         if prior is not None:
             return _replay(prior, normalized_hash), False
+        active = await self._row_by_active_owner(normalized_owner)
+        if active is not None:
+            raise ActiveWorkflowConflict(active.run_id)
         if await self._session.get(WorkflowRunRow, run.run_id) is not None:
             raise DomainInvariantViolation(f"workflow run already exists: {run.run_id}")
 
@@ -151,6 +165,9 @@ class WorkflowRepository:
                     causation_id=causation_id,
                     audit_payload=audit_payload,
                     outbox_payload=outbox_payload,
+                    parent_run_id=parent_run_id,
+                    retry_mode=retry_mode,
+                    resumed_from_node_id=resumed_from_node_id,
                 )
         except IntegrityError:
             # A concurrent transaction may have won the unique idempotency key.
@@ -159,7 +176,10 @@ class WorkflowRepository:
                 normalized_key,
             )
             if prior is None:
-                raise
+                active = await self._row_by_active_owner(normalized_owner)
+                if active is None:
+                    raise
+                raise ActiveWorkflowConflict(active.run_id) from None
             return _replay(prior, normalized_hash), False
         return run, True
 
@@ -397,6 +417,80 @@ class WorkflowRepository:
             ).all()
         )
 
+    async def list_queued(
+        self,
+        *,
+        limit: int = 1,
+    ) -> tuple[tuple[str, str, str, str], ...]:
+        """Return oldest queued runs as (run_id, owner_id, request_intent, workflow_key).
+
+        v1 uses the status index plus CAS on start; multi-worker lease/SKIP LOCKED
+        is deferred until contention metrics justify it.
+        """
+        bound = max(1, min(int(limit), 100))
+        rows = (
+            await self._session.scalars(
+                select(WorkflowRunRow)
+                .where(WorkflowRunRow.status == WorkflowRunStatus.QUEUED.value)
+                .order_by(WorkflowRunRow.requested_at.asc(), WorkflowRunRow.run_id.asc())
+                .limit(bound)
+            )
+        ).all()
+        return tuple(
+            (row.run_id, row.owner_id, row.request_intent, row.workflow_key)
+            for row in rows
+        )
+
+    async def get_record(self, run_id: str) -> dict[str, object] | None:
+        row = await self._session.get(WorkflowRunRow, run_id)
+        return None if row is None else self._record(row)
+
+    async def list_records(
+        self, *, owner_id: str, limit: int, cursor: str | None, status: str | None
+    ) -> tuple[tuple[dict[str, object], ...], str | None]:
+        bound = max(1, min(limit, 100))
+        query = select(WorkflowRunRow).where(WorkflowRunRow.owner_id == owner_id)
+        if status:
+            query = query.where(WorkflowRunRow.status == status)
+        if cursor:
+            try:
+                requested_text, run_id = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+                requested_at = datetime.fromisoformat(requested_text)
+            except Exception as error:
+                raise ValueError("invalid workflow cursor") from error
+            query = query.where(
+                (WorkflowRunRow.requested_at < requested_at)
+                | ((WorkflowRunRow.requested_at == requested_at) & (WorkflowRunRow.run_id < run_id))
+            )
+        rows = (
+            await self._session.scalars(
+                query.order_by(WorkflowRunRow.requested_at.desc(), WorkflowRunRow.run_id.desc())
+                .limit(bound + 1)
+            )
+        ).all()
+        page = rows[:bound]
+        next_cursor = None
+        if len(rows) > bound and page:
+            next_cursor = base64.urlsafe_b64encode(
+                json.dumps([page[-1].requested_at.isoformat(), page[-1].run_id]).encode()
+            ).decode()
+        return tuple(self._record(row) for row in page), next_cursor
+
+    @staticmethod
+    def _record(row: WorkflowRunRow) -> dict[str, object]:
+        return {
+            "run": _workflow(row),
+            "owner_id": row.owner_id,
+            "request_intent": row.request_intent,
+            "scope": json.loads(row.scope),
+            "requested_at": row.requested_at,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "parent_run_id": row.parent_run_id,
+            "retry_mode": row.retry_mode,
+            "resumed_from_node_id": row.resumed_from_node_id,
+        }
+
     async def _insert_queued(
         self,
         run: WorkflowRun,
@@ -412,6 +506,9 @@ class WorkflowRepository:
         causation_id: str,
         audit_payload: Mapping[str, object],
         outbox_payload: Mapping[str, object],
+        parent_run_id: str | None = None,
+        retry_mode: str | None = None,
+        resumed_from_node_id: str | None = None,
     ) -> None:
         state = _state(run)
         occurred_at = run.audit_reference.recorded_at
@@ -433,6 +530,9 @@ class WorkflowRepository:
                 requested_at=requested_at,
                 created_at=occurred_at,
                 updated_at=occurred_at,
+                parent_run_id=parent_run_id,
+                retry_mode=retry_mode,
+                resumed_from_node_id=resumed_from_node_id,
             )
         )
         await self._session.flush()
@@ -559,6 +659,27 @@ class WorkflowRepository:
             )
         )
         return row
+
+    async def _row_by_active_owner(
+        self,
+        owner_id: str,
+    ) -> WorkflowRunRow | None:
+        return await self._session.scalar(
+            select(WorkflowRunRow)
+            .where(
+                WorkflowRunRow.owner_id == owner_id,
+                WorkflowRunRow.status.in_(
+                    (
+                        WorkflowRunStatus.QUEUED.value,
+                        WorkflowRunStatus.RUNNING.value,
+                        WorkflowRunStatus.CANCEL_REQUESTED.value,
+                        WorkflowRunStatus.CANCELLING.value,
+                    )
+                ),
+            )
+            .order_by(WorkflowRunRow.requested_at, WorkflowRunRow.run_id)
+            .limit(1)
+        )
 
     async def _lock_trigger(self, stable_trigger_key: str) -> None:
         bind = self._session.get_bind()

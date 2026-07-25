@@ -137,6 +137,47 @@ def test_prompt_agent_rejects_unknown_evidence_reference() -> None:
         )
 
 
+def test_research_prompt_uses_a_real_evidence_id_and_consistent_claim_rules() -> None:
+    client = JsonChatClient(evidence_id="source-42")
+    request = prompt_request(["tradingagents:fundamentals_analyst"]).model_copy(
+        update={
+            "evidence": [
+                EvidenceRecord(
+                    identifier="source-42",
+                    source="Filing",
+                    excerpt="Revenue increased.",
+                )
+            ]
+        }
+    )
+
+    AgentRunner(chat_client=client).run(request)
+
+    prompt = client.prompts[0]
+    assert '"evidence_ids":["source-42"]' in prompt
+    assert "For the first research role, claims must be non-empty" in prompt
+    assert "return an empty claims list instead of paraphrasing" in prompt
+    assert "materially distinct fact or inference" in prompt
+
+
+def test_prompt_honors_requested_response_language() -> None:
+    client = JsonChatClient()
+    request = prompt_request(["tradingagents:fundamentals_analyst"]).model_copy(
+        update={
+            "payload": {
+                "response_language": "zh-CN",
+                "response_requirements": "所有面向用户的文本使用简体中文。",
+            }
+        }
+    )
+
+    AgentRunner(chat_client=client).run(request)
+
+    prompt = client.prompts[0]
+    assert "Payload.response_language" in prompt
+    assert "Payload.response_requirements" in prompt
+
+
 def test_prompt_agent_requires_evidence() -> None:
     request = prompt_request(["tradingagents:fundamentals_analyst"]).model_copy(
         update={"evidence": []}

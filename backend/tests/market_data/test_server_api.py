@@ -31,7 +31,7 @@ from finance_god.orchestration.workflows import (
     create_workflow_command_runtime_from_environment,
 )
 
-from .conftest import NOW, FakeSDK, adapter, bar
+from .conftest import NOW, FakeSDK, adapter, bar, stock_snapshot
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -149,6 +149,9 @@ def test_overview_api_returns_latest_open_session_during_weekend(
         {"nature_date": 20260725, "is_trade": 0},
     ]
     sdk.responses["get_stock_min"] = [bar("20260724 15:00:00")]
+    sdk.responses["get_stock_daily"] = [
+        stock_snapshot(data_time="20260724", close=10.2)
+    ]
     data_adapter = adapter(sdk, now=weekend_now)
     service = MarketDataService(
         adapter=data_adapter,
@@ -172,6 +175,8 @@ def test_overview_api_returns_latest_open_session_during_weekend(
     assert quote["provider_time"].startswith("2026-07-24T15:00:00")
     assert quote["source_endpoint"] == "get_stock_min"
     assert quote["market_status"] == "released"
+    assert quote["session_alignment"] == "latest_released_session"
+    assert quote["change_percent"] == "0.02"
 
 
 def test_catalog_api_separates_availability_trade_and_stability_counts(
@@ -339,6 +344,47 @@ def test_lifespan_keeps_live_up_and_ready_down_when_workflow_runtime_fails(
             )
 
     asyncio.run(exercise())
+
+
+def test_readiness_coalesces_concurrent_probes_and_reuses_short_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    async def probe() -> tuple[bool, str]:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return True, "READY"
+
+    monkeypatch.setattr(server, "_probe_readiness", probe)
+    monkeypatch.setattr(server, "_readiness_cache", None)
+    monkeypatch.setattr(server.settings, "readiness_cache_ttl_seconds", 10.0)
+
+    async def exercise() -> None:
+        results = await asyncio.gather(*(server._readiness() for _ in range(8)))
+        cached = await server._readiness()
+        assert results == [(True, "READY")] * 8
+        assert cached == (True, "READY")
+
+    asyncio.run(exercise())
+    assert calls == 1
+
+
+def test_readiness_timeout_returns_stable_unavailable_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def blocked_probe() -> tuple[bool, str]:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(server, "_probe_readiness", blocked_probe)
+    monkeypatch.setattr(server, "_readiness_cache", None)
+    monkeypatch.setattr(server.settings, "readiness_probe_timeout_seconds", 0.01)
+
+    result = asyncio.run(server._readiness())
+
+    assert result == (False, "READINESS_PROBE_TIMEOUT")
 
 
 def test_lifespan_owns_one_workflow_runtime_and_closes_it(

@@ -2,7 +2,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.ai_catalog import DEEPSEEK_MODELS, STEPFUN_MODELS
+from app.ai_catalog import DEEPSEEK_MODELS, STEPFUN_MODELS, STEPFUN_REALTIME_MODELS
 
 
 def validate_provider_model(capability: "AICapability", provider: str, model_name: str) -> None:
@@ -13,6 +13,10 @@ def validate_provider_model(capability: "AICapability", provider: str, model_nam
             raise ValueError("Unsupported DeepSeek model")
         if provider == "stepfun" and model_name not in STEPFUN_MODELS:
             raise ValueError("Unsupported StepFun model")
+        return
+    if capability == AICapability.REALTIME:
+        if provider != "stepfun" or model_name not in STEPFUN_REALTIME_MODELS:
+            raise ValueError("Realtime requires the StepFun realtime model")
         return
     expected_model = (
         "web-speech-recognition"
@@ -27,6 +31,7 @@ class AICapability(StrEnum):
     TEXT = "text"
     STT = "stt"
     TTS = "tts"
+    REALTIME = "realtime"
 
 
 class AISettingsUpdate(BaseModel):

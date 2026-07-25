@@ -2,13 +2,12 @@
 
 import asyncio
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.security import hash_password
 from app.db.session import async_session_factory
 from app.models.user import User
+from scripts.dev_account_seed import seed_dev_account
 
 
 async def seed_dev_admin(
@@ -18,28 +17,15 @@ async def seed_dev_admin(
     email: str,
     password: str,
 ) -> User:
-    if app_env != "development":
-        raise RuntimeError("Development administrator seeding requires APP_ENV=development")
-    if len(password) < 12:
-        raise ValueError("DEV_ADMIN_PASSWORD must contain at least 12 characters")
-
-    normalized_email = email.strip().lower()
-    user = await session.scalar(select(User).where(User.email == normalized_email))
-    if user is None:
-        user = User(
-            email=normalized_email,
-            hashed_password=hash_password(password),
-            display_name="Development Administrator",
-            role="admin",
-            status="active",
-        )
-        session.add(user)
-    else:
-        user.hashed_password = hash_password(password)
-        user.role = "admin"
-        user.status = "active"
-    await session.flush()
-    return user
+    return await seed_dev_account(
+        session,
+        app_env=app_env,
+        email=email,
+        password=password,
+        display_name="Development Administrator",
+        role="admin",
+        password_setting="DEV_ADMIN_PASSWORD",
+    )
 
 
 async def _run() -> None:

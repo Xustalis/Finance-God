@@ -182,6 +182,7 @@ _COMMON_PROHIBITIONS = (
 )
 
 _ABBREVIATIONS = {
+    "RC": WorkflowKey.RESEARCH_CANDIDATES,
     "CR": WorkflowKey.COMPANY_RESEARCH,
     "MC": WorkflowKey.MARKET_CONTEXT,
     "PS": WorkflowKey.PORTFOLIO_STRESS,
@@ -421,8 +422,8 @@ _ROWS = (
     (
         "quantskills:agent-correlation-break-research",
         "测量跨资产相关结构变化",
-        "PS PC CM",
-        "FR SM",
+        "PC CM",
+        "PS FR SM",
         "不把相关性变化直接转成买卖信号。",
     ),
     (
@@ -1205,7 +1206,7 @@ class AgentGovernanceCatalog:
             decision.mode is not WorkflowCallMode.MANDATORY
             for decision in planner.workflow_matrix.values()
         ):
-            raise ValueError("financegod:planner must cover all 15 workflows")
+            raise ValueError("financegod:planner must cover every workflow")
         if planner.vendor_capability is not None:
             raise ValueError(
                 "financegod:planner must remain outside the vendor runtime"

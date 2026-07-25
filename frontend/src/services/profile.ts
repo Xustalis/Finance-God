@@ -7,5 +7,5 @@ export function localizeDimension(value:string):string{return dimensionNames[val
 export function localizeArchetype(title:string,code:string):string{if(title&&/[\u4e00-\u9fff]/.test(title))return title;return archetypeNames[code]||'审慎探索者'}
 export function localizeProfileText(value:string):string{if(/[\u4e00-\u9fff]/.test(value))return value;return phraseNames[value]||'仍在形成中的投资倾向'}
 export function directionScore(score:number):{label:string;percent:number}{const value=Math.max(0,Math.min(100,Math.round(score)));return{label:String(value),percent:value}}
-export const masterPortraits:Record<string,string>={market_growth:'/masters/bogle.jpg',value_return:'/masters/buffett.jpg',growth_discovery:'/masters/lynch.jpg',multi_asset:'/masters/dalio.jpg',trend_discipline:'/masters/seykota.jpg'}
+export const masterPortraits:Record<string,string>={market_growth:'/masters/bogle.webp',value_return:'/masters/buffett.webp',growth_discovery:'/masters/lynch.webp',multi_asset:'/masters/dalio.webp',trend_discipline:'/masters/seykota.webp'}
 export function masterInitial(name:string):string{return (name||'').replace(/[·・.\s]/g,'').slice(0,1)||'投'}

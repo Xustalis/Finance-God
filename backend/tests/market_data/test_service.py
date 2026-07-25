@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from math import nan
 
 import pytest
@@ -11,7 +12,6 @@ from finance_god.market_data import (
     ErrorKind,
     FailClosedPublishedState,
     MarketDataApplication,
-    MarketDataConfigurationError,
     MarketDataError,
     MarketDataService,
     PandaCalendarPublishedState,
@@ -20,7 +20,7 @@ from finance_god.market_data import (
 from finance_god.market_data.contracts import ReleaseState
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
-from .conftest import NOW, FakeSDK, adapter, bar
+from .conftest import NOW, FakeSDK, adapter, bar, stock_snapshot
 
 
 class RecordingWorkflow:
@@ -57,6 +57,7 @@ def test_service_fails_closed_before_sdk_when_publication_state_is_unknown() -> 
 def test_service_exposes_research_data_but_never_marks_it_trade_eligible() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,
@@ -96,6 +97,39 @@ def test_service_exposes_public_read_only_bar_boundary() -> None:
     assert result.bars
     assert result.frequency == "1分钟"
     assert result.quality.trade_eligible is False
+
+
+def test_service_exposes_full_bounded_daily_series_for_research() -> None:
+    sdk = FakeSDK()
+    sdk.responses["get_stock_daily"] = [
+        bar("20260722", close=10.2),
+        bar("20260721", close=10.1),
+        bar("20260720", close=10.0),
+    ]
+    service = MarketDataService(
+        adapter=adapter(sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    result = service.read_historical_daily_bars(
+        "000001.SZ",
+        start_date="20260622",
+        end_date="20260722",
+    )
+
+    assert len(result.bars) == 3
+    assert [item.close for item in result.bars] == [
+        Decimal("10.2"),
+        Decimal("10.1"),
+        Decimal("10.0"),
+    ]
+    assert result.frequency == "日频"
+    assert sdk.calls[-1][1] == {
+        "symbol": "000001.SZ",
+        "start_date": "20260622",
+        "end_date": "20260722",
+    }
 
 
 def test_service_exposes_source_stamped_company_disclosure_facts() -> None:
@@ -171,7 +205,7 @@ def test_service_exposes_raw_margin_facts_without_sentiment_inference() -> None:
     assert all("sentiment" not in field.name for field in result.facts[0].fields)
 
 
-def test_service_creates_audited_data_quality_review_for_conflict() -> None:
+def test_market_get_reports_conflict_without_creating_a_workflow() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [
         bar("20260723 10:31:00", symbol="600519.SH"),
@@ -188,12 +222,10 @@ def test_service_creates_audited_data_quality_review_for_conflict() -> None:
 
     assert batch.quotes == ()
     assert batch.diagnostics[0].code.value == "conflict"
-    assert len(workflow.requests) == 1
-    assert workflow.requests[0].workflow_key == "data_quality_review"
-    assert workflow.requests[0].recursive_trigger_allowed is False
+    assert workflow.requests == []
 
 
-def test_service_surfaces_dq_workflow_start_failure() -> None:
+def test_market_get_never_invokes_the_dq_workflow_port() -> None:
     class FailingWorkflow:
         async def start(self, request: DQTriggerRequest) -> DQWorkflowReceipt:
             del request
@@ -207,26 +239,59 @@ def test_service_surfaces_dq_workflow_start_failure() -> None:
     )
     application = MarketDataApplication(service, dq_workflow=FailingWorkflow())
 
-    try:
-        asyncio.run(application.quotes(["000001.SZ"]))
-    except RuntimeError as error:
-        assert "DQ workflow unavailable" in str(error)
-    else:
-        raise AssertionError("DQ workflow failure must surface explicitly")
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
+
+    assert batch.quotes == ()
+    assert batch.diagnostics[0].code.value == "unexpected_missing"
+
+
+def _calendar_day(
+    nature_date: int,
+    *,
+    is_trade: int,
+    pretrade_date: int,
+    next_trade_date: int,
+) -> dict[str, object]:
+    return {
+        "nature_date": nature_date,
+        "is_trade": is_trade,
+        "exchange": "SH",
+        "pretrade_date": pretrade_date,
+        "next_trade_date": next_trade_date,
+    }
+
+
+def _range_filtered_trade_cal(sdk: FakeSDK, rows: list[dict[str, object]]) -> None:
+    """Serve only calendar rows inside each request window (official SDK shape)."""
+
+    def get_trade_cal(**kwargs: object) -> list[dict[str, object]]:
+        sdk.calls.append(("get_trade_cal", kwargs))
+        start = str(kwargs["start_date"])
+        end = str(kwargs["end_date"])
+        return [
+            row
+            for row in rows
+            if start <= str(row["nature_date"]) <= end
+        ]
+
+    sdk.get_trade_cal = get_trade_cal  # type: ignore[method-assign]
 
 
 def test_official_calendar_response_authorizes_released_session() -> None:
     sdk = FakeSDK()
-    sdk.responses["get_trade_cal"] = [
-        {
-            "nature_date": 20260723,
-            "is_trade": 1,
-            "exchange": "SH",
-            "pretrade_date": 20260722,
-            "next_trade_date": 20260724,
-        },
-    ]
+    _range_filtered_trade_cal(
+        sdk,
+        [
+            _calendar_day(
+                20260723,
+                is_trade=1,
+                pretrade_date=20260722,
+                next_trade_date=20260724,
+            ),
+        ],
+    )
     sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     data_adapter = adapter(sdk)
     service = MarketDataService(
         adapter=data_adapter,
@@ -245,31 +310,37 @@ def test_official_calendar_response_authorizes_released_session() -> None:
     assert ready is True
     assert reason == "ready"
     calls = [name for name, _ in sdk.calls]
-    assert calls.count("get_trade_cal") == 2
-    assert calls.count("get_stock_rt_daily") == 0
+    # quotes: 1 latest_released; readiness: probe + snapshot latest_released + bars latest_released
+    assert calls.count("get_trade_cal") == 4
+    assert calls.count("get_stock_rt_daily") == 2
+    # quotes snapshot + readiness snapshot + readiness bars
     assert calls.count("get_stock_rt_min") == 3
 
 
 def test_weekend_cold_start_uses_latest_authoritative_open_session() -> None:
     weekend_now = NOW.replace(day=25)
     sdk = FakeSDK()
-    sdk.responses["get_trade_cal"] = [
-        {
-            "nature_date": 20260724,
-            "is_trade": 1,
-            "exchange": "SH",
-            "pretrade_date": 20260723,
-            "next_trade_date": 20260727,
-        },
-        {
-            "nature_date": 20260725,
-            "is_trade": 0,
-            "exchange": "SH",
-            "pretrade_date": 20260724,
-            "next_trade_date": 20260727,
-        },
-    ]
+    _range_filtered_trade_cal(
+        sdk,
+        [
+            _calendar_day(
+                20260724,
+                is_trade=1,
+                pretrade_date=20260723,
+                next_trade_date=20260727,
+            ),
+            _calendar_day(
+                20260725,
+                is_trade=0,
+                pretrade_date=20260724,
+                next_trade_date=20260727,
+            ),
+        ],
+    )
     sdk.responses["get_stock_min"] = [bar("20260724 15:00:00")]
+    sdk.responses["get_stock_daily"] = [
+        stock_snapshot(data_time="20260724", close=10.2)
+    ]
     data_adapter = adapter(sdk, now=weekend_now)
     service = MarketDataService(
         adapter=data_adapter,
@@ -290,12 +361,16 @@ def test_weekend_cold_start_uses_latest_authoritative_open_session() -> None:
     assert quote.source_endpoint == "get_stock_min"
     assert quote.market_status == "released"
     assert quote.freshness == "unknown"
+    assert quote.session_alignment == "latest_released_session"
+    assert quote.previous_close == 10
+    assert quote.change_percent == Decimal("0.02")
     assert not any(name == "get_stock_rt_min" for name, _ in sdk.calls)
 
 
 def test_readiness_probes_quote_and_page_bar_contract_once_per_cache_window() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,
@@ -307,8 +382,47 @@ def test_readiness_probes_quote_and_page_bar_contract_once_per_cache_window() ->
     assert service.probe_readiness() == (True, "ready")
 
     calls = [name for name, _ in sdk.calls]
-    assert calls.count("get_stock_rt_daily") == 0
+    assert calls.count("get_stock_rt_daily") == 1
+    # Snapshot + bars each hit the realtime minute endpoint once per probe; the
+    # second probe is served from the readiness cache.
     assert calls.count("get_stock_rt_min") == 2
+
+
+def test_readiness_uses_latest_released_session_on_closed_days() -> None:
+    weekend_now = NOW.replace(day=25)
+    sdk = FakeSDK()
+    _range_filtered_trade_cal(
+        sdk,
+        [
+            _calendar_day(
+                20260724,
+                is_trade=1,
+                pretrade_date=20260723,
+                next_trade_date=20260727,
+            ),
+            _calendar_day(
+                20260725,
+                is_trade=0,
+                pretrade_date=20260724,
+                next_trade_date=20260727,
+            ),
+        ],
+    )
+    sdk.responses["get_stock_min"] = [bar("20260724 15:00:00")]
+    sdk.responses["get_stock_daily"] = [
+        stock_snapshot(data_time="20260724", close=10.2)
+    ]
+    data_adapter = adapter(sdk, now=weekend_now)
+    service = MarketDataService(
+        adapter=data_adapter,
+        now=lambda: weekend_now,
+        clock=lambda: 100.0,
+        published_state=PandaCalendarPublishedState(data_adapter),
+    )
+
+    assert service.probe_readiness() == (True, "ready")
+    assert not any(name == "get_stock_rt_min" for name, _ in sdk.calls)
+    assert any(name == "get_stock_min" for name, _ in sdk.calls)
 
 
 def test_readiness_fails_when_page_bar_contract_has_schema_drift() -> None:
@@ -341,22 +455,19 @@ def test_unsupported_default_bar_symbol_preserves_capability_error() -> None:
     assert captured.value.public_code.value == "MARKET_DATA_CAPABILITY_UNAVAILABLE"
 
 
-def test_readiness_fails_when_workflow_command_port_is_unconfigured() -> None:
+def test_readiness_does_not_depend_on_a_mutating_workflow_port() -> None:
     service = MarketDataService(
         adapter=adapter(FakeSDK()),
         now=lambda: NOW,
         published_state=StaticPublishedState(ReleaseState.RELEASED),
     )
 
-    application = MarketDataApplication(service, dq_workflow=None)
+    application = MarketDataApplication(service)
 
-    assert application.probe_readiness() == (
-        False,
-        "DQ_WORKFLOW_COMMAND_PORT_UNCONFIGURED",
-    )
+    assert application.probe_readiness() == service.probe_readiness()
 
 
-def test_quality_failure_without_workflow_port_fails_explicitly() -> None:
+def test_quality_failure_without_workflow_port_remains_a_read_result() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00", symbol="600519.SH")]
     service = MarketDataService(
@@ -366,17 +477,16 @@ def test_quality_failure_without_workflow_port_fails_explicitly() -> None:
     )
     application = MarketDataApplication(service, dq_workflow=None)
 
-    try:
-        asyncio.run(application.quotes(["000001.SZ"]))
-    except MarketDataConfigurationError as error:
-        assert error.public_code.value == "MARKET_DATA_CONFIGURATION_ERROR"
-    else:
-        raise AssertionError("missing workflow command port must fail explicitly")
+    batch = asyncio.run(application.quotes(["000001.SZ"]))
+
+    assert batch.quotes == ()
+    assert batch.diagnostics[0].code.value == "conflict"
 
 
 def test_quote_batch_keeps_supported_results_and_reports_unknown_symbols() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [bar("20260723 10:31:00")]
+    sdk.responses["get_stock_rt_daily"] = [stock_snapshot()]
     service = MarketDataService(
         adapter=adapter(sdk),
         now=lambda: NOW,

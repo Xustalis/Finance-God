@@ -271,6 +271,35 @@ class NotificationRepository:
         )
         return [_notification(row) for row in rows]
 
+    async def list_history(
+        self,
+        owner_user_id: str,
+        *,
+        limit: int = 50,
+        include_read: bool = True,
+    ) -> list[Notification]:
+        """List recent notifications for the owner (history, not just unread).
+
+        Toast dismissal on the client is independent of read status. This history
+        surface returns persisted status (unread|read) without inventing a third
+        handled state.
+        """
+        bound = max(1, min(int(limit), 200))
+        query = select(NotificationRow).where(
+            NotificationRow.owner_user_id == owner_user_id,
+        )
+        if not include_read:
+            query = query.where(
+                NotificationRow.status == NotificationStatus.UNREAD.value,
+            )
+        rows = await self._session.scalars(
+            query.order_by(
+                NotificationRow.created_at.desc(),
+                NotificationRow.notification_id,
+            ).limit(bound)
+        )
+        return [_notification(row) for row in rows]
+
     async def get(self, owner_user_id: str, notification_id: str) -> Notification | None:
         row = await self._session.scalar(
             select(NotificationRow).where(

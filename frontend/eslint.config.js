@@ -6,7 +6,7 @@ import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescri
 // Enforces Vue essential correctness rules and the recommended TS rule set.
 export default defineConfigWithVueTs(
   { files: ['**/*.{ts,mts,tsx,vue}'] },
-  globalIgnores(['**/dist/**', '**/node_modules/**', 'config/**']),
+  globalIgnores(['**/dist/**', '**/node_modules/**', 'config/**', 'prototypes/**']),
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
   {

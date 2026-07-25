@@ -290,6 +290,45 @@ class PandaDataAdapter:
             )
             return DataEnvelope((), quote_diagnostics, bars.empty_meaning)
         latest = bars.items[0]
+        daily_endpoint = (
+            "get_stock_rt_daily"
+            if trading_date == market_today
+            else "get_stock_daily"
+        )
+        daily_params: dict[str, object] = {"symbol": instrument.provider_symbol}
+        if daily_endpoint == "get_stock_daily":
+            daily_params |= {
+                "start_date": trading_date,
+                "end_date": trading_date,
+            }
+        daily_records = records_from_frame(
+            self._request(
+                daily_endpoint,
+                {"A_SHARE_STOCK"}
+                if daily_endpoint == "get_stock_rt_daily"
+                else {"A_SHARE_STOCK_ONLY"},
+                **daily_params,
+            ),
+            endpoint=daily_endpoint,
+        )
+        daily = self._normalizer.snapshot(
+            daily_records,
+            instrument=instrument,
+            endpoint=daily_endpoint,
+            ingested_at=self._utc_now(),
+            release_state=release_state,
+            expected_date=trading_date,
+            provider_published_at=provider_published_at,
+        )
+        if not daily.items:
+            return daily
+        previous_close = daily.items[0].previous_close
+        if previous_close is None:
+            return self._schema_drift(
+                instrument.symbol,
+                daily_endpoint,
+                "daily snapshot is missing previous_close",
+            )
         return DataEnvelope(
             (
                 NormalizedSnapshot(
@@ -300,7 +339,7 @@ class PandaDataAdapter:
                     open=latest.open,
                     high=latest.high,
                     low=latest.low,
-                    previous_close=None,
+                    previous_close=previous_close,
                     volume=latest.volume,
                     amount=latest.amount,
                 ),

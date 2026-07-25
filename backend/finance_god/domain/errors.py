@@ -18,3 +18,11 @@ class DomainInvariantViolation(DomainError):
 
 class ConcurrentCommandConflict(DomainError):
     """Raised when an aggregate or projection revision changed concurrently."""
+
+
+class ActiveWorkflowConflict(ConcurrentCommandConflict):
+    """Raised when an owner already has a non-terminal workflow run."""
+
+    def __init__(self, active_run_id: str) -> None:
+        super().__init__("workflow owner already has an active run")
+        self.active_run_id = active_run_id

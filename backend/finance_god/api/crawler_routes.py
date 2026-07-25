@@ -6,17 +6,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from finance_god.crawler.service import CrawlerService
-
-# 全局爬虫服务实例
-_crawler_service: CrawlerService | None = None
-
-
-def _service() -> CrawlerService:
-    global _crawler_service
-    if _crawler_service is None:
-        _crawler_service = CrawlerService()
-    return _crawler_service
+from finance_god.crawler.service import get_crawler_service
 
 
 async def get_news(request: Request) -> JSONResponse:
@@ -32,7 +22,7 @@ async def get_news(request: Request) -> JSONResponse:
     force_refresh = request.query_params.get("refresh", "0") == "1"
 
     try:
-        news = await _service().get_news(
+        news = await get_crawler_service().get_news(
             sector=sector, limit=limit, force_refresh=force_refresh
         )
         return JSONResponse(
@@ -58,7 +48,9 @@ async def get_sentiment(request: Request) -> JSONResponse:
     force_refresh = request.query_params.get("refresh", "0") == "1"
 
     try:
-        sentiment = await _service().get_sentiment(force_refresh=force_refresh)
+        sentiment = await get_crawler_service().get_sentiment(
+            force_refresh=force_refresh
+        )
         return JSONResponse(
             {
                 "success": True,
@@ -85,7 +77,7 @@ async def get_full_report(request: Request) -> JSONResponse:
     force_refresh = request.query_params.get("refresh", "0") == "1"
 
     try:
-        result = await _service().get_full_report(
+        result = await get_crawler_service().get_full_report(
             sector=sector, news_limit=limit, force_refresh=force_refresh
         )
         return JSONResponse(

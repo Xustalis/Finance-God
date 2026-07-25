@@ -366,9 +366,19 @@ class Transport:
 
 
 class Bars:
-    async def next_bar(self, value: OrderDraft) -> SimulationBar | None:
+    def __init__(self, value: SimulationBar | None = None) -> None:
+        self.value = value or bar()
+        self.submitted_at: datetime | None = None
+
+    async def next_bar(
+        self,
+        value: OrderDraft,
+        *,
+        submitted_at: datetime,
+    ) -> SimulationBar | None:
         del value
-        return bar()
+        self.submitted_at = submitted_at
+        return self.value
 
 
 class Ledger:
@@ -387,6 +397,7 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.repository = MemoryRepository()
         self.transport = Transport()
         self.ledger = Ledger()
+        self.bars = Bars()
         self.service = SimulationExecutionService(
             uow_factory=lambda: MemoryUnitOfWork(self.repository),
             accounts=Accounts(),
@@ -394,7 +405,7 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
             manual_review=Review(),
             risk=Risk(),
             transport=self.transport,
-            bars=Bars(),
+            bars=self.bars,
             ledger=self.ledger,
             matcher=DeterministicMatcher(),
             clock=Clock(),
@@ -457,6 +468,34 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(self.repository.fills), 1)
         self.assertEqual(self.ledger.calls, [OrderSide.BUY])
+        assert first.exchange_order is not None
+        self.assertEqual(
+            self.bars.submitted_at,
+            first.exchange_order.audit_reference.recorded_at,
+        )
+
+    async def test_reconcile_without_post_submission_bar_keeps_order_waiting(self) -> None:
+        confirmed = await self._confirmed()
+        submitted = await self.service.submit(
+            owner_id="owner-1",
+            draft_id=confirmed.draft.draft_id,
+            idempotency_key="order-key",
+            request_hash=HASH,
+        )
+        self.bars.value = None
+
+        reconciled = await self.service.reconcile(
+            owner_id="owner-1",
+            order_id=submitted.order_id,
+        )
+
+        assert reconciled.exchange_order is not None
+        self.assertEqual(
+            reconciled.exchange_order.status,
+            ExchangeOrderStatus.ACCEPTED,
+        )
+        self.assertEqual(self.repository.fills, [])
+        self.assertEqual(self.ledger.calls, [])
 
     async def test_unknown_submission_is_queried_not_resubmitted(self) -> None:
         self.transport.status = SubmissionStatus.UNKNOWN

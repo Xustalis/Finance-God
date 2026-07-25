@@ -629,12 +629,12 @@ class SimulationExecutionService:
         draft = await self._repository.get_draft(order.draft_reference.object_id)
         if draft is None:
             raise ValueError("order draft not found")
-        bar = await self._bars.next_bar(draft.draft)
+        bar = await self._bars.next_bar(
+            draft.draft,
+            submitted_at=order.audit_reference.recorded_at,
+        )
         if bar is None:
-            raise ExecutionFailure(
-                ExecutionFailureCode.MARKET_DATA_MISSING,
-                "next available PandaData daily bar is unavailable",
-            )
+            return stored
         result = self._matcher.match(
             draft.draft,
             bar,

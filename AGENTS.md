@@ -44,13 +44,16 @@ item is unverified.
   interaction. Financial newspapers may inform material, proportion and
   hierarchy; trading terminals may inform density and operational clarity.
   Do not copy third-party brand assets or exact compositions.
-- Global navigation is a compact top bar. Workspace tabs sit below it when a page
-  has multiple tools.
+- Global navigation is a compact top bar (`FINANCE GOD` wordmark + functional
+  entries such as reminders and “我的”). Workspace tabs sit below it when a page
+  has multiple tools; on `/desk` they are horizontal editorial labels, not a
+  narrow icon rail.
 - Surfaces use warm beige and light paper tones with deep brown-black ink.
   Selection and primary actions use ink weight, underlines and rules rather than
-  blue. Red/green are reserved for loss/sell/risk and gain/buy/pass.
-- Do not build dashboard card mosaics. Use workspace regions, dividers, tables,
-  tabs, toolbars, charts, and inspectors.
+  blue. Current-tab / unread accents may use restrained crimson (`#c91418`);
+  red/green semantic colors remain reserved for loss/sell/risk and gain/buy/pass.
+- Do not build dashboard card mosaics. Use workspace regions, double rules,
+  tables, tabs, toolbars, charts, and inspectors. Default corners are square.
 - UI copy must describe function. Ban slogans, metaphors, design commentary, and
   vague phrases such as “事实流”, “智能中枢”, “全景洞察”, or “闭环赋能” unless the
   term is a defined domain object.

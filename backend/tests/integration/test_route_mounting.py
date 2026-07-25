@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import uuid
 
 import pytest
 import server as finance_server
@@ -31,6 +32,20 @@ def test_live_is_reachable_via_api_and_api_finance(client: TestClient) -> None:
     assert plain.json() == {"liveness": "live"}
     assert finance.status_code == 200
     assert finance.json() == {"liveness": "live"}
+
+
+def test_fastapi_entrypoint_exposes_request_diagnostics_and_compression(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/openapi.json",
+        headers={"Accept-Encoding": "gzip"},
+    )
+
+    assert response.status_code == 200
+    uuid.UUID(response.headers["X-Request-ID"])
+    assert response.headers["Server-Timing"].startswith("app;dur=")
+    assert response.headers["Content-Encoding"] == "gzip"
 
 
 def test_simulation_current_account_requires_bearer_token(

@@ -34,11 +34,12 @@ interface FactBatch {
 
 const props = defineProps<{
   quotes: readonly OverviewQuote[]
-  bars: readonly DeskBar[]
+  bars?: readonly DeskBar[]
   selectedSymbol: string
   loading: boolean
   marketError: string | null
-  barsError: string | null
+  barsError?: string | null
+  marketLoadedAt: string | null
   sentimentFacts: FactBatch | null
   sentimentError: string | null
   informationFacts: FactBatch | null
@@ -52,6 +53,12 @@ const selectedQuote = computed<ChartQuote | null>(() => {
   const q = props.quotes.find(q => q.symbol === props.selectedSymbol)
   return q ? { ...q } as ChartQuote : null
 })
+const currentSentimentFacts = computed(() => (
+  props.sentimentFacts?.symbol === props.selectedSymbol ? props.sentimentFacts : null
+))
+const currentInformationFacts = computed(() => (
+  props.informationFacts?.symbol === props.selectedSymbol ? props.informationFacts : null
+))
 
 function field(value: string | number | boolean | null): string {
   return value === null ? '—' : String(value)
@@ -59,10 +66,10 @@ function field(value: string | number | boolean | null): string {
 
 /** Map sentiment level to a representative emoji. */
 const sentimentEmoji = computed(() => {
-  if (!props.sentimentFacts?.facts?.length) return ''
-  const levelField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'level')
+  if (!currentSentimentFacts.value?.facts?.length) return ''
+  const levelField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'level')
   const level = String(levelField?.value ?? '').toLowerCase()
-  const scoreField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'score')
+  const scoreField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'score')
   const score = Number(scoreField?.value ?? 50)
   if (level === 'bullish' || level === 'very_bullish' || score >= 70) return '😄'
   if (level === 'bearish' || level === 'very_bearish' || score <= 30) return '😢'
@@ -72,18 +79,30 @@ const sentimentEmoji = computed(() => {
 })
 
 const sentimentLabel = computed(() => {
-  if (!props.sentimentFacts?.facts?.length) return ''
-  const levelField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'level')
+  if (!currentSentimentFacts.value?.facts?.length) return ''
+  const levelField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'level')
   const level = String(levelField?.value ?? '')
   const map: Record<string, string> = { very_bullish: '极度乐观', bullish: '乐观', neutral: '中性', bearish: '悲观', very_bearish: '极度悲观' }
   return map[level] || level
 })
 
 const sentimentScore = computed(() => {
-  if (!props.sentimentFacts?.facts?.length) return null
-  const scoreField = props.sentimentFacts.facts[0]?.fields?.find(f => f.name === 'score')
+  if (!currentSentimentFacts.value?.facts?.length) return null
+  const scoreField = currentSentimentFacts.value.facts[0]?.fields?.find(f => f.name === 'score')
   return scoreField?.value ?? null
 })
+function time(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
 </script>
 
 <template>
@@ -98,7 +117,7 @@ const sentimentScore = computed(() => {
     <section class="overview-section market-overview" aria-labelledby="market-title">
       <header class="market-header-row">
         <h2 id="market-title">大盘指数</h2>
-        <div v-if="sentimentFacts" class="sentiment-badge" :class="sentimentLabel">
+        <div v-if="currentSentimentFacts" class="sentiment-badge" :class="sentimentLabel">
           <span class="sentiment-emoji">{{ sentimentEmoji }}</span>
           <span class="sentiment-text">{{ sentimentLabel }}</span>
           <span v-if="sentimentScore !== null" class="sentiment-score">{{ sentimentScore }}</span>
@@ -118,26 +137,32 @@ const sentimentScore = computed(() => {
       <!-- Chart -->
       <MarketChart
         :quote="selectedQuote"
-        :bars="bars"
+        :bars="bars ?? []"
         :loading="loading"
-        :error="barsError"
+        :error="barsError ?? null"
         :on-period-change="onPeriodChange"
       />
+      <p v-if="marketError" class="data-error" role="alert">
+        真实行情刷新失败：{{ marketError }}
+        <small v-if="marketLoadedAt">当前保留数据最后成功读取于 {{ time(marketLoadedAt) }}。</small>
+      </p>
+      <p v-else-if="marketLoadedAt" class="data-footnote">客户端最后成功读取于 {{ time(marketLoadedAt) }}。</p>
     </section>
 
     <!-- Sentiment details below chart -->
-    <div v-if="sentimentFacts" class="sentiment-detail-strip">
-      <span v-for="item in sentimentFacts.facts[0]?.fields?.slice(0, 4)" :key="item.name" class="sentiment-detail-item">
+    <div v-if="currentSentimentFacts" class="sentiment-detail-strip">
+      <span v-for="item in currentSentimentFacts.facts[0]?.fields?.slice(0, 4)" :key="item.name" class="sentiment-detail-item">
         <span class="sentiment-detail-label">{{ item.name }}</span>
         <span class="sentiment-detail-value">{{ field(item.value) }}</span>
       </span>
     </div>
+    <p v-if="sentimentError" class="data-error" role="alert">市场情绪事实刷新失败：{{ sentimentError }}</p>
 
     <section class="overview-section facts-section" aria-labelledby="information-title">
       <header><h2 id="information-title">市场资讯</h2><small>爬虫实时财经要闻与研报（东方财富）</small></header>
-      <template v-if="informationFacts">
+      <template v-if="currentInformationFacts">
         <ul class="news-list">
-          <li v-for="(fact, idx) in informationFacts.facts.slice(0, 8)" :key="idx" class="news-item">
+          <li v-for="(fact, idx) in currentInformationFacts.facts.slice(0, 8)" :key="idx" class="news-item">
             <a
               :href="String(fact.fields.find(f => f.name === 'url')?.value || '#')"
               target="_blank"
@@ -151,7 +176,7 @@ const sentimentScore = computed(() => {
           </li>
         </ul>
       </template>
-      <p v-else class="empty-data">{{ informationError || '' }}</p>
+      <p v-else class="empty-data">{{ informationError || '正在读取服务端市场资讯。' }}</p>
     </section>
   </section>
 </template>
