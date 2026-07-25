@@ -38,6 +38,9 @@ build/
 
 # Local browser automation session artifacts
 .playwright-cli/
+/.claude/
+/desk_page_*.png
+/screenshot_*.png
 
 # Local runtime databases
 backend/*.db
