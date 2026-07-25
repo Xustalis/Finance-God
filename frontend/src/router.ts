@@ -61,7 +61,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     const adminAuthenticated = validStoredSession('finance-god-admin-token', 'finance-god-admin-user', 'admin')
     if (to.meta.requiresAuth && !userAuthenticated) return { path: '/login', query: { redirect: to.fullPath } }
     if (to.meta.requiresAdmin && !adminAuthenticated) return { path: '/admin/login', query: { redirect: to.fullPath } }
-    if (to.path === '/login' && userAuthenticated) return typeof to.query.redirect === 'string' ? to.query.redirect : '/app/exe'
+    if (to.path === '/login' && userAuthenticated) return typeof to.query.redirect === 'string' ? to.query.redirect : (profileCompleted() ? '/desk' : '/app/exe')
     if (to.path === '/admin/login' && adminAuthenticated) return '/admin/ai-settings'
   })
   return router

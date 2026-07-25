@@ -19,6 +19,16 @@ RISK_EVIDENCE_WEIGHTS = {
     "income_stability": 10,
 }
 
+# 对话证据只允许在客观问卷基线上做有限修正：各维度权重合计可达 ±70，
+# 若不封顶，回答连贯的用户几乎必然被推到 100 分的最高风险档。
+EVIDENCE_ADJUSTMENT_LIMIT = 15
+
+# 适当性约束：无经验 / 入门用户不进入最高风险档（growth 档下限为 65）。
+EXPERIENCE_RISK_CEILING = {
+    "none": 55,
+    "beginner": 64,
+}
+
 HORIZON_LABELS = {
     "under_1_year": "1年以内",
     "1_3_years": "1至3年",
@@ -110,9 +120,14 @@ def assess_profile(
     risk += {"under_1_year": -20, "1_3_years": -8, "3_5_years": 5, "5_plus_years": 15}.get(objective.get("fund_horizon"), 0)
     risk += min(int(objective.get("emergency_fund_months", 0)), 12) - 6
     risk += {"none": -10, "beginner": -5, "intermediate": 5, "advanced": 12}.get(objective.get("investment_experience"), 0)
-    risk += sum(
+    evidence_adjustment = sum(
         round(float(profile_evidence.get(dimension, 0.0)) * weight)
         for dimension, weight in RISK_EVIDENCE_WEIGHTS.items()
+    )
+    risk += max(-EVIDENCE_ADJUSTMENT_LIMIT, min(EVIDENCE_ADJUSTMENT_LIMIT, evidence_adjustment))
+    risk = min(
+        risk,
+        EXPERIENCE_RISK_CEILING.get(objective.get("investment_experience"), 100),
     )
     risk = max(0, min(100, risk))
     if risk < 35:

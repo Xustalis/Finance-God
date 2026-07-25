@@ -2,10 +2,13 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# 使用 lockfile + npm ci 保证开发容器依赖可复现。
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
+
+USER node
 
 EXPOSE 3000
 

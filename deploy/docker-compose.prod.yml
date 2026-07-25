@@ -23,6 +23,9 @@ services:
     env_file:
       - ${FINANCE_GOD_ENV_FILE:-.env.production}
     environment:
+      # 生产环境固定为 production：即使 env 文件遗漏 APP_ENV，也不会回落到
+      # development 而绕过 Settings 对默认 SECRET_KEY 的启动校验。
+      APP_ENV: production
       DATABASE_URL: postgresql+asyncpg://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
       DATABASE_URL_SYNC: postgresql+psycopg2://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god
       FINANCE_GOD_DATABASE_URL: postgresql+psycopg2://finance_god:${POSTGRES_PASSWORD}@db:5432/finance_god

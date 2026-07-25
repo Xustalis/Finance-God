@@ -37,6 +37,18 @@ services:
     command: >
       sh -c "alembic upgrade head &&
       python -m app.startup"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   learning:
     build: ./backend
@@ -69,10 +81,12 @@ services:
 
   frontend:
     build: ./frontend
-    env_file:
-      - .env
     environment:
+      # 前端容器只接收构建/代理所需变量，绝不通过 env_file 注入整份根 .env——
+      # PandaData 与 AI 密钥仅属于后端容器。
       VITE_API_PROXY_TARGET: http://backend:8000
+      VITE_WORKBENCH_ORIGIN: ${VITE_WORKBENCH_ORIGIN:-}
+      WORKBENCH_ORIGIN: ${WORKBENCH_ORIGIN:-}
     ports:
       - "3000:3000"
     volumes:

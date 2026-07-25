@@ -119,12 +119,27 @@ describe('objective profile state', () => {
     setActivePinia(createPinia())
     const current = vi.fn().mockRejectedValue(new ApiClientError('missing', 404))
     const create = vi.fn().mockResolvedValue({ ...baseSession(), step: 'objective_profile', user_id: 'u7', id: 's7' })
-    const store = useOnboardingStore(); store.configureApi({ current, create } as never)
+    const latest = vi.fn().mockRejectedValue(new ApiClientError('no profile', 404))
+    const store = useOnboardingStore(); store.configureApi({ current, create } as never, { latest } as never)
     await store.restore(); store.selectObjective('prefer_not_to_say')
     setActivePinia(createPinia())
     const restored = useOnboardingStore(); restored.configureApi({ current: vi.fn().mockResolvedValue({ ...baseSession(), step: 'objective_profile', user_id: 'u7', id: 's7' }) } as never)
     await restored.restore()
-    expect(restored.objective.gender).toBe('prefer_not_to_say'); expect(restored.objectiveIndex).toBe(1); expect(create).toHaveBeenCalledOnce()
+    expect(restored.objective.gender).toBe('prefer_not_to_say'); expect(restored.objectiveIndex).toBe(1); expect(create).toHaveBeenCalledOnce(); expect(latest).toHaveBeenCalledOnce()
+  })
+
+  it('marks the profile ready instead of creating a session when the server already has one', async () => {
+    setActivePinia(createPinia())
+    const create = vi.fn()
+    const store = useOnboardingStore()
+    store.configureApi(
+      { current: vi.fn().mockRejectedValue(new ApiClientError('missing', 404)), create } as never,
+      { latest: vi.fn().mockResolvedValue({ profile: { id: 'p1' }, recommendations: [] }) } as never,
+    )
+    await store.restore()
+    expect(store.profileReady).toBe(true)
+    expect(store.session).toBeNull()
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('does not create a session after non-404 restore failures', async () => {

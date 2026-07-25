@@ -1,14 +1,24 @@
+# 与 pyproject.toml [project.dependencies] 保持一致；pyproject 是唯一事实来源。
+# 本文件仅为 pip install -r 场景（Dockerfile / CI 缓存键）与 vendor 路径包存在。
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+SQLAlchemy[asyncio]>=2.0.25,<3
+asyncpg>=0.29.0,<1
+aiosqlite>=0.20.0,<1
+alembic>=1.13.0,<2
+pydantic>=2.6.0,<3
+pydantic-settings>=2.1.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt<5
+httpx[socks]>=0.27.0
+websockets>=14.0,<16
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.0,<2
 openai>=2.0.0,<3
 langchain>=0.1.0
 langgraph>=1.0.0,<2
-pydantic>=2.0.0,<3
-python-dotenv>=1.0.0,<2
 mcp>=1.27.0,<2
 panda_data>=0.0.12,<1
-starlette>=1.0.0,<2
-uvicorn>=0.30.0,<1
-SQLAlchemy[asyncio]>=2.0.0,<3
-alembic>=1.13.0,<2
-asyncpg>=0.29.0,<1
-aiosqlite>=0.20.0,<1
+# 本地 vendor 路径包无法写入 pyproject 的 PEP 621 依赖，必须保留在此。
 ./vendor/verifolio-unified-agents-0.2.0/agent_framework

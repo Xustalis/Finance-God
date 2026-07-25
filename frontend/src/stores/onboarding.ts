@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { onboardingApi } from '@/api'
+import { onboardingApi, profileApi } from '@/api'
 import { ApiClientError } from '@/api/client'
 import type { InputMode, ObjectiveProfile, Session } from '@/types/api'
 
@@ -22,11 +22,12 @@ export const objectiveSteps:ObjectiveStep[]=[
 ]
 const makeId=()=>globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`
 export const useOnboardingStore=defineStore('onboarding',()=>{
-  const session=ref<Session|null>(null), objectiveIndex=ref(0), objective=ref<Partial<ObjectiveProfile>>({}), messages=ref<{role:'user'|'assistant';content:string}[]>([]), busy=ref(false), error=ref('')
+  const session=ref<Session|null>(null), objectiveIndex=ref(0), objective=ref<Partial<ObjectiveProfile>>({}), messages=ref<{role:'user'|'assistant';content:string}[]>([]), busy=ref(false), error=ref(''), profileReady=ref(false)
   let client=onboardingApi
+  let profileClient=profileApi
   let pendingContent:{content:string;inputMode:InputMode;requestId:string}|null=null
   const currentObjective=computed(()=>objectiveSteps[objectiveIndex.value]); const objectiveComplete=computed(()=>objectiveSteps.every(s=>objective.value[s.key]!==undefined))
-  function configureApi(api:typeof onboardingApi){client=api}
+  function configureApi(api:typeof onboardingApi,profiles:typeof profileApi=profileApi){client=api;profileClient=profiles}
   const draftKey=()=>session.value?`finance-god-objective:${session.value.user_id}:${session.value.id}`:null
   const messagesKey=()=>session.value?`finance-god-messages:${session.value.user_id}:${session.value.id}`:null
   function persistDraft(){const key=draftKey();if(key)localStorage.setItem(key,JSON.stringify({objective:objective.value,index:objectiveIndex.value}))}
@@ -34,13 +35,17 @@ export const useOnboardingStore=defineStore('onboarding',()=>{
   function persistMessages(){const key=messagesKey();if(key)localStorage.setItem(key,JSON.stringify(messages.value))}
   function loadMessages(){const key=messagesKey();if(!key)return;try{const saved=JSON.parse(localStorage.getItem(key)||'[]') as {role:'user'|'assistant';content:string}[];messages.value=Array.isArray(saved)?saved:[]}catch{localStorage.removeItem(key);messages.value=[]}}
   function clearMemory(){objective.value={};objectiveIndex.value=0;messages.value=[];pendingContent=null}
-  function reset(){const objectiveStorage=draftKey(),messageStorage=messagesKey();if(objectiveStorage)localStorage.removeItem(objectiveStorage);if(messageStorage)localStorage.removeItem(messageStorage);clearMemory();session.value=null;error.value='';busy.value=false}
-  async function restore(){busy.value=true;error.value='';try{let next:Session;try{next=await client.current()}catch(e){if(!(e instanceof ApiClientError)||e.status!==404)throw e;next=await client.create()}if(session.value&&(session.value.id!==next.id||session.value.user_id!==next.user_id))clearMemory();session.value=next;if(next.objective_profile)objective.value={...next.objective_profile};else if(next.step==='objective_profile')loadDraft();loadMessages();return session.value}finally{busy.value=false}}
+  function reset(){const objectiveStorage=draftKey(),messageStorage=messagesKey();if(objectiveStorage)localStorage.removeItem(objectiveStorage);if(messageStorage)localStorage.removeItem(messageStorage);clearMemory();session.value=null;error.value='';busy.value=false;profileReady.value=false}
+  async function hasCompletedProfile(){try{await profileClient.latest();return true}catch(e){if(e instanceof ApiClientError&&e.status===404)return false;throw e}}
+  async function restore(){busy.value=true;error.value='';try{let next:Session;try{next=await client.current()}catch(e){if(!(e instanceof ApiClientError)||e.status!==404)throw e;
+      // 无活跃会话时先确认服务端是否已有完成画像，避免为已完成用户新建空会话
+      if(await hasCompletedProfile()){profileReady.value=true;return null}
+      next=await client.create()}if(session.value&&(session.value.id!==next.id||session.value.user_id!==next.user_id))clearMemory();session.value=next;if(next.objective_profile)objective.value={...next.objective_profile};else if(next.step==='objective_profile')loadDraft();loadMessages();return session.value}finally{busy.value=false}}
   function selectObjective(value:string|number){const step=currentObjective.value;if(!step)return;(objective.value as Record<string,unknown>)[step.key]=value;if(objectiveIndex.value<objectiveSteps.length-1)objectiveIndex.value++;persistDraft()}
   function previousObjective(){objectiveIndex.value=Math.max(0,objectiveIndex.value-1);persistDraft()}
   async function submitObjective(){if(!session.value||!objectiveComplete.value)throw new Error('请完成全部客观信息');busy.value=true;try{const key=draftKey();session.value=await client.saveObjective(session.value.id,objective.value as ObjectiveProfile);if(key)localStorage.removeItem(key)}finally{busy.value=false}}
   async function sendContent(content:string,input_mode:InputMode='text'){if(!session.value)throw new Error('会话尚未建立');busy.value=true;error.value='';const retry=pendingContent?.content===content&&pendingContent.inputMode===input_mode?pendingContent:{content,inputMode:input_mode,requestId:makeId()};pendingContent=retry;try{const result=await client.sendMessage(session.value.id,{request_id:retry.requestId,content,input_mode});pendingContent=null;session.value=result.session;messages.value.push({role:'user',content:result.user_message.content},{role:'assistant',content:result.assistant_message.content});persistMessages();return result}catch(e){error.value=e instanceof Error?e.message:'对话暂时不可用';throw e}finally{busy.value=false}}
   async function skipCurrent(){if(session.value?.current_dimension!=='income_stability')throw new Error('当前问题不能跳过');busy.value=true;try{session.value=await client.skip(session.value.id,'income_stability')}finally{busy.value=false}}
   async function complete(){if(!session.value)throw new Error('会话尚未建立');busy.value=true;try{return await client.complete(session.value.id)}finally{busy.value=false}}
-  return{session,objectiveIndex,objective,messages,busy,error,currentObjective,objectiveComplete,configureApi,restore,reset,persistMessages,selectObjective,previousObjective,submitObjective,sendContent,skipCurrent,complete}
+  return{session,objectiveIndex,objective,messages,busy,error,profileReady,currentObjective,objectiveComplete,configureApi,restore,reset,persistMessages,selectObjective,previousObjective,submitObjective,sendContent,skipCurrent,complete}
 })

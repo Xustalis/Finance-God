@@ -37,8 +37,15 @@ describe('market quote normalization', () => {
       symbol: '000001.SZ',
       name: '000001.SZ',
       last: '11.1',
+      open: '11.0',
+      high: '11.3',
+      low: '10.9',
+      previous_close: '10.96',
       change: null,
-      change_percent: '1.25',
+      // 后端合同以比例传输涨跌幅；展示层归一化为百分数。
+      change_percent: '0.0125',
+      volume: '1000000',
+      amount: '11100000',
       provider: 'PandaData',
       provider_time: '2026-07-24T15:00:00+08:00',
       frequency: '1m',
@@ -46,6 +53,12 @@ describe('market quote normalization', () => {
       market_status: 'released',
     })
     expect(quote.last).toBe(11.1)
+    expect(quote.open).toBe(11)
+    expect(quote.high).toBe(11.3)
+    expect(quote.low).toBe(10.9)
+    expect(quote.previous_close).toBe(10.96)
+    expect(quote.volume).toBe(1000000)
+    expect(quote.amount).toBe(11100000)
     expect(quote.change).toBeNull()
     expect(quote.change_percent).toBe(1.25)
     expect(quote.freshness).toBe('stale')

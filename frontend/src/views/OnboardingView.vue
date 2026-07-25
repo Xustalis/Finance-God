@@ -10,14 +10,14 @@ const progress=computed(()=>phase.value==='objective'?(store.objectiveIndex+1)/o
 const sensitive=computed(()=>store.session?.current_dimension==='income_stability')
 const currentQuestion=computed(()=>store.session?.current_question||'正在准备下一问…')
 const showQuestionCard=computed(()=>{const q=(store.session?.current_question||'').trim();if(!q)return false;const lastAssistant=[...store.messages].reverse().find(m=>m.role==='assistant');return !lastAssistant||!lastAssistant.content.includes(q)})
-async function restoreSession(){try{await store.restore();if(store.session?.objective_profile)started.value=true;if(localStorage.getItem('finance-god-profile-completed')==='true'){router.replace('/desk');return}}catch(e){store.error=e instanceof Error?e.message:'无法恢复会话'}}
+async function restoreSession(){if(localStorage.getItem('finance-god-profile-completed')==='true'){await router.replace('/desk');return}try{await store.restore();if(store.profileReady){localStorage.setItem('finance-god-profile-completed','true');await router.replace('/desk');return}if(store.session?.objective_profile)started.value=true}catch(e){store.error=e instanceof Error?e.message:'无法恢复会话'}}
 onMounted(async()=>{await restoreSession();timer=window.setInterval(()=>thinkingIndex.value=(thinkingIndex.value+1)%thinking.length,1800)})
 onBeforeUnmount(()=>clearInterval(timer));watch([()=>store.messages.length,currentQuestion],async()=>{await nextTick();if(messageStream.value)messageStream.value.scrollTop=messageStream.value.scrollHeight})
 async function choose(value:string|number){store.selectObjective(value)}
 async function objectiveNext(){try{await store.submitObjective()}catch(e){store.error=e instanceof Error?e.message:'提交失败'}}
 async function send(){const content=draft.value.trim();if(!content||store.busy)return;draft.value='';try{await store.sendContent(content,inputMode.value);inputMode.value='text'}catch{draft.value=content}}
 async function skip(){try{await store.skipCurrent()}catch(e){store.error=e instanceof Error?e.message:'跳过失败'}}
-async function finish(){finishing.value=true;try{await store.complete();await router.push('/app/profile-report')}catch(e){finishing.value=false;store.error=e instanceof Error?e.message:'生成报告失败'}}
+async function finish(){finishing.value=true;try{await store.complete();localStorage.setItem('finance-god-profile-completed','true');await router.push('/app/profile-report')}catch(e){finishing.value=false;store.error=e instanceof Error?e.message:'生成报告失败'}}
 function appendVoiceTranscript(role:'user'|'assistant',content:string){store.messages.push({role,content});store.persistMessages()}
 async function startVoice(){if(!store.session)return;await voiceSession.start({surface:'onboarding',sessionId:store.session.id,onFinalTranscript:appendVoiceTranscript})}
 function logout(){store.reset();auth.logout();router.replace('/login')}

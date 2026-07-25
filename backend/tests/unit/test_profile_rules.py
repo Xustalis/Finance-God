@@ -18,6 +18,58 @@ def test_confirmed_ai_evidence_changes_deterministic_risk_score() -> None:
     assert cautious.dimension_scores["risk_capacity"] < adventurous.dimension_scores["risk_capacity"]
 
 
+def test_conversation_evidence_refines_but_cannot_dominate_objective_answers() -> None:
+    # 稳健新手：持有不加仓、3-5 年期限、6 个月应急金、入门经验；
+    # 即便所有对话维度都给出最有利于加风险的证据，也不应落入最高风险档。
+    beginner_objective = {
+        "loss_reaction": "hold",
+        "fund_horizon": "3_5_years",
+        "emergency_fund_months": 6,
+        "investment_experience": "beginner",
+    }
+    aggressive_evidence = {
+        "risk_tolerance": 1.0,
+        "liquidity_need": -1.0,
+        "investment_goal": 1.0,
+        "loss_behavior": 1.0,
+        "investment_knowledge": 1.0,
+        "income_stability": 1.0,
+    }
+    assessment = assess_profile(
+        beginner_objective,
+        {key: 0.9 for key in aggressive_evidence},
+        aggressive_evidence,
+        [],
+    )
+
+    assert assessment.risk_level != "growth"
+    assert assessment.dimension_scores["risk_capacity"] < 65
+
+
+def test_inexperienced_users_are_capped_below_the_growth_band() -> None:
+    aggressive_evidence = {
+        "risk_tolerance": 1.0,
+        "liquidity_need": -1.0,
+        "investment_goal": 1.0,
+        "loss_behavior": 1.0,
+        "investment_knowledge": 1.0,
+        "income_stability": 1.0,
+    }
+    for experience in ("none", "beginner"):
+        objective = OBJECTIVE | {"investment_experience": experience}
+        assessment = assess_profile(
+            objective, {key: 0.9 for key in aggressive_evidence}, aggressive_evidence, []
+        )
+        assert assessment.risk_level != "growth", experience
+    experienced = assess_profile(
+        OBJECTIVE | {"investment_experience": "advanced"},
+        {key: 0.9 for key in aggressive_evidence},
+        aggressive_evidence,
+        [],
+    )
+    assert experienced.risk_level == "growth"
+
+
 def test_low_confidence_lists_missing_skipped_and_weak_dimensions() -> None:
     assessment = assess_profile(
         OBJECTIVE,

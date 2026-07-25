@@ -30,6 +30,8 @@ export function createHttpClient({ tokenKey, userKey, loginPath }: ClientOptions
     if (error.response?.status === 401) {
       localStorage.removeItem(tokenKey)
       localStorage.removeItem(userKey)
+      // 会话失效时同时丢弃画像完成缓存，避免下一个登录账号继承他人的完成态
+      if (tokenKey === 'finance-god-token') localStorage.removeItem('finance-god-profile-completed')
       if (location.pathname !== loginPath) location.assign(loginPath)
     }
     const body = error.response?.data

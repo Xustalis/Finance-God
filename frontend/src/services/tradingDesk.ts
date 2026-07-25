@@ -1,7 +1,11 @@
 import axios from 'axios'
 import type { ProfileWithRecommendations } from '@/types/api'
 
-const client = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || '/api', timeout: 30_000 })
+// 交易台裸 JSON 域（/api/market、/api/simulation 等）。与 /api/v1 包络域使用
+// 不同的基址变量：VITE_API_BASE_URL 属于 v1 客户端，两者默认值互斥，混用会
+// 打断其中一方（见 api/client.ts 与 useRealtimeVoice）。
+const FINANCE_API_BASE_URL = import.meta.env.VITE_FINANCE_API_BASE_URL || '/api'
+const client = axios.create({ baseURL: FINANCE_API_BASE_URL, timeout: 30_000 })
 
 export class DeskApiError extends Error {
   constructor(
@@ -19,12 +23,30 @@ client.interceptors.request.use((config) => {
   return config
 })
 
+client.interceptors.response.use(undefined, (error: unknown) => {
+  // 会话过期时与 /api/v1 客户端保持同一行为：清凭据与画像完成缓存并回登录页，
+  // 避免 /desk 各面板散落展示原始鉴权错误。
+  if (axios.isAxiosError(error) && error.response?.status === 401) {
+    localStorage.removeItem('finance-god-token')
+    localStorage.removeItem('finance-god-user')
+    localStorage.removeItem('finance-god-profile-completed')
+    if (location.pathname !== '/login') location.assign('/login')
+  }
+  return Promise.reject(error)
+})
+
 export interface DeskQuote {
   symbol: string
   name: string
   last: number | null
+  open?: number | null
+  high?: number | null
+  low?: number | null
+  previous_close?: number | null
   change: number | null
   change_percent: number | null
+  volume?: number | null
+  amount?: number | null
   provider: string
   provider_time: string
   frequency: string
@@ -40,12 +62,20 @@ export function parseMarketNumber(value: unknown): number | null {
 }
 
 export function normalizeDeskQuote(raw: Record<string, unknown>): DeskQuote {
+  // 后端合同以比例传输涨跌幅（-0.0161 = -1.61%）；展示层统一收口为百分数。
+  const changePercentRatio = parseMarketNumber(raw.change_percent)
   return {
     symbol: String(raw.symbol ?? ''),
     name: String(raw.name ?? raw.symbol ?? ''),
     last: parseMarketNumber(raw.last),
+    open: parseMarketNumber(raw.open),
+    high: parseMarketNumber(raw.high),
+    low: parseMarketNumber(raw.low),
+    previous_close: parseMarketNumber(raw.previous_close),
     change: parseMarketNumber(raw.change),
-    change_percent: parseMarketNumber(raw.change_percent),
+    change_percent: changePercentRatio === null ? null : changePercentRatio * 100,
+    volume: parseMarketNumber(raw.volume),
+    amount: parseMarketNumber(raw.amount),
     provider: String(raw.provider ?? 'PandaData'),
     provider_time: String(raw.provider_time ?? ''),
     frequency: String(raw.frequency ?? ''),
@@ -775,8 +805,7 @@ export async function streamDeskAgentDecision(
   onDelta: (delta: string) => void,
 ): Promise<DeskAgentDecision> {
   const token = localStorage.getItem('finance-god-token')
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
-  const response = await fetch(`${baseUrl}/agent/desk/decision/stream`, {
+  const response = await fetch(`${FINANCE_API_BASE_URL}/agent/desk/decision/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -31,13 +31,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS：origins 来自逗号分隔配置；凭据模式下禁止通配符，剔除空项与 "*"，
+# 方法与请求头收敛到实际使用的集合（Bearer 鉴权 + JSON/NDJSON 请求体）。
+_cors_origins = [
+    origin.strip()
+    for origin in settings.cors_origins.split(",")
+    if origin.strip() and origin.strip() != "*"
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 

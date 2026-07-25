@@ -251,10 +251,17 @@ function updateData() {
     candleSeries.setData(candles as any)
     volumeSeries.setData(volumes as any)
 
-    if (ma5Series) ma5Series.setData(calcMA(barsToRender, 5).map(d => isMinute ? { ...d, time: Math.floor(new Date(d.time).getTime() / 1000) } : d) as any)
-    if (ma10Series) ma10Series.setData(calcMA(barsToRender, 10).map(d => isMinute ? { ...d, time: Math.floor(new Date(d.time).getTime() / 1000) } : d) as any)
-    if (ma20Series) ma20Series.setData(calcMA(barsToRender, 20).map(d => isMinute ? { ...d, time: Math.floor(new Date(d.time).getTime() / 1000) } : d) as any)
-    if (ma60Series) ma60Series.setData(calcMA(barsToRender, 60).map(d => isMinute ? { ...d, time: Math.floor(new Date(d.time).getTime() / 1000) } : d) as any)
+    // 均线必须与蜡烛使用同一升序序列和同一时间格式：
+    // 日/周/月线截取 YYYY-MM-DD，分钟线转 UTC 秒。混用完整 ISO 串会被
+    // lightweight-charts 拒绝并连带清空蜡烛（首屏空白的根因）。
+    const maTime = (time: string) =>
+      isMinute ? (Math.floor(new Date(time).getTime() / 1000) as any) : toDay(time)
+    const maSeriesByPeriod: Array<[any, number]> = [
+      [ma5Series, 5], [ma10Series, 10], [ma20Series, 20], [ma60Series, 60],
+    ]
+    for (const [series, period] of maSeriesByPeriod) {
+      if (series) series.setData(calcMA(sorted, period).map(d => ({ ...d, time: maTime(d.time) })) as any)
+    }
 
     chart?.timeScale().fitContent()
   } catch (error) {
