@@ -11,7 +11,6 @@ import type {
   SimulationFill,
   SimulationOrder,
   SimulationPortfolio,
-  TradeDecisionContextInput,
   TradePlan,
   TradePlanActionRevision,
 } from '@/services/tradingDesk'
@@ -50,7 +49,6 @@ const props = withDefaults(defineProps<{
     instrumentId: string
     side: 'buy' | 'sell'
     quantity: string
-    decisionContext: TradeDecisionContextInput
   }) => void | Promise<void>
   onReviewDraft?: () => void | Promise<void>
   onAcknowledgeSoftRisk?: (hash: string) => void | Promise<void>
@@ -67,12 +65,6 @@ const props = withDefaults(defineProps<{
 const instrumentId = ref(props.selectedSymbol)
 const side = ref<'buy' | 'sell'>('buy')
 const quantity = ref('')
-const thesis = ref('')
-const expectedReturn = ref('')
-const primaryRisks = ref('')
-const contraryEvidence = ref('')
-const expectedHoldingPeriod = ref('')
-const confidence = ref('')
 const referenceQuote = computed(() => props.quotes.find((quote) => quote.symbol === instrumentId.value.trim().toUpperCase()) ?? null)
 const chartQuote = computed<ChartQuote | null>(() => {
   const quote = props.quotes.find((item) => item.symbol === props.selectedSymbol)
@@ -100,12 +92,6 @@ const canSubmit = computed(() => Boolean(
   && !props.loading
   && numericQuantity.value > 0
   && !balanceBlockedReason.value
-  && thesis.value.trim()
-  && expectedReturn.value.trim()
-  && primaryRisks.value.trim()
-  && contraryEvidence.value.trim()
-  && expectedHoldingPeriod.value.trim()
-  && confidence.value.trim()
 ))
 const latestFill = computed(() => props.receipt?.fills[props.receipt.fills.length - 1] ?? null)
 const recentFills = computed(() => [...props.fills].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 20))
@@ -170,14 +156,6 @@ async function submit() {
     instrumentId: instrumentId.value.trim().toUpperCase(),
     side: side.value,
     quantity: String(quantity.value),
-    decisionContext: {
-      thesis: thesis.value.trim(),
-      expected_return: expectedReturn.value.trim(),
-      primary_risks: primaryRisks.value.trim(),
-      contrary_evidence: contraryEvidence.value.trim(),
-      expected_holding_period: expectedHoldingPeriod.value.trim(),
-      confidence: confidence.value.trim(),
-    },
   })
 }
 </script>
@@ -268,16 +246,6 @@ async function submit() {
         <label>标的<input v-model="instrumentId" required @change="selectTradingSymbol"></label>
         <label>方向<select v-model="side"><option value="buy">买入</option><option value="sell">卖出</option></select></label>
         <label>数量<input v-model="quantity" type="number" min="1" step="1" required></label>
-        <fieldset class="decision-record">
-          <legend>决策记录</legend>
-          <p>以下内容随成交冻结，用于复盘当时的判断。</p>
-          <label>为什么交易<textarea v-model="thesis" maxlength="2000" required></textarea></label>
-          <label>预期收益<input v-model="expectedReturn" type="text" maxlength="1000" required></label>
-          <label>主要风险<textarea v-model="primaryRisks" maxlength="2000" required></textarea></label>
-          <label>反方证据<textarea v-model="contraryEvidence" maxlength="2000" required></textarea></label>
-          <label>预计持有周期<input v-model="expectedHoldingPeriod" type="text" maxlength="500" required></label>
-          <label>信心程度<input v-model="confidence" type="text" maxlength="500" required></label>
-        </fieldset>
         <dl class="market-sheet trade-check">
           <div><dt>预计金额</dt><dd>{{ money(estimatedAmount) }}</dd></div>
           <div v-if="side === 'buy'"><dt>可用现金</dt><dd>{{ money(account.cash_available_rmb) }}</dd></div>
@@ -364,9 +332,4 @@ async function submit() {
 .pnl-negative { color: var(--risk); font-weight: 600; }
 .pnl-percent { font-size: 0.82rem; font-weight: 400; }
 .sell-pnl { margin-top: 0.25rem; padding-top: 0.25rem; border-top: 1px dashed var(--faint-rule); }
-.decision-record { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem 1rem; margin: 1rem 0; padding: 1rem 0 0; border: 0; border-top: 1px solid var(--rule); }
-.decision-record legend { padding: 0 .7rem 0 0; font-weight: 800; }
-.decision-record > p { grid-column: 1 / -1; margin: 0; color: var(--muted-ink); font-size: .82rem; }
-.decision-record textarea { min-height: 5rem; resize: vertical; }
-@media (max-width: 680px) { .decision-record { grid-template-columns: 1fr; } }
 </style>

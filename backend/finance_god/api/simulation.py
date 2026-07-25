@@ -33,7 +33,7 @@ from finance_god.execution import (
     ExecutionFailure,
     SimulationExecutionService,
 )
-from finance_god.trade_review import TradeDecisionContext, TradeReviewService
+from finance_god.trade_review import TradeReviewService
 
 IDEMPOTENCY_HEADER = "idempotency-key"
 MarketReferenceProvider = Callable[
@@ -115,7 +115,6 @@ class ImmediateMarketOrderRequest(APIModel):
     side: OrderSide
     quantity: Decimal = Field(gt=0)
     market_mode: Literal["live", "historical"] = "live"
-    decision_context: TradeDecisionContext
 
 
 class ProtectiveStrategyCreateRequest(APIModel):
@@ -477,7 +476,6 @@ def create_simulation_routes(
                 market_evidence=trusted_version,
                 idempotency_key=_idempotency_key(request),
                 request_hash=_request_hash(body),
-                decision_context=body.decision_context,
                 submission_profile_version=(
                     await trade_review_service.current_profile_version(
                         owner_id=owner_id

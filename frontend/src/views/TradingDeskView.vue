@@ -2,7 +2,6 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTradingDeskStore, type DeskSection } from '@/stores/tradingDesk'
-import type { TradeDecisionContextInput } from '@/services/tradingDesk'
 import DeskAgentPanel from '@/components/desk/DeskAgentPanel.vue'
 import OverviewWorkspace from '@/components/desk/OverviewWorkspace.vue'
 
@@ -78,7 +77,6 @@ async function submitMarketOrder(input: {
   instrumentId: string
   side: 'buy' | 'sell'
   quantity: string
-  decisionContext: TradeDecisionContextInput
 }) {
   if (!desk.account) throw new Error('请先建立模拟账户。')
   const instrumentId = input.instrumentId.trim().toUpperCase()
@@ -88,7 +86,6 @@ async function submitMarketOrder(input: {
     instrumentId,
     side: input.side,
     quantity: input.quantity,
-    decisionContext: input.decisionContext,
   })
 }
 

@@ -88,7 +88,6 @@ import {
   type SimulationPortfolio,
   type TradePlan,
   type TradePlanActionRevision,
-  type TradeDecisionContextInput,
   type TradeDecisionSnapshot,
   type TradeEpisode,
   type TradeReview,
@@ -1602,7 +1601,6 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     instrumentId: string
     side: 'buy' | 'sell'
     quantity: string
-    decisionContext: TradeDecisionContextInput
   }) {
     orderError.value = null
     try {
@@ -1612,7 +1610,6 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         side: input.side,
         quantity: input.quantity,
         market_mode: simulationClock.value ? 'historical' : 'live',
-        decision_context: input.decisionContext,
       }, newIdempotencyKey('simulation-market-order'))
       await loadSimulationData()
       return activeOrder.value

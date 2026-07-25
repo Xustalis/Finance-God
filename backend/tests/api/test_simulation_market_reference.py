@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
-import pytest
 from pydantic import BaseModel
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -236,10 +235,6 @@ def test_immediate_market_order_uses_only_the_server_quote() -> None:
                 "instrument_id": "000001.SZ",
                 "side": "buy",
                 "quantity": "100",
-                "decision_context": {
-                    **DECISION_CONTEXT,
-                    "thesis": "  估值处于历史低位且盈利改善  ",
-                },
             },
             headers={"Idempotency-Key": "market-order-1"},
         )
@@ -249,7 +244,7 @@ def test_immediate_market_order_uses_only_the_server_quote() -> None:
     assert execution.created is not None
     assert execution.created["trusted_price"] == Decimal("11.10")
     assert execution.created["market_evidence"] == TRUSTED_VERSION
-    assert execution.created["decision_context"].thesis == "估值处于历史低位且盈利改善"
+    assert "decision_context" not in execution.created
 
 
 def test_immediate_market_order_binds_server_profile_version() -> None:
@@ -263,7 +258,6 @@ def test_immediate_market_order_binds_server_profile_version() -> None:
                 "instrument_id": "000001.SZ",
                 "side": "buy",
                 "quantity": "100",
-                "decision_context": DECISION_CONTEXT,
             },
             headers={"Idempotency-Key": "profile-bound-order"},
         )
@@ -290,12 +284,8 @@ def test_reconcile_projects_delayed_fill_through_the_same_outbox() -> None:
     assert response.json()["decision_snapshot_id"] == "snapshot-order-delayed"
 
 
-@pytest.mark.parametrize("field_name", tuple(DECISION_CONTEXT))
-def test_immediate_market_order_rejects_blank_decision_context(
-    field_name: str,
-) -> None:
+def test_immediate_market_order_rejects_decision_context_field() -> None:
     execution = _Execution()
-    context = {**DECISION_CONTEXT, field_name: " \n\t "}
     with TestClient(_app(execution)) as client:
         response = client.post(
             "/api/simulation/market-orders",
@@ -304,9 +294,9 @@ def test_immediate_market_order_rejects_blank_decision_context(
                 "instrument_id": "000001.SZ",
                 "side": "buy",
                 "quantity": "100",
-                "decision_context": context,
+                "decision_context": DECISION_CONTEXT,
             },
-            headers={"Idempotency-Key": f"blank-{field_name}"},
+            headers={"Idempotency-Key": "decision-context-removed"},
         )
 
     assert response.status_code == 422

@@ -1826,18 +1826,7 @@ describe('trading workspace routing', () => {
     await wrapper.get('input:not([type])').setValue('000001.SZ')
     await wrapper.get('input:not([type])').trigger('change')
     await wrapper.get('input[type="number"]').setValue('100')
-    const decisionFields = wrapper.findAll('.decision-record textarea, .decision-record input')
-    const decisionValues = [
-      '估值处于历史低位且盈利改善',
-      '三个月目标收益 10%',
-      '盈利修复不及预期',
-      '行业净息差仍在收窄',
-      '三个月',
-      '中等',
-    ]
-    for (const [index, field] of decisionFields.entries()) {
-      await field.setValue(decisionValues[index])
-    }
+    expect(wrapper.find('.decision-record').exists()).toBe(false)
     expect(wrapper.text()).toContain('立即买入')
     expect(wrapper.text()).not.toContain('订单草稿')
     expect(wrapper.text()).not.toContain('风险复核')
@@ -1846,14 +1835,6 @@ describe('trading workspace routing', () => {
       instrumentId: '000001.SZ',
       side: 'buy',
       quantity: '100',
-      decisionContext: {
-        thesis: decisionValues[0],
-        expected_return: decisionValues[1],
-        primary_risks: decisionValues[2],
-        contrary_evidence: decisionValues[3],
-        expected_holding_period: decisionValues[4],
-        confidence: decisionValues[5],
-      },
     })
     expect(wrapper.text()).toContain('真实行情')
     expect(wrapper.text()).toContain('2026-07-25T01:00:00Z')

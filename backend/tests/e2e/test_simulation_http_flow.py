@@ -12,15 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from finance_god.infrastructure.persistence.models import Base as FinanceBase
 
-DECISION_CONTEXT = {
-    "thesis": "估值处于历史低位且盈利改善",
-    "expected_return": "三个月目标收益 10%",
-    "primary_risks": "盈利修复不及预期",
-    "contrary_evidence": "行业净息差仍在收窄",
-    "expected_holding_period": "三个月",
-    "confidence": "中等",
-}
-
 
 def _register(client: TestClient, email: str) -> tuple[dict[str, str], str]:
     response = client.post(
@@ -237,7 +228,6 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "100",
-            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
     )
@@ -258,7 +248,6 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "100",
-            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
     )
@@ -274,7 +263,6 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "101",
-            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-immediate-buy"},
     )
@@ -310,7 +298,6 @@ def test_authenticated_simulation_flow_is_durable_isolated_and_atomic(
             "instrument_id": "000001.SZ",
             "side": "buy",
             "quantity": "1000000",
-            "decision_context": DECISION_CONTEXT,
         },
         headers={**first_headers, "idempotency-key": "e2e-insufficient-cash"},
     )
