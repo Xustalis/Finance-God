@@ -172,4 +172,6 @@ def select_desk_workflow(message: str, *, section: str) -> WorkflowKey:
         return WorkflowKey.TRADE_PLAN_GENERATION
     if section == "watchlist":
         return WorkflowKey.COMPANY_RESEARCH
+    if section == "review":
+        return WorkflowKey.POST_TRADE_REVIEW
     return WorkflowKey.MARKET_CONTEXT

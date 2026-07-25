@@ -41,13 +41,16 @@ export interface ChartQuote {
   session_alignment?: string
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   quote: ChartQuote | null
   bars: readonly DeskBar[]
   loading: boolean
   error: string | null
+  minutePeriodsAvailable?: boolean
   onPeriodChange?: (period: ChartPeriod) => void
-}>()
+}>(), {
+  minutePeriodsAvailable: true,
+})
 
 const activePeriod = ref<ChartPeriod>('daily')
 
@@ -160,6 +163,7 @@ function aggregateMinutes(bars: readonly DeskBar[], minutes: number): DeskBar[] 
 }
 
 function setPeriod(period: ChartPeriod) {
+  if (MINUTE_PERIODS.has(period) && props.minutePeriodsAvailable === false) return
   activePeriod.value = period
   props.onPeriodChange?.(MINUTE_PERIODS.has(period) ? '1m' : 'daily')
 }
@@ -299,6 +303,12 @@ watch(() => props.bars, () => {
 watch(activePeriod, () => {
   if (chart) updateData()
 })
+
+watch(() => props.minutePeriodsAvailable, (available) => {
+  if (available === false && MINUTE_PERIODS.has(activePeriod.value)) {
+    activePeriod.value = 'daily'
+  }
+})
 </script>
 
 <template>
@@ -338,10 +348,10 @@ watch(activePeriod, () => {
 
     <!-- Period tabs -->
     <div class="chart-period-bar" role="group" aria-label="K线周期">
-      <button type="button" class="period-tab" :class="{ active: activePeriod === '1m' }" :aria-pressed="activePeriod === '1m'" @click="setPeriod('1m')">分时</button>
-      <button type="button" class="period-tab" :class="{ active: activePeriod === '5m' }" :aria-pressed="activePeriod === '5m'" @click="setPeriod('5m')">5分</button>
-      <button type="button" class="period-tab" :class="{ active: activePeriod === '15m' }" :aria-pressed="activePeriod === '15m'" @click="setPeriod('15m')">15分</button>
-      <button type="button" class="period-tab" :class="{ active: activePeriod === '60m' }" :aria-pressed="activePeriod === '60m'" @click="setPeriod('60m')">1小时</button>
+      <button type="button" class="period-tab" :class="{ active: activePeriod === '1m' }" :aria-pressed="activePeriod === '1m'" :disabled="minutePeriodsAvailable === false" :title="minutePeriodsAvailable === false ? '当前指数仅支持日线、周线和月线' : undefined" @click="setPeriod('1m')">分时</button>
+      <button type="button" class="period-tab" :class="{ active: activePeriod === '5m' }" :aria-pressed="activePeriod === '5m'" :disabled="minutePeriodsAvailable === false" :title="minutePeriodsAvailable === false ? '当前指数仅支持日线、周线和月线' : undefined" @click="setPeriod('5m')">5分</button>
+      <button type="button" class="period-tab" :class="{ active: activePeriod === '15m' }" :aria-pressed="activePeriod === '15m'" :disabled="minutePeriodsAvailable === false" :title="minutePeriodsAvailable === false ? '当前指数仅支持日线、周线和月线' : undefined" @click="setPeriod('15m')">15分</button>
+      <button type="button" class="period-tab" :class="{ active: activePeriod === '60m' }" :aria-pressed="activePeriod === '60m'" :disabled="minutePeriodsAvailable === false" :title="minutePeriodsAvailable === false ? '当前指数仅支持日线、周线和月线' : undefined" @click="setPeriod('60m')">1小时</button>
       <button type="button" class="period-tab" :class="{ active: activePeriod === 'daily' }" :aria-pressed="activePeriod === 'daily'" @click="setPeriod('daily')">日线</button>
       <button type="button" class="period-tab" :class="{ active: activePeriod === 'weekly' }" :aria-pressed="activePeriod === 'weekly'" @click="setPeriod('weekly')">周线</button>
       <button type="button" class="period-tab" :class="{ active: activePeriod === 'monthly' }" :aria-pressed="activePeriod === 'monthly'" @click="setPeriod('monthly')">月线</button>

@@ -24,6 +24,7 @@ import {
   fetchInformationFacts,
   fetchBars,
   fetchMarketOverview,
+  fetchMarketNews,
   fetchNotificationHistory,
   fetchNotifications,
   fetchProfile,
@@ -69,6 +70,7 @@ import {
   DeskApiError,
   type DeskEvidenceBundle,
   type DeskFactBatch,
+  type DeskMarketNewsBatch,
   type DeskBar,
   type DeskNotification,
   type DeskQuote,
@@ -181,6 +183,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const profile = ref<ProfileWithRecommendations | null>(null)
   const informationFacts = ref<DeskFactBatch | null>(null)
   const sentimentFacts = ref<DeskFactBatch | null>(null)
+  const marketNews = ref<DeskMarketNewsBatch | null>(null)
   const bars = ref<DeskBar[]>([])
   const notifications = ref<DeskNotification[]>([])
   const account = ref<SimulationAccount | null>(null)
@@ -209,6 +212,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const profileError = ref<string | null>(null)
   const informationFactsError = ref<string | null>(null)
   const sentimentFactsError = ref<string | null>(null)
+  const marketNewsError = ref<string | null>(null)
   const barsError = ref<string | null>(null)
   const notificationError = ref<string | null>(null)
   const notificationStreamError = ref<string | null>(null)
@@ -277,6 +281,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   let bootstrapRequestId = 0
   let agentPreviewRequestId = 0
   let barsRequestId = 0
+  let marketNewsRequestId = 0
 
   function persistDeskContext() {
     localStorage.setItem(deskContextStorageKey(), JSON.stringify({
@@ -332,13 +337,20 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const portfolioSymbols = computed(() => portfolio.value?.positions.map((item) => item.instrument_id) ?? [])
   const watchlistSymbols = computed(() => Object.values(watchlistInstruments.value).flat().map((item) => item.instrument_id))
   const extraQuoteSymbols = ref<string[]>([])
-  const quoteSymbols = computed(() => [...new Set([
-    ...BASELINE_SYMBOLS,
-    symbol.value,
-    ...portfolioSymbols.value,
-    ...watchlistSymbols.value,
-    ...extraQuoteSymbols.value,
-  ].filter(Boolean))])
+  const quoteSymbols = computed(() => {
+    const symbols = [...new Set([
+      ...BASELINE_SYMBOLS,
+      symbol.value,
+      ...portfolioSymbols.value,
+      ...watchlistSymbols.value,
+      ...extraQuoteSymbols.value,
+    ].filter(Boolean))]
+    if (!hasSimulationAccount.value) return symbols
+    return [...new Set([
+      DEFAULT_SYMBOL,
+      ...symbols.filter(instrumentId => !INDEX_SYMBOLS.has(instrumentId)),
+    ])]
+  })
   const selectedQuote = computed(() => quotes.value.find((item) => item.symbol === symbol.value) ?? null)
   const unreadCount = computed(() => notifications.value.filter((item) => item.status !== 'read').length)
   const agentSubmitting = computed(() => agentRequestCount.value > 0)
@@ -526,6 +538,13 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   }
 
   function setSection(next: DeskSection) {
+    const switchedFromIndexToTradableStock = next === 'trading' && INDEX_SYMBOLS.has(symbol.value)
+    if (switchedFromIndexToTradableStock) {
+      barsRequestId += 1
+      bars.value = []
+      symbol.value = DEFAULT_SYMBOL
+      barsFrequency.value = 'daily'
+    }
     quickCommandRequestId += 1
     section.value = next
     persistDeskContext()
@@ -536,6 +555,10 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     if (next === 'portfolio') void loadSimulationData()
     if (next === 'watchlist') void Promise.all([loadWatchlists(), loadCandidates()])
     if (next === 'trading') void loadSimulationData()
+    if (switchedFromIndexToTradableStock) {
+      void refreshMarket()
+      void loadBars()
+    }
     if (next === 'review') {
       void loadReviewWorkspace()
       return
@@ -618,10 +641,12 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       ? '当前标的是指数；融资余额与公司披露事实仅支持 A 股个股。切换至个股后可读取 PandaData 真实数据。'
       : null
   ))
+  const minuteBarsSupported = computed(() => !INDEX_SYMBOLS.has(symbol.value))
 
   function setSymbol(next: string) {
     const normalized = parseInstrumentId(next)
     if (!normalized || normalized === symbol.value) return
+    if (INDEX_SYMBOLS.has(normalized)) barsFrequency.value = 'daily'
     quickCommandRequestId += 1
     barsRequestId += 1
     bars.value = []
@@ -691,7 +716,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     bars.value = []
     try {
       const result = hasSimulationAccount.value
-        ? await fetchSimulationBars(requestedSymbol)
+        ? await fetchSimulationBars(requestedSymbol, freq ?? '1m')
         : await fetchBars(requestedSymbol, freq)
       if (requestId === barsRequestId && symbol.value === requestedSymbol && barsFrequency.value === freq) {
         bars.value = result
@@ -763,6 +788,32 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         ? failureText(sentiment.reason, '市场情绪事实不可用')
         : `服务端返回了其他标的的融资事实（${sentiment.value.symbol || '未知标的'}）。`
     }
+  }
+
+  async function loadMarketNews() {
+    const requestId = ++marketNewsRequestId
+    marketNewsError.value = null
+    if (hasSimulationAccount.value) {
+      marketNews.value = null
+      return
+    }
+    try {
+      const result = await fetchMarketNews(8)
+      if (requestId !== marketNewsRequestId || hasSimulationAccount.value) return
+      marketNews.value = result
+    } catch (error) {
+      if (requestId !== marketNewsRequestId || hasSimulationAccount.value) return
+      marketNews.value = null
+      marketNewsError.value = failureText(error, '市场资讯抓取不可用')
+    }
+  }
+
+  async function refreshOverviewWorkspace() {
+    await Promise.all([
+      refreshMarket({ withBars: true }),
+      loadMarketFacts(),
+      loadMarketNews(),
+    ])
   }
 
   async function loadNotifications() {
@@ -1798,7 +1849,13 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     // Shell state only after a successful bootstrap response — never declare capabilities locally.
     await refreshBootstrap()
     await bootstrapSimulationClock()
-    await Promise.all([refreshMarket({ withBars: true }), loadProfile(), loadNotifications(), loadMarketFacts()])
+    await Promise.all([
+      refreshMarket({ withBars: true }),
+      loadProfile(),
+      loadNotifications(),
+      loadMarketFacts(),
+      loadMarketNews(),
+    ])
     startNotificationStream()
     await restoreActiveWorkflow()
     startPolling()
@@ -1814,10 +1871,10 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   onScopeDispose(dispose)
 
   return {
-    section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, bars, notifications,
+    section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, marketNews, bars, notifications,
     account, accountState, simulationClock, portfolio, orders, fills, tradeEpisodes, selectedTradeEpisode, tradeEpisodeDecisions, tradeEpisodeReview, agentLearningSummary, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
     selectedWatchlistInstruments, candidates, activeDraft, activeOrder, activeTradePlan, hasSimulationAccount,
-    marketError, profileError, informationFactsError, sentimentFactsError, marketFactsNotice, barsError, notificationError, notificationStreamError, simulationError,
+    marketError, profileError, informationFactsError, sentimentFactsError, marketNewsError, marketFactsNotice, minuteBarsSupported, barsError, notificationError, notificationStreamError, simulationError,
     accountError, ordersError, fillsError, marketLoadedAt, simulationLoadedAt, watchlistError, candidateError,
     orderError, tradePlanError,
     loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates, tradeReviewLoading, tradeReviewError, agentLearningLoading, agentLearningError,
@@ -1830,8 +1887,8 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     deskCapabilities, profileProjection, bootstrapStatus, bootstrapError, notificationHistory, uiActionError, lastUiActionReceipt,
     workspaceControl, openedRecord, candidateLocation, tradeDraftPrefill, requestedArtifactId, requestedReminderId,
     selectedQuote, unreadCount, profileSummary, quickCommands,
-    setSection, setSymbol, setBarsFrequency, refreshMarket, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace, refreshSimulationClock, resumeClock,
-    loadProfile, loadMarketFacts, loadNotifications, loadNotificationHistory,
+    setSection, setSymbol, setBarsFrequency, refreshMarket, refreshOverviewWorkspace, ensureQuote, ensureQuoteSymbol, refreshPortfolioWorkspace, refreshTradingWorkspace, refreshSimulationClock, resumeClock,
+    loadProfile, loadMarketFacts, loadMarketNews, loadNotifications, loadNotificationHistory,
     dismissNotification, applyUiAction,
     loadSimulationData, loadTradeEpisodes, loadAgentLearningSummary, loadReviewWorkspace, selectTradeEpisode, retrySelectedTradeReview, loadWatchlists, loadCandidates, createAccount, createDraft, reviewDraft,
     acknowledgeSoftRisk, confirmDraft, submitDraft, submitMarketOrder, reconcileOrder, createWatchlist, renameWatchlist, removeWatchlist,

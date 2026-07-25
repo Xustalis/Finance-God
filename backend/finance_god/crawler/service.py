@@ -7,8 +7,14 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from .models import CrawlerResult, IndustryNews, MarketSentiment
-from .news_crawler import fetch_industry_news
+from .models import (
+    CrawlerResult,
+    IndustryNews,
+    MarketSentiment,
+    NewsFreshness,
+    NewsSnapshot,
+)
+from .news_crawler import NewsSourcesUnavailable, fetch_industry_news
 from .sentiment_crawler import fetch_market_sentiment
 
 _LOGGER = logging.getLogger(__name__)
@@ -16,6 +22,7 @@ _CST = ZoneInfo("Asia/Shanghai")
 
 # 缓存有效期
 _NEWS_CACHE_TTL = timedelta(minutes=5)
+_NEWS_CACHE_FETCH_LIMIT = 50
 _SENTIMENT_CACHE_TTL = timedelta(minutes=1)
 _SHARED_CRAWLER_SERVICE: CrawlerService | None = None
 
@@ -47,9 +54,27 @@ class CrawlerService:
             limit: 返回条目数
             force_refresh: 是否强制刷新缓存
         """
-        now = datetime.now(tz=_CST)
+        snapshot = await self.get_news_snapshot(
+            sector=sector,
+            limit=limit,
+            force_refresh=force_refresh,
+        )
+        return snapshot.items
 
-        # 检查缓存
+    async def get_news_snapshot(
+        self,
+        *,
+        sector: str = "",
+        limit: int = 30,
+        force_refresh: bool = False,
+    ) -> NewsSnapshot:
+        """Return public news with truthful cache and freshness metadata."""
+
+        if not 1 <= limit <= _NEWS_CACHE_FETCH_LIMIT:
+            raise ValueError(
+                f"limit must be between 1 and {_NEWS_CACHE_FETCH_LIMIT}"
+            )
+        now = datetime.now(tz=_CST)
         if (
             not force_refresh
             and not sector
@@ -57,10 +82,15 @@ class CrawlerService:
             and self._news_cache_time
             and (now - self._news_cache_time) < _NEWS_CACHE_TTL
         ):
-            return self._news_cache[:limit]
+            return self._snapshot(
+                items=self._news_cache[:limit],
+                fetched_at=self._news_cache_time,
+                requested_at=now,
+                cached=True,
+            )
 
         async with self._lock:
-            # 双检锁
+            now = datetime.now(tz=_CST)
             if (
                 not force_refresh
                 and not sector
@@ -68,23 +98,75 @@ class CrawlerService:
                 and self._news_cache_time
                 and (now - self._news_cache_time) < _NEWS_CACHE_TTL
             ):
-                return self._news_cache[:limit]
+                return self._snapshot(
+                    items=self._news_cache[:limit],
+                    fetched_at=self._news_cache_time,
+                    requested_at=now,
+                    cached=True,
+                )
 
-            # 获取资讯
-            news_list = await fetch_industry_news(sector=sector, limit=limit)
+            upstream_limit = _NEWS_CACHE_FETCH_LIMIT if not sector else limit
+            try:
+                news_list = await fetch_industry_news(
+                    sector=sector,
+                    limit=upstream_limit,
+                )
+            except NewsSourcesUnavailable as exc:
+                if not sector and self._news_cache and self._news_cache_time:
+                    return self._snapshot(
+                        items=self._news_cache[:limit],
+                        fetched_at=self._news_cache_time,
+                        requested_at=now,
+                        cached=True,
+                        warning=(
+                            "实时资讯源刷新失败，当前返回上次成功缓存："
+                            f"{type(exc).__name__}"
+                        ),
+                    )
+                raise
 
-            # 按发布时间排序
             news_list.sort(
                 key=lambda x: x.publish_time or datetime.min.replace(tzinfo=_CST),
                 reverse=True,
             )
 
-            # 更新缓存（仅综合资讯缓存）
+            fetched_at = datetime.now(tz=_CST)
             if not sector:
                 self._news_cache = news_list
-                self._news_cache_time = now
+                self._news_cache_time = fetched_at
 
-            return news_list[:limit]
+            return self._snapshot(
+                items=news_list[:limit],
+                fetched_at=fetched_at,
+                requested_at=now,
+                cached=False,
+            )
+
+    @staticmethod
+    def _snapshot(
+        *,
+        items: list[IndustryNews],
+        fetched_at: datetime,
+        requested_at: datetime,
+        cached: bool,
+        warning: str | None = None,
+    ) -> NewsSnapshot:
+        age = max(0, int((requested_at - fetched_at).total_seconds()))
+        return NewsSnapshot(
+            items=items,
+            fetched_at=fetched_at,
+            freshness=NewsFreshness(
+                status=(
+                    "fresh"
+                    if age < int(_NEWS_CACHE_TTL.total_seconds())
+                    else "stale"
+                ),
+                age_seconds=age,
+                ttl_seconds=int(_NEWS_CACHE_TTL.total_seconds()),
+                cached=cached,
+            ),
+            warnings=[warning] if warning else [],
+        )
 
     async def get_sentiment(
         self, *, force_refresh: bool = False

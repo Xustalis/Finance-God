@@ -11,7 +11,7 @@ import type {
 } from '@/services/tradingDesk'
 import { canUseQuoteAsDraftReference, draftReferenceBlockedReason } from '@/services/tradingDesk'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   account: Pick<SimulationAccount, 'account_id' | 'cash_available_rmb'> | null
   accountState: 'unknown' | 'absent' | 'available' | 'error'
   portfolio: SimulationPortfolio | null
@@ -19,6 +19,7 @@ const props = defineProps<{
   quotes: readonly DeskQuote[]
   bars?: readonly DeskBar[]
   barsError?: string | null
+  minutePeriodsAvailable?: boolean
   receipt: SimulationOrder | null
   fills: readonly SimulationFill[]
   prefill?: { side: 'buy' | 'sell'; quantity: string } | null
@@ -30,7 +31,9 @@ const props = defineProps<{
   onSelectSymbol?: (symbol: string) => void
   onPeriodChange?: (period: ChartPeriod) => void
   onSubmit: (input: { instrumentId: string; side: 'buy' | 'sell'; quantity: string }) => void | Promise<void>
-}>()
+}>(), {
+  minutePeriodsAvailable: true,
+})
 
 const instrumentId = ref(props.selectedSymbol)
 const side = ref<'buy' | 'sell'>('buy')
@@ -117,6 +120,7 @@ async function submit() {
         :bars="bars ?? []"
         :loading="loading"
         :error="chartError"
+        :minute-periods-available="minutePeriodsAvailable"
         :on-period-change="onPeriodChange"
       />
     </section>

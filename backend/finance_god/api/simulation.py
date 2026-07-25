@@ -44,7 +44,7 @@ HistoricalMarketReferenceProvider = Callable[
     Awaitable[tuple[Decimal, VersionReference]],
 ]
 HistoricalMarketBarsProvider = Callable[
-    [str, str],
+    [str, str, str],
     Awaitable[dict[str, object]],
 ]
 SimulationStartValidator = Callable[[AwareDatetime], Awaitable[None]]
@@ -258,7 +258,7 @@ def create_simulation_routes(
             warnings = []
             for symbol in symbols:
                 try:
-                    result = await historical_market_bars_provider(owner_id, symbol)
+                    result = await historical_market_bars_provider(owner_id, symbol, "1m")
                 except Exception:  # noqa: BLE001 - isolate batch items
                     warnings.append(
                         {
@@ -316,9 +316,21 @@ def create_simulation_routes(
             symbol = request.query_params.get("symbol", "").strip().upper()
             if not symbol:
                 raise ValueError("symbol is required")
-            result = await historical_market_bars_provider(
-                await _owner(owner_resolver, request), symbol
-            )
+            frequency = request.query_params.get("frequency", "1m").strip().lower()
+            if frequency not in {"1m", "daily"}:
+                raise ValueError("frequency must be 1m or daily")
+            try:
+                result = await historical_market_bars_provider(
+                    await _owner(owner_resolver, request),
+                    symbol,
+                    frequency,
+                )
+            except SimulationServiceUnavailable:
+                raise
+            except Exception as error:
+                raise SimulationServiceUnavailable(
+                    "当前模拟时点没有可展示的 PandaData K 线"
+                ) from error
             return result
 
         return await _respond(action)

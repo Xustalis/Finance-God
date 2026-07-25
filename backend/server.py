@@ -1437,31 +1437,46 @@ async def _trusted_historical_simulation_market_reference(
 async def _historical_simulation_market_bars(
     owner_id: str,
     symbol: str,
+    frequency: str,
 ) -> dict[str, object]:
     clock = await SimulationClockService(_workspace_session).current_for_owner(owner_id)
-    trading_date = clock.current_time.astimezone(
-        ZoneInfo("Asia/Shanghai")
-    ).strftime("%Y%m%d")
+    simulation_time = clock.current_time.astimezone(ZoneInfo("Asia/Shanghai"))
     service, _application = _services()
-    result = await asyncio.to_thread(
-        service.read_historical_minute_bars,
-        symbol.strip().upper(),
-        trading_date=trading_date,
-        limit=1_000,
-    )
-    visible = tuple(
-        bar
-        for bar in result.bars
-        if (
-            (observed_at := datetime.fromisoformat(bar.provider_time)).tzinfo is not None
-            and observed_at + timedelta(minutes=1) <= clock.current_time
+    if frequency == "daily":
+        completed_date = simulation_time.date()
+        if (simulation_time.hour, simulation_time.minute) < (15, 1):
+            completed_date -= timedelta(days=1)
+        result = await asyncio.to_thread(
+            service.read_historical_daily_bars,
+            symbol.strip().upper(),
+            start_date=(completed_date - timedelta(days=1_500)).strftime("%Y%m%d"),
+            end_date=completed_date.strftime("%Y%m%d"),
+            limit=1_000,
         )
-    )
+        visible = result.bars
+    else:
+        result = await asyncio.to_thread(
+            service.read_historical_minute_bars,
+            symbol.strip().upper(),
+            trading_date=simulation_time.strftime("%Y%m%d"),
+            limit=1_000,
+        )
+        visible = tuple(
+            bar
+            for bar in result.bars
+            if (
+                (observed_at := datetime.fromisoformat(bar.provider_time)).tzinfo
+                is not None
+                and observed_at + timedelta(minutes=1) <= clock.current_time
+            )
+        )
     if not visible:
-        raise ValueError("no completed PandaData minute bar is available at simulation time")
+        raise ValueError(
+            f"no completed PandaData {frequency} bar is available at simulation time"
+        )
     return {
         "bars": visible,
-        "frequency": "1m",
+        "frequency": result.frequency,
         "simulation_time": clock.current_time,
         "simulation_clock_revision": clock.revision,
     }

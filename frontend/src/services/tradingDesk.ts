@@ -327,6 +327,33 @@ export interface DeskFactBatch {
   facts: DeskFact[]
 }
 
+export interface DeskMarketNewsItem {
+  id: string
+  title: string
+  summary: string
+  source: string
+  url: string | null
+  publish_time: string | null
+  sector: string | null
+  tags: string[]
+}
+
+export interface DeskMarketNewsBatch {
+  provider: string
+  data_mode: 'real'
+  trade_eligible: false
+  requested_at: string
+  fetched_at: string
+  freshness: {
+    status: 'fresh' | 'stale'
+    age_seconds: number
+    ttl_seconds: number
+    cached: boolean
+  }
+  items: DeskMarketNewsItem[]
+  warnings: string[]
+}
+
 export type IdempotencyKey = string
 export type SimulationOrderSide = 'buy' | 'sell' | 'short' | 'cover' | 'subscribe' | 'redeem' | 'convert' | 'recurring_invest'
 export type SimulationOrderType = 'market' | 'limit' | 'fund'
@@ -826,10 +853,11 @@ export async function fetchBars(symbol: string, frequency?: string): Promise<Des
   return normalizeDeskBars(result.bars ?? [])
 }
 
-export async function fetchSimulationBars(symbol: string): Promise<DeskBar[]> {
-  const result = await request<{ bars?: Array<Record<string, unknown>> }>(() =>
-    client.get('/simulation/market/bars', { params: { symbol } })
+export async function fetchSimulationBars(symbol: string, frequency = '1m'): Promise<DeskBar[]> {
+  const result = await request<{ frequency?: string; bars?: Array<Record<string, unknown>> }>(() =>
+    client.get('/simulation/market/bars', { params: { symbol, frequency } })
   )
+  assertBarFrequency(frequency, result.frequency)
   return normalizeDeskBars(result.bars ?? [])
 }
 
@@ -843,6 +871,10 @@ export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
       limit: 4,
     },
   }))
+}
+
+export function fetchMarketNews(limit = 8): Promise<DeskMarketNewsBatch> {
+  return request(() => client.get('/market/news', { params: { limit } }))
 }
 
 export function fetchSentimentFacts(symbol: string): Promise<DeskFactBatch> {

@@ -126,4 +126,25 @@ describe('MarketChart period tabs', () => {
     expect(onPeriodChange).toHaveBeenNthCalledWith(3, 'daily')
     expect(onPeriodChange).toHaveBeenNthCalledWith(4, 'daily')
   })
+
+  it('disables minute periods when the current instrument only supports daily bars', async () => {
+    const onPeriodChange = vi.fn()
+    const wrapper = mount(MarketChart, {
+      props: {
+        quote: null,
+        bars: makeBars(),
+        loading: false,
+        error: null,
+        minutePeriodsAvailable: false,
+        onPeriodChange,
+      },
+    })
+
+    const minuteTabs = wrapper.findAll('.period-tab').slice(0, 4)
+    expect(minuteTabs.every(tab => tab.attributes('disabled') !== undefined)).toBe(true)
+    expect(minuteTabs[0].attributes('title')).toContain('当前指数仅支持')
+    await minuteTabs[0].trigger('click')
+    expect(onPeriodChange).not.toHaveBeenCalled()
+    expect(wrapper.find('.period-tab.active').text()).toBe('日线')
+  })
 })

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 
 class SentimentLevel(str, Enum):
@@ -30,6 +31,58 @@ class IndustryNews(BaseModel):
     publish_time: datetime | None = Field(default=None, description="发布时间")
     sector: str = Field(default="", description="所属行业板块")
     tags: list[str] = Field(default_factory=list, description="标签")
+
+
+class NewsFreshness(BaseModel):
+    """Public news cache/freshness metadata."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["fresh", "stale"]
+    age_seconds: int = Field(ge=0)
+    ttl_seconds: int = Field(gt=0)
+    cached: bool
+
+
+class NewsSnapshot(BaseModel):
+    """Crawler result with metadata required by the public market contract."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    items: list[IndustryNews]
+    fetched_at: datetime
+    freshness: NewsFreshness
+    warnings: list[str] = Field(default_factory=list)
+
+
+class MarketNewsItem(BaseModel):
+    """Validated public item; invalid crawler rows never cross the API boundary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    title: str = Field(min_length=1)
+    summary: str = ""
+    source: str = Field(min_length=1)
+    url: AnyHttpUrl
+    publish_time: datetime
+    sector: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class MarketNewsEnvelope(BaseModel):
+    """Read-only real-news response exposed by ``/market/news``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: Literal["Finance-God crawler"] = "Finance-God crawler"
+    data_mode: Literal["real"] = "real"
+    requested_at: datetime
+    fetched_at: datetime
+    freshness: NewsFreshness
+    trade_eligible: Literal[False] = False
+    items: list[MarketNewsItem]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SectorFlow(BaseModel):

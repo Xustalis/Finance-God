@@ -9,8 +9,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
+from hashlib import sha256
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -32,6 +35,13 @@ _HEADERS = {
     "Referer": "https://www.eastmoney.com/",
     "Accept": "application/json, text/plain, */*",
 }
+_TRACKING_QUERY_KEYS = frozenset(
+    {"from", "spm", "source", "src", "track", "tracking_id"}
+)
+
+
+class NewsSourcesUnavailable(RuntimeError):
+    """All configured public-news sources failed."""
 
 # 东方财富行业板块代码映射
 SECTOR_CODES: dict[str, str] = {
@@ -61,6 +71,7 @@ async def fetch_industry_news(
     sector: str = "",
     limit: int = 30,
     timeout: float = 10.0,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[IndustryNews]:
     """从东方财富获取行业资讯（要闻 + 行业研报）。
 
@@ -78,24 +89,41 @@ async def fetch_industry_news(
     import asyncio
 
     tasks = [
-        _fetch_general_news(limit=min(limit, 20), timeout=timeout),
-        _fetch_industry_reports(sector=sector, limit=min(limit, 15), timeout=timeout),
+        _fetch_general_news(
+            limit=min(limit, 20), timeout=timeout, transport=transport
+        ),
+        _fetch_industry_reports(
+            sector=sector,
+            limit=min(limit, 15),
+            timeout=timeout,
+            transport=transport,
+        ),
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    failures: list[str] = []
+    completed_sources = 0
     for result in results:
         if isinstance(result, list):
+            completed_sources += 1
             news_list.extend(result)
         elif isinstance(result, Exception):
             _LOGGER.warning("数据源获取异常: %s", result)
+            failures.append(f"{type(result).__name__}: {result}")
 
-    # 去重（按标题）并排序
-    seen_titles: set[str] = set()
+    if completed_sources == 0:
+        detail = "; ".join(failures) or "no crawler source completed"
+        raise NewsSourcesUnavailable(f"all public-news sources failed: {detail}")
+
+    # 规范 URL + 标题作为身份，避免追踪参数和空白差异制造重复。
+    seen_items: set[tuple[str, str]] = set()
     unique_news: list[IndustryNews] = []
     for item in news_list:
-        if item.title not in seen_titles:
-            seen_titles.add(item.title)
-            unique_news.append(item)
+        identity = news_identity(url=item.url, title=item.title)
+        if identity in seen_items:
+            continue
+        seen_items.add(identity)
+        unique_news.append(item)
 
     unique_news.sort(
         key=lambda x: x.publish_time or datetime.min.replace(tzinfo=_CST),
@@ -108,7 +136,10 @@ async def fetch_industry_news(
 
 
 async def _fetch_general_news(
-    *, limit: int = 20, timeout: float = 10.0
+    *,
+    limit: int = 20,
+    timeout: float = 10.0,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[IndustryNews]:
     """获取东方财富综合财经要闻。"""
     params = {
@@ -122,14 +153,12 @@ async def _fetch_general_news(
         "req_trace": "1",
     }
 
-    try:
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=timeout) as client:
-            resp = await client.get(_EASTMONEY_NEWS_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:
-        _LOGGER.warning("财经要闻获取失败: %s", exc)
-        return []
+    async with httpx.AsyncClient(
+        headers=_HEADERS, timeout=timeout, transport=transport
+    ) as client:
+        resp = await client.get(_EASTMONEY_NEWS_URL, params=params)
+        resp.raise_for_status()
+        data = resp.json()
 
     news_list: list[IndustryNews] = []
     items = data.get("data", {}).get("list", []) if data.get("data") else []
@@ -165,7 +194,11 @@ async def _fetch_general_news(
 
 
 async def _fetch_industry_reports(
-    *, sector: str = "", limit: int = 15, timeout: float = 10.0
+    *,
+    sector: str = "",
+    limit: int = 15,
+    timeout: float = 10.0,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[IndustryNews]:
     """获取东方财富行业研报（券商分析师研究报告）。
 
@@ -177,8 +210,9 @@ async def _fetch_industry_reports(
 
     news_list: list[IndustryNews] = []
 
-    try:
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        headers=_HEADERS, timeout=timeout, transport=transport
+    ) as client:
             # 行业研报
             params_industry = {
                 "industryCode": "*",
@@ -211,9 +245,6 @@ async def _fetch_industry_reports(
 
             for item in (data2.get("data") or [])[:8]:
                 news_list.append(_report_to_news(item, report_type="个股研报"))
-
-    except Exception as exc:
-        _LOGGER.warning("研报数据获取失败: %s", exc)
 
     return news_list
 
@@ -291,3 +322,47 @@ def _extract_tags(item: dict[str, Any]) -> list[str]:
             if col.get("column_name"):
                 tags.append(col["column_name"])
     return tags[:5]
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize whitespace/case for deterministic duplicate identity."""
+
+    return re.sub(r"\s+", " ", title).strip().casefold()
+
+
+def _normalize_url(url: str) -> str:
+    """Return a stable URL identity without fragments or tracking parameters."""
+
+    raw = url.strip()
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    filtered_query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in _TRACKING_QUERY_KEYS
+    ]
+    return urlunsplit(
+        (
+            parts.scheme.casefold(),
+            parts.netloc.casefold(),
+            parts.path.rstrip("/") or "/",
+            urlencode(sorted(filtered_query)),
+            "",
+        )
+    )
+
+
+def news_identity(*, url: str, title: str) -> tuple[str, str]:
+    """Return the normalized identity shared by deduplication and public IDs."""
+
+    return (_normalize_url(url), _normalize_title(title))
+
+
+def news_item_id(*, url: str, title: str) -> str:
+    """Build a stable public identifier from the crawler deduplication key."""
+
+    normalized_url, normalized_title = news_identity(url=url, title=title)
+    value = f"{normalized_url}\n{normalized_title}"
+    return sha256(value.encode("utf-8")).hexdigest()

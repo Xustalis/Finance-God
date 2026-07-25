@@ -129,12 +129,15 @@ onBeforeUnmount(() => {
           <OverviewWorkspace
             v-if="desk.section === 'information'"
             :quotes="desk.quotes ?? []" :bars="desk.bars ?? []" :selected-symbol="desk.symbol" :loading="desk.loadingMarket" :market-error="desk.marketError" :bars-error="desk.barsError ?? null"
+            :minute-periods-available="desk.minuteBarsSupported"
             :market-loaded-at="desk.marketLoadedAt"
             :sentiment-facts="desk.simulationClock ? null : desk.sentimentFacts" :sentiment-error="desk.simulationClock ? null : desk.sentimentFactsError"
             :sentiment-notice="desk.simulationClock ? '历史演示不提供时点还原的市场情绪事实。' : desk.marketFactsNotice"
             :information-facts="desk.simulationClock ? null : desk.informationFacts" :information-error="desk.simulationClock ? null : desk.informationFactsError"
             :information-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : desk.marketFactsNotice"
-            :on-select-symbol="desk.setSymbol" :on-refresh="() => desk.refreshMarket({ withBars: true })"
+            :market-news="desk.simulationClock ? null : desk.marketNews" :market-news-error="desk.simulationClock ? null : desk.marketNewsError"
+            :market-news-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : null"
+            :on-select-symbol="desk.setSymbol" :on-refresh="desk.refreshOverviewWorkspace"
             :on-period-change="(frequency: string) => desk.setBarsFrequency(frequency)"
           />
           <PortfolioWorkspace
@@ -165,6 +168,7 @@ onBeforeUnmount(() => {
             v-else-if="desk.section === 'trading'"
             :account="desk.account ?? null" :account-state="desk.accountState" :selected-symbol="desk.symbol" :quotes="desk.quotes ?? []"
             :bars="desk.bars ?? []" :bars-error="desk.barsError ?? null"
+            :minute-periods-available="desk.minuteBarsSupported"
             :portfolio="desk.portfolio ?? null" :receipt="desk.activeOrder ?? null" :fills="desk.fills ?? []"
             :prefill="desk.tradeDraftPrefill"
             :loading="desk.loadingSimulation || desk.loadingMarket"

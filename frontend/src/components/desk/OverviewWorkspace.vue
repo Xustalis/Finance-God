@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import MarketChart, { type ChartQuote } from './MarketChart.vue'
-import type { DeskBar } from '@/services/tradingDesk'
+import type { DeskBar, DeskMarketNewsBatch } from '@/services/tradingDesk'
 import { computed } from 'vue'
 
 export interface OverviewQuote {
@@ -38,13 +38,14 @@ interface FactBatch {
   facts: MarketFact[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   quotes: readonly OverviewQuote[]
   bars?: readonly DeskBar[]
   selectedSymbol: string
   loading: boolean
   marketError: string | null
   barsError?: string | null
+  minutePeriodsAvailable?: boolean
   marketLoadedAt: string | null
   sentimentFacts: FactBatch | null
   sentimentError: string | null
@@ -52,10 +53,15 @@ const props = defineProps<{
   informationFacts: FactBatch | null
   informationError: string | null
   informationNotice?: string | null
+  marketNews?: DeskMarketNewsBatch | null
+  marketNewsError?: string | null
+  marketNewsNotice?: string | null
   onSelectSymbol: (symbol: string) => void
   onRefresh: () => void | Promise<void>
   onPeriodChange?: (period: string) => void
-}>()
+}>(), {
+  minutePeriodsAvailable: true,
+})
 
 const selectedQuote = computed<ChartQuote | null>(() => {
   const q = props.quotes.find(q => q.symbol === props.selectedSymbol)
@@ -72,6 +78,16 @@ const informationIsMock = computed(() => currentInformationFacts.value?.data_mod
 
 function field(value: string | number | boolean | null): string {
   return value === null ? '—' : String(value)
+}
+
+function safeNewsUrl(raw: string | null): string | null {
+  if (!raw) return null
+  try {
+    const parsed = new URL(raw)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null
+  } catch {
+    return null
+  }
 }
 
 function factSummary(fact: MarketFact): string {
@@ -125,6 +141,7 @@ function time(value: string): string {
         :bars="bars ?? []"
         :loading="loading"
         :error="barsError ?? null"
+        :minute-periods-available="minutePeriodsAvailable"
         :on-period-change="onPeriodChange"
       />
       <p v-if="marketError" class="data-error" role="alert">
@@ -174,6 +191,46 @@ function time(value: string): string {
       <p v-else-if="informationError" class="data-error" role="alert">公司披露事实刷新失败：{{ informationError }}</p>
       <p v-else-if="informationNotice" class="empty-data" role="status">{{ informationNotice }}</p>
       <p v-else class="empty-data">正在读取服务端公司披露事实。</p>
+    </section>
+
+    <section class="overview-section facts-section" aria-labelledby="market-news-title">
+      <header>
+        <h2 id="market-news-title">市场资讯</h2>
+        <small>服务端公开资讯爬虫 · 非交易参考</small>
+      </header>
+      <template v-if="marketNews">
+        <p v-if="marketNews.freshness.status === 'stale'" class="data-error" role="status">
+          当前展示上次成功抓取的真实资讯；抓取于 {{ time(marketNews.fetched_at) }}。
+          {{ marketNews.warnings.join('；') }}
+        </p>
+        <ul v-if="marketNews.items.length" class="news-list">
+          <li v-for="item in marketNews.items" :key="item.id" class="news-item">
+            <a
+              v-if="safeNewsUrl(item.url)"
+              class="news-link"
+              :href="safeNewsUrl(item.url) ?? undefined"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span class="news-sector">{{ item.publish_time ? time(item.publish_time) : '时间未知' }}</span>
+              <span class="news-title">{{ item.title }}</span>
+              <small class="news-source">{{ item.source }}</small>
+            </a>
+            <div v-else class="news-link">
+              <span class="news-sector">{{ item.publish_time ? time(item.publish_time) : '时间未知' }}</span>
+              <span class="news-title">{{ item.title }}</span>
+              <small class="news-source">{{ item.source }}</small>
+            </div>
+          </li>
+        </ul>
+        <p v-else class="empty-data" role="status">当前抓取范围没有可展示的公开资讯。</p>
+        <p class="data-footnote">
+          抓取于 {{ time(marketNews.fetched_at) }}；来源：{{ marketNews.provider }}；资讯不参与定价或下单。
+        </p>
+      </template>
+      <p v-else-if="marketNewsError" class="data-error" role="alert">市场资讯抓取失败：{{ marketNewsError }}</p>
+      <p v-else-if="marketNewsNotice" class="empty-data" role="status">{{ marketNewsNotice }}</p>
+      <p v-else class="empty-data">正在读取服务端公开资讯。</p>
     </section>
   </section>
 </template>

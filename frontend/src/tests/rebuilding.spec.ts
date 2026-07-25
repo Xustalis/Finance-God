@@ -31,6 +31,16 @@ vi.mock('@/services/tradingDesk', () => ({
   draftReferenceBlockedReason: vi.fn(() => '真实行情不可用'),
   isDeskCapabilityEnabled: vi.fn((capabilities: Record<string, boolean> | null | undefined, key: string) => capabilities?.[key] === true),
   fetchMarketOverview: vi.fn().mockResolvedValue({ quotes: [], warnings: [] }),
+  fetchMarketNews: vi.fn().mockResolvedValue({
+    provider: 'Finance-God Public News Crawler',
+    data_mode: 'real',
+    trade_eligible: false,
+    requested_at: '2026-07-25T07:00:00Z',
+    fetched_at: '2026-07-25T07:00:00Z',
+    freshness: { status: 'fresh', age_seconds: 0, ttl_seconds: 300, cached: false },
+    items: [],
+    warnings: [],
+  }),
   fetchBars: vi.fn().mockResolvedValue([]),
   fetchSimulationMarketOverview: vi.fn().mockResolvedValue({ quotes: [], warnings: [] }),
   fetchSimulationBars: vi.fn().mockResolvedValue([]),
@@ -773,12 +783,69 @@ describe('trading workspace routing', () => {
     expect(store.marketFactsNotice).toContain('仅支持 A 股个股')
   })
 
+  it('loads crawler news independently from symbol changes and refreshes it explicitly', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(1)
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledWith(8)
+    store.setSymbol('600519.SH')
+    await flushPromises()
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(1)
+
+    await store.refreshOverviewWorkspace()
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(2)
+
+    store.hasSimulationAccount = true
+    await store.loadMarketNews()
+    expect(store.marketNews).toBeNull()
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(2)
+  })
+
   it('requests real daily bars on first load', async () => {
     const store = useTradingDeskStore(createPinia())
 
     await store.initialize()
 
     expect(tradingDeskApi.fetchBars).toHaveBeenCalledWith('000001.SZ', 'daily')
+  })
+
+  it('keeps unsupported index minute bars out of chart and historical quote requests', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+    store.setBarsFrequency('1m')
+    await flushPromises()
+
+    store.setSymbol('000001.SH')
+    await flushPromises()
+
+    expect(store.minuteBarsSupported).toBe(false)
+    expect(tradingDeskApi.fetchBars).toHaveBeenLastCalledWith('000001.SH', 'daily')
+    store.hasSimulationAccount = true
+    expect(store.quoteSymbols).not.toContain('000001.SH')
+    expect(store.quoteSymbols).not.toContain('399001.SZ')
+    expect(store.quoteSymbols).not.toContain('000300.SH')
+    expect(store.quoteSymbols).toContain('000001.SZ')
+  })
+
+  it('switches an index to a tradable stock when entering the trading workspace', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+    store.setSymbol('000300.SH')
+    await flushPromises()
+    store.hasSimulationAccount = true
+
+    store.setSection('trading')
+    await flushPromises()
+
+    expect(store.symbol).toBe('000001.SZ')
+    expect(tradingDeskApi.fetchSimulationBars).toHaveBeenLastCalledWith('000001.SZ', 'daily')
+    expect(tradingDeskApi.fetchSimulationMarketOverview).toHaveBeenLastCalledWith(
+      expect.arrayContaining(['000001.SZ']),
+    )
+    expect(tradingDeskApi.fetchSimulationMarketOverview).toHaveBeenLastCalledWith(
+      expect.not.arrayContaining(['000001.SH', '399001.SZ', '000300.SH']),
+    )
   })
 
   it('uses the shared UUID fallback for desk write commands on HTTP', async () => {
@@ -1151,6 +1218,64 @@ describe('trading workspace routing', () => {
     expect(wrapper.find('.news-item a').exists()).toBe(false)
     expect(wrapper.get('.news-item .news-source').text()).toBe('Finance-God Mock')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('renders only HTTP crawler news URLs as isolated external links', () => {
+    const wrapper = mount(OverviewWorkspace, {
+      props: {
+        quotes: [],
+        selectedSymbol: '000001.SZ',
+        loading: false,
+        marketError: null,
+        marketLoadedAt: null,
+        sentimentFacts: null,
+        sentimentError: null,
+        informationFacts: null,
+        informationError: null,
+        marketNews: {
+          provider: 'Finance-God Public News Crawler',
+          data_mode: 'real',
+          trade_eligible: false,
+          requested_at: '2026-07-25T07:00:00Z',
+          fetched_at: '2026-07-25T07:00:00Z',
+          freshness: { status: 'fresh', age_seconds: 0, ttl_seconds: 300, cached: false },
+          warnings: [],
+          items: [
+            {
+              id: 'safe-news',
+              title: '合法资讯',
+              summary: '',
+              source: '公开来源',
+              url: 'https://example.com/news?id=1',
+              publish_time: '2026-07-25T06:30:00Z',
+              sector: '综合',
+              tags: [],
+            },
+            {
+              id: 'unsafe-news',
+              title: '不安全链接资讯',
+              summary: '',
+              source: '未知来源',
+              url: 'javascript:alert(1)',
+              publish_time: null,
+              sector: null,
+              tags: [],
+            },
+          ],
+        },
+        marketNewsError: null,
+        onSelectSymbol: vi.fn(),
+        onRefresh: vi.fn(),
+      },
+    })
+
+    const link = wrapper.get('.news-item a')
+    expect(link.attributes('href')).toBe('https://example.com/news?id=1')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
+    expect(wrapper.findAll('.news-item a')).toHaveLength(1)
+    expect(wrapper.text()).toContain('不安全链接资讯')
+    expect(wrapper.text()).toContain('资讯不参与定价或下单')
   })
 
   it('does not offer account creation while the account request is failing', () => {

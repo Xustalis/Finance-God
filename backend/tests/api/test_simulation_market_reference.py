@@ -45,7 +45,11 @@ async def _trusted_reference(_symbol: str) -> tuple[Decimal, VersionReference]:
     return Decimal("11.10"), TRUSTED_VERSION
 
 
-async def _historical_bars(_owner_id: str, _symbol: str) -> dict[str, object]:
+async def _historical_bars(
+    _owner_id: str,
+    _symbol: str,
+    frequency: str,
+) -> dict[str, object]:
     return {
         "bars": (
             _HistoricalBar(
@@ -54,7 +58,7 @@ async def _historical_bars(_owner_id: str, _symbol: str) -> dict[str, object]:
                 freshness="fresh",
             ),
         ),
-        "frequency": "1m",
+        "frequency": "日频" if frequency == "daily" else "1m",
         "simulation_time": datetime.fromisoformat("2026-07-24T15:01:00+08:00"),
         "simulation_clock_revision": 3,
     }
@@ -63,10 +67,19 @@ async def _historical_bars(_owner_id: str, _symbol: str) -> dict[str, object]:
 async def _partially_failing_historical_bars(
     _owner_id: str,
     symbol: str,
+    frequency: str,
 ) -> dict[str, object]:
     if symbol == "399001.SZ":
         raise ValueError("no completed PandaData minute bar is available")
-    return await _historical_bars(_owner_id, symbol)
+    return await _historical_bars(_owner_id, symbol, frequency)
+
+
+async def _failed_historical_bars(
+    _owner_id: str,
+    _symbol: str,
+    _frequency: str,
+) -> dict[str, object]:
+    raise RuntimeError("upstream details must not leak")
 
 
 def _app(
@@ -232,3 +245,59 @@ def test_historical_bars_serializes_simulation_time() -> None:
 
     assert response.status_code == 200
     assert response.json()["simulation_time"] == "2026-07-24T15:01:00+08:00"
+
+
+def test_historical_bars_passes_daily_frequency_to_provider() -> None:
+    execution = _Execution()
+    with TestClient(
+        _app(
+            execution,
+            historical_market_bars_provider=_historical_bars,
+        )
+    ) as client:
+        response = client.get(
+            "/api/simulation/market/bars",
+            params={"symbol": "000001.SZ", "frequency": "daily"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["frequency"] == "日频"
+
+
+def test_historical_bars_rejects_an_unknown_frequency() -> None:
+    execution = _Execution()
+    with TestClient(
+        _app(
+            execution,
+            historical_market_bars_provider=_historical_bars,
+        )
+    ) as client:
+        response = client.get(
+            "/api/simulation/market/bars",
+            params={"symbol": "000001.SZ", "frequency": "weekly"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_historical_bars_maps_upstream_failure_to_service_unavailable() -> None:
+    execution = _Execution()
+    with TestClient(
+        _app(
+            execution,
+            historical_market_bars_provider=_failed_historical_bars,
+        )
+    ) as client:
+        response = client.get(
+            "/api/simulation/market/bars",
+            params={"symbol": "000300.SH", "frequency": "daily"},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "SERVICE_UNAVAILABLE",
+            "message": "当前模拟时点没有可展示的 PandaData K 线",
+        }
+    }

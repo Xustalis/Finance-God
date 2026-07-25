@@ -285,6 +285,28 @@ def test_connected_trade_plan_workflow_is_accepted_for_queueing() -> None:
     assert response.json()["workflow_key"] == "trade_plan_generation"
 
 
+def test_review_workspace_creates_post_trade_review_workflow() -> None:
+    commands, registry = _commands()
+    client = _client(commands, registry)
+    response = client.post(
+        "/workflows/desk",
+        json={
+            "request_intent": "分析本次操作",
+            "section": "review",
+            "symbol": "600519.SH",
+            "context_version": "desk:user:review:600519:1",
+        },
+        headers=_headers("desk-review-workflow-0001"),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["workflow_key"] == "post_trade_review"
+    assert client.get("/workflows?limit=20").json()["items"][0]["scope"] == {
+        "section": "review",
+        "symbol": "600519.SH",
+    }
+
+
 def test_connected_strategy_monitoring_workflow_is_accepted_for_queueing() -> None:
     commands, registry = _commands()
     response = _client(commands, registry).post(
@@ -327,6 +349,7 @@ def test_desk_workflow_selection_covers_operating_intents() -> None:
         ("复核订单草稿", "trading", WorkflowKey.ORDER_REVIEW),
         ("执行已确认订单", "trading", WorkflowKey.SIMULATION_EXECUTION),
         ("复盘这次成交滑点", "trading", WorkflowKey.POST_TRADE_REVIEW),
+        ("分析本次操作", "review", WorkflowKey.POST_TRADE_REVIEW),
         ("解释突发事件影响", "information", WorkflowKey.EVENT_IMPACT),
         ("分析股债汇联动", "information", WorkflowKey.CROSS_MARKET_ANALYSIS),
         ("检查策略漂移", "information", WorkflowKey.STRATEGY_MONITORING),
