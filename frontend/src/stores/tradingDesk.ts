@@ -790,7 +790,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     }
   }
 
-  async function loadMarketNews() {
+  async function loadMarketNews(forceRefresh = false) {
     const requestId = ++marketNewsRequestId
     marketNewsError.value = null
     if (simulationClock.value) {
@@ -798,7 +798,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       return
     }
     try {
-      const result = await fetchMarketNews(8)
+      const result = await fetchMarketNews(8, forceRefresh)
       if (requestId !== marketNewsRequestId || simulationClock.value) return
       marketNews.value = result
     } catch (error) {
@@ -812,7 +812,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     await Promise.all([
       refreshMarket({ withBars: true }),
       loadMarketFacts(),
-      loadMarketNews(),
+      loadMarketNews(true),
     ])
   }
 

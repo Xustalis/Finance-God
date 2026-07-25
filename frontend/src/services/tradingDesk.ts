@@ -873,8 +873,10 @@ export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
   }))
 }
 
-export function fetchMarketNews(limit = 8): Promise<DeskMarketNewsBatch> {
-  return request(() => client.get('/market/news', { params: { limit } }))
+export function fetchMarketNews(limit = 8, forceRefresh = false): Promise<DeskMarketNewsBatch> {
+  return request(() => client.get('/market/news', {
+    params: { limit, refresh: forceRefresh ? 1 : 0 },
+  }))
 }
 
 export function fetchSentimentFacts(symbol: string): Promise<DeskFactBatch> {

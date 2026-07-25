@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useTradingDeskStore, type DeskSection } from '@/stores/tradingDesk'
 import DeskAgentPanel from '@/components/desk/DeskAgentPanel.vue'
 import OverviewWorkspace from '@/components/desk/OverviewWorkspace.vue'
@@ -12,8 +11,6 @@ const TradingWorkspace = defineAsyncComponent(() => import('@/components/desk/Tr
 const ReviewWorkspace = defineAsyncComponent(() => import('@/components/desk/ReviewWorkspace.vue'))
 
 const desk = useTradingDeskStore()
-const route = useRoute()
-const reviewDemoMode = computed(() => import.meta.env.DEV && route.query.preview === '1')
 const remindersOpen = ref(false)
 const myOpen = ref(false)
 const toastVisible = ref(false)
@@ -112,17 +109,6 @@ onBeforeUnmount(() => {
           <nav class="desk-nav" aria-label="交易台工作区">
             <button v-for="item in sections" :key="item.id" type="button" :class="{ active: desk.section === item.id }" @click="desk.setSection(item.id)">{{ item.label }}</button>
           </nav>
-          <div v-if="desk.simulationClock" class="simulation-time-strip" role="status">
-            <span>历史演示</span>
-            <strong>{{ new Date(desk.simulationClock.current_time).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</strong>
-            <span>1× · {{ desk.simulationClock.status === 'running' ? '运行中' : '闭市暂停' }}</span>
-            <button
-              v-if="desk.simulationClock.status === 'paused_market_closed'"
-              type="button"
-              class="refresh-button"
-              @click="runWorkspaceAction(() => desk.resumeClock())"
-            >进入下一交易时段</button>
-          </div>
         </div>
 
         <div class="desk-left-content">
@@ -145,7 +131,6 @@ onBeforeUnmount(() => {
             :account="desk.account ?? null" :account-state="desk.accountState" :portfolio="desk.portfolio ?? null" :quotes="desk.quotes ?? []"
             :loading="desk.loadingSimulation || desk.loadingMarket"
             :error="workspaceError || desk.simulationError || desk.marketError" :on-load="desk.refreshPortfolioWorkspace"
-            :historical-mode-active="Boolean(desk.simulationClock)" :on-enter-historical-mode="desk.enterHistoricalMode"
             :on-create-account="(input) => runWorkspaceAction(() => desk.createAccount(input.initialCash, input.simulationStartAt))"
           />
           <WatchlistWorkspace
@@ -192,7 +177,7 @@ onBeforeUnmount(() => {
             :learning-summary="desk.agentLearningSummary"
             :learning-loading="desk.agentLearningLoading"
             :learning-error="desk.agentLearningError"
-            :demo-mode="reviewDemoMode"
+            :demo-mode="false"
             :on-load="desk.loadReviewWorkspace"
             :on-retry-learning="desk.loadAgentLearningSummary"
             :on-select="desk.selectTradeEpisode"

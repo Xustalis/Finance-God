@@ -798,13 +798,14 @@ describe('trading workspace routing', () => {
     await store.initialize()
 
     expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(1)
-    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledWith(8)
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledWith(8, false)
     store.setSymbol('600519.SH')
     await flushPromises()
     expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(1)
 
     await store.refreshOverviewWorkspace()
     expect(tradingDeskApi.fetchMarketNews).toHaveBeenCalledTimes(2)
+    expect(tradingDeskApi.fetchMarketNews).toHaveBeenLastCalledWith(8, true)
 
     store.hasSimulationAccount = true
     await store.loadMarketNews()
