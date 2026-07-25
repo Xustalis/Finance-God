@@ -643,6 +643,56 @@ class WorkflowWorkerTest(unittest.IsolatedAsyncioTestCase):
             '"row_count":0', evidence_by_id["margin_balance-000001.SZ"].excerpt
         )
 
+    async def test_index_market_context_skips_equity_only_fact_endpoints(
+        self,
+    ) -> None:
+        async def index_context_provider(symbols: list[str]):
+            self.assertEqual(symbols, ["000001.SZ"])
+            return SimpleNamespace(
+                quotes=(
+                    SimpleNamespace(
+                        symbol="000001.SZ",
+                        provider="PandaData",
+                        asset_type="index",
+                        last=Decimal("3510"),
+                        change_percent=Decimal("0.01"),
+                        provider_time="2026-07-24T15:00:00+08:00",
+                        retrieved_at=NOW,
+                        frequency="1d",
+                        freshness="latest_released",
+                        session_alignment="latest_released_session",
+                        market_status="released",
+                    ),
+                ),
+                errors={},
+            )
+
+        async def equity_facts_must_not_run(*args, **kwargs):
+            del args, kwargs
+            raise AssertionError("equity-only facts were requested for an index")
+
+        self.worker._market_context_provider = index_context_provider
+        self.worker._information_facts_provider = equity_facts_must_not_run
+        self.worker._sentiment_facts_provider = equity_facts_must_not_run
+        run_id = await self._queue(
+            key=WorkflowKey.MARKET_CONTEXT,
+            suffix="index-market-context",
+            input_versions=CONTEXT_INPUT,
+        )
+
+        self.assertEqual(await self.worker.process_once(), 1)
+
+        run = await self.repository.get(run_id)
+        assert run is not None
+        self.assertEqual(run.status, WorkflowRunStatus.COMPLETED)
+        evidence_ids = {
+            item.identifier for item in self.runtime.requests[0].evidence
+        }
+        self.assertIn("market-context-000001.SZ", evidence_ids)
+        self.assertIn("target-market-bars-000001.SZ", evidence_ids)
+        self.assertNotIn("company_disclosure-000001.SZ", evidence_ids)
+        self.assertNotIn("margin_balance-000001.SZ", evidence_ids)
+
     async def test_event_impact_can_confirm_no_recorded_alert(self) -> None:
         self.alert_context = MarketAlertContext(
             snapshot=self.alert_context.snapshot,

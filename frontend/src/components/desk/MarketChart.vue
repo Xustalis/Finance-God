@@ -1,9 +1,26 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
-import { createChart, type IChartApi, ColorType, CrosshairMode, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts'
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  CrosshairMode,
+  HistogramSeries,
+  LineSeries,
+  type CandlestickData,
+  type HistogramData,
+  type IChartApi,
+  type ISeriesApi,
+  type LineData,
+  type Time,
+  type UTCTimestamp,
+} from 'lightweight-charts'
 import type { DeskBar } from '@/services/tradingDesk'
 
 export type ChartPeriod = '1m' | '5m' | '15m' | '60m' | 'daily' | 'weekly' | 'monthly'
+
+const MINUTE_PERIODS = new Set<ChartPeriod>(['1m', '5m', '15m', '60m'])
+const MOVING_AVERAGE_PERIODS = [5, 10, 20, 60] as const
 
 export interface ChartQuote {
   symbol: string
@@ -18,7 +35,10 @@ export interface ChartQuote {
   volume?: number | null
   amount?: number | null
   provider_time: string
+  frequency?: string
   freshness: string
+  market_status?: string
+  session_alignment?: string
 }
 
 const props = defineProps<{
@@ -33,17 +53,41 @@ const activePeriod = ref<ChartPeriod>('daily')
 
 const chartContainer = ref<HTMLDivElement | null>(null)
 let chart: IChartApi | null = null
-let candleSeries: any = null
-let volumeSeries: any = null
-let ma5Series: any = null
-let ma10Series: any = null
-let ma20Series: any = null
-let ma60Series: any = null
+let candleSeries: ISeriesApi<'Candlestick'> | null = null
+let volumeSeries: ISeriesApi<'Histogram'> | null = null
+let ma5Series: ISeriesApi<'Line'> | null = null
+let ma10Series: ISeriesApi<'Line'> | null = null
+let ma20Series: ISeriesApi<'Line'> | null = null
+let ma60Series: ISeriesApi<'Line'> | null = null
 
 const changeColor = computed(() => {
   if (!props.quote?.change) return 'var(--ink)'
   return props.quote.change >= 0 ? 'var(--positive)' : 'var(--risk)'
 })
+
+const marketStateLabel = computed(() => {
+  if (props.quote?.session_alignment === 'latest_released_session') {
+    return '休市 · 最近交易日'
+  }
+  if (props.quote?.market_status === 'in_session') return '交易时段'
+  if (props.quote?.market_status === 'released') return '已发布收盘'
+  if (props.quote?.market_status === 'closed') return '休市'
+  return props.quote?.market_status || '市场状态未知'
+})
+
+function formatProviderTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value || '时间未知'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
 
 function formatVolume(vol: number | null | undefined): string {
   if (vol == null) return '—'
@@ -59,107 +103,65 @@ function formatAmount(amt: number | null | undefined): string {
   return String(Math.round(amt))
 }
 
-function calcMA(data: readonly DeskBar[], period: number): Array<{ time: string; value: number }> {
-  const result: Array<{ time: string; value: number }> = []
-  for (let i = period - 1; i < data.length; i++) {
-    let sum = 0
-    for (let j = 0; j < period; j++) sum += data[i - j].close
-    result.push({ time: data[i].time, value: +(sum / period).toFixed(2) })
-  }
-  return result
-}
-
-/** Aggregate daily bars into weekly candles (Mon-Fri grouped by ISO week). */
-function aggregateWeekly(daily: readonly DeskBar[]): DeskBar[] {
-  const sorted = [...daily].sort((a, b) => a.time.localeCompare(b.time))
-  const weeks: Map<string, DeskBar[]> = new Map()
-  for (const bar of sorted) {
-    const d = new Date(bar.time)
-    const day = d.getDay()
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-    const monday = new Date(d)
-    monday.setDate(diff)
-    const key = monday.toISOString().slice(0, 10)
-    if (!weeks.has(key)) weeks.set(key, [])
-    weeks.get(key)!.push(bar)
-  }
+function aggregateBars(bars: readonly DeskBar[], keyFor: (bar: DeskBar) => string): DeskBar[] {
   const result: DeskBar[] = []
-  for (const [weekStart, bars] of weeks) {
-    if (!bars.length) continue
-    result.push({
-      time: weekStart,
-      open: bars[0].open,
-      high: Math.max(...bars.map(b => b.high)),
-      low: Math.min(...bars.map(b => b.low)),
-      close: bars[bars.length - 1].close,
-      volume: bars.reduce((s, b) => s + b.volume, 0),
-    })
+  for (const bar of bars) {
+    const key = keyFor(bar)
+    const current = result.at(-1)
+    if (!current || current.time !== key) {
+      result.push({ ...bar, time: key })
+      continue
+    }
+    current.high = Math.max(current.high, bar.high)
+    current.low = Math.min(current.low, bar.low)
+    current.close = bar.close
+    current.volume += bar.volume
   }
   return result
 }
 
-/** Aggregate daily bars into monthly candles. */
-function aggregateMonthly(daily: readonly DeskBar[]): DeskBar[] {
-  const sorted = [...daily].sort((a, b) => a.time.localeCompare(b.time))
-  const months: Map<string, DeskBar[]> = new Map()
-  for (const bar of sorted) {
-    const key = bar.time.slice(0, 7) + '-01'
-    if (!months.has(key)) months.set(key, [])
-    months.get(key)!.push(bar)
-  }
-  const result: DeskBar[] = []
-  for (const [monthStart, bars] of months) {
-    if (!bars.length) continue
-    result.push({
-      time: monthStart,
-      open: bars[0].open,
-      high: Math.max(...bars.map(b => b.high)),
-      low: Math.min(...bars.map(b => b.low)),
-      close: bars[bars.length - 1].close,
-      volume: bars.reduce((s, b) => s + b.volume, 0),
-    })
-  }
-  return result
+function weekStart(bar: DeskBar): string {
+  const date = new Date(bar.time)
+  const day = date.getDay()
+  date.setDate(date.getDate() - day + (day === 0 ? -6 : 1))
+  return date.toISOString().slice(0, 10)
 }
 
-/** Get display bars based on the active period. */
+const sortedBars = computed<readonly DeskBar[]>(() =>
+  [...props.bars].sort((a, b) => a.time.localeCompare(b.time)),
+)
+
 const displayBars = computed<readonly DeskBar[]>(() => {
-  if (activePeriod.value === 'weekly') return aggregateWeekly(props.bars)
-  if (activePeriod.value === 'monthly') return aggregateMonthly(props.bars)
-  if (activePeriod.value === '5m') return aggregateMinutes(props.bars, 5)
-  if (activePeriod.value === '15m') return aggregateMinutes(props.bars, 15)
-  if (activePeriod.value === '60m') return aggregateMinutes(props.bars, 60)
-  return props.bars
+  const bars = sortedBars.value
+  if (activePeriod.value === 'daily') return aggregateBars(bars, bar => bar.time.slice(0, 10))
+  if (activePeriod.value === 'weekly') return aggregateBars(bars, weekStart)
+  if (activePeriod.value === 'monthly') return aggregateBars(bars, bar => `${bar.time.slice(0, 7)}-01`)
+  if (activePeriod.value === '5m') return aggregateMinutes(bars, 5)
+  if (activePeriod.value === '15m') return aggregateMinutes(bars, 15)
+  if (activePeriod.value === '60m') return aggregateMinutes(bars, 60)
+  return bars
 })
 
-/** Aggregate 1-minute bars into N-minute candles. */
 function aggregateMinutes(bars: readonly DeskBar[], minutes: number): DeskBar[] {
-  if (!bars.length) return []
-  const sorted = [...bars].sort((a, b) => a.time.localeCompare(b.time))
   const result: DeskBar[] = []
-  for (let i = 0; i < sorted.length; i += minutes) {
-    const chunk = sorted.slice(i, i + minutes)
-    if (!chunk.length) break
-    result.push({
-      time: chunk[0].time,
-      open: chunk[0].open,
-      high: Math.max(...chunk.map(b => b.high)),
-      low: Math.min(...chunk.map(b => b.low)),
-      close: chunk[chunk.length - 1].close,
-      volume: chunk.reduce((s, b) => s + b.volume, 0),
-    })
+  for (let index = 0; index < bars.length; index++) {
+    const bar = bars[index]
+    if (index % minutes === 0) {
+      result.push({ ...bar })
+      continue
+    }
+    const current = result[result.length - 1]
+    current.high = Math.max(current.high, bar.high)
+    current.low = Math.min(current.low, bar.low)
+    current.close = bar.close
+    current.volume += bar.volume
   }
   return result
 }
 
 function setPeriod(period: ChartPeriod) {
   activePeriod.value = period
-  // Notify parent for server-side frequency switch
-  if (period === '1m' || period === '5m' || period === '15m' || period === '60m') {
-    props.onPeriodChange?.('1m')
-  } else {
-    props.onPeriodChange?.('daily')
-  }
+  props.onPeriodChange?.(MINUTE_PERIODS.has(period) ? '1m' : 'daily')
 }
 
 function initChart() {
@@ -169,6 +171,7 @@ function initChart() {
       background: { type: ColorType.Solid, color: 'transparent' },
       textColor: '#5c4a3a',
       fontFamily: 'system-ui, -apple-system, sans-serif',
+      attributionLogo: false,
     },
     grid: {
       vertLines: { color: 'rgba(139, 115, 85, 0.08)' },
@@ -209,65 +212,66 @@ function initChart() {
   updateData()
 }
 
-function toDay(time: string): string {
-  // For daily/weekly/monthly: 'YYYY-MM-DD'
-  // For minute bars: keep time portion for lightweight-charts BusinessDay or UTC timestamp
-  return time.slice(0, 10)
-}
-
 function updateData() {
   if (!candleSeries || !volumeSeries) return
   const barsToRender = displayBars.value
-  if (!barsToRender.length) return
+  if (!barsToRender.length) {
+    candleSeries.setData([])
+    volumeSeries.setData([])
+    ma5Series?.setData([])
+    ma10Series?.setData([])
+    ma20Series?.setData([])
+    ma60Series?.setData([])
+    return
+  }
 
-  const isMinute = activePeriod.value === '1m' || activePeriod.value === '5m' || activePeriod.value === '15m' || activePeriod.value === '60m'
-
-  // Update time scale visibility
+  const isMinute = MINUTE_PERIODS.has(activePeriod.value)
   chart?.timeScale().applyOptions({ timeVisible: isMinute })
 
-  // lightweight-charts requires ascending order
-  const sorted = [...barsToRender].sort((a, b) => a.time.localeCompare(b.time))
+  const candles: CandlestickData[] = []
+  const volumes: HistogramData[] = []
+  const averages: Record<number, LineData[]> = Object.fromEntries(
+    MOVING_AVERAGE_PERIODS.map(period => [period, []]),
+  )
+  const rollingSums: Record<number, number> = Object.fromEntries(
+    MOVING_AVERAGE_PERIODS.map(period => [period, 0]),
+  )
 
-  const candles = sorted.map(b => {
-    if (isMinute) {
-      // Use UTC timestamp for minute data
-      const ts = Math.floor(new Date(b.time).getTime() / 1000)
-      return { time: ts as any, open: b.open, high: b.high, low: b.low, close: b.close }
+  for (let index = 0; index < barsToRender.length; index++) {
+    const bar = barsToRender[index]
+    const time: Time = isMinute
+      ? Math.floor(new Date(bar.time).getTime() / 1000) as UTCTimestamp
+      : bar.time.slice(0, 10)
+    candles.push({ time, open: bar.open, high: bar.high, low: bar.low, close: bar.close })
+    volumes.push({
+      time,
+      value: bar.volume,
+      color: bar.close >= bar.open ? 'rgba(192, 57, 43, 0.4)' : 'rgba(39, 174, 96, 0.4)',
+    })
+    for (const period of MOVING_AVERAGE_PERIODS) {
+      rollingSums[period] += bar.close
+      if (index >= period) rollingSums[period] -= barsToRender[index - period].close
+      if (index >= period - 1) {
+        averages[period].push({ time, value: +(rollingSums[period] / period).toFixed(2) })
+      }
     }
-    return { time: toDay(b.time), open: b.open, high: b.high, low: b.low, close: b.close }
-  })
-
-  const volumes = sorted.map(b => {
-    const timeVal = isMinute ? Math.floor(new Date(b.time).getTime() / 1000) as any : toDay(b.time)
-    return {
-      time: timeVal,
-      value: b.volume,
-      color: b.close >= b.open ? 'rgba(192, 57, 43, 0.4)' : 'rgba(39, 174, 96, 0.4)',
-    }
-  })
+  }
 
   // lightweight-charts 对时间格式与重复时间敏感，异常不能打断周期切换与组件响应式。
   try {
-    candleSeries.setData(candles as any)
-    volumeSeries.setData(volumes as any)
+    candleSeries.setData(candles)
+    volumeSeries.setData(volumes)
 
-    // 均线必须与蜡烛使用同一升序序列和同一时间格式：
-    // 日/周/月线截取 YYYY-MM-DD，分钟线转 UTC 秒。混用完整 ISO 串会被
-    // lightweight-charts 拒绝并连带清空蜡烛（首屏空白的根因）。
-    const maTime = (time: string) =>
-      isMinute ? (Math.floor(new Date(time).getTime() / 1000) as any) : toDay(time)
-    const maSeriesByPeriod: Array<[any, number]> = [
-      [ma5Series, 5], [ma10Series, 10], [ma20Series, 20], [ma60Series, 60],
-    ]
-    for (const [series, period] of maSeriesByPeriod) {
-      if (series) series.setData(calcMA(sorted, period).map(d => ({ ...d, time: maTime(d.time) })) as any)
-    }
+    ma5Series?.setData(averages[5])
+    ma10Series?.setData(averages[10])
+    ma20Series?.setData(averages[20])
+    ma60Series?.setData(averages[60])
 
     chart?.timeScale().fitContent()
   } catch (error) {
     // 回退：清空系列，避免渲染半态数据；错误信息由父级 error 通道呈现。
     console.warn('[MarketChart] 更新图表数据失败，已回退为空数据', error)
-    try { candleSeries.setData([] as any); volumeSeries.setData([] as any) } catch { /* noop */ }
+    try { candleSeries.setData([]); volumeSeries.setData([]) } catch { /* noop */ }
   }
 }
 
@@ -312,7 +316,13 @@ watch(activePeriod, () => {
             {{ quote.change_percent != null ? `${quote.change_percent >= 0 ? '+' : ''}${quote.change_percent.toFixed(2)}%` : '—' }}
           </span>
         </div>
-        <small class="chart-provider">PandaData · {{ quote.provider_time }} · {{ quote.freshness }}</small>
+        <small class="chart-provider">
+          <strong>{{ marketStateLabel }}</strong>
+          · PandaData
+          · 上游 {{ formatProviderTime(quote.provider_time) }}
+          · {{ quote.frequency || '频率未知' }}
+          · {{ quote.freshness }}
+        </small>
       </div>
       <div class="chart-mini-stats">
         <dl>

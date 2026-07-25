@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 from math import nan
+from pathlib import Path
 
 import pytest
 
@@ -17,7 +18,8 @@ from finance_god.market_data import (
     PandaCalendarPublishedState,
     StaticPublishedState,
 )
-from finance_god.market_data.contracts import ReleaseState
+from finance_god.market_data.bar_cache import PersistentBarCache
+from finance_god.market_data.contracts import DataFrequency, ReleaseState
 from finance_god.market_data.instruments import DEFAULT_INSTRUMENT_MASTER
 
 from .conftest import NOW, FakeSDK, adapter, bar, stock_snapshot
@@ -130,6 +132,48 @@ def test_service_exposes_full_bounded_daily_series_for_research() -> None:
         "start_date": "20260622",
         "end_date": "20260722",
     }
+
+
+def test_public_bars_cache_bounded_window_across_service_instances(
+    tmp_path: Path,
+) -> None:
+    cache = PersistentBarCache(tmp_path / "market-bars.sqlite3")
+    first_sdk = FakeSDK()
+    first_sdk.responses["get_stock_daily"] = [
+        bar("20260722", close=10.2),
+        bar("20260721", close=10.1),
+        bar("20260720", close=10.0),
+    ]
+    first = MarketDataService(
+        adapter=adapter(first_sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+        bar_cache=cache,
+    )
+
+    initial = first.read_bars(
+        "000001.SZ",
+        frequency_override=DataFrequency.DAILY,
+    )
+
+    assert len(initial.bars) == 3
+    assert first_sdk.calls[-1][1]["start_date"] == "20260305"
+
+    second_sdk = FakeSDK()
+    second = MarketDataService(
+        adapter=adapter(second_sdk),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+        bar_cache=PersistentBarCache(tmp_path / "market-bars.sqlite3"),
+    )
+
+    cached = second.read_bars(
+        "000001.SZ",
+        frequency_override=DataFrequency.DAILY,
+    )
+
+    assert cached.bars == initial.bars
+    assert second_sdk.calls == []
 
 
 def test_service_exposes_source_stamped_company_disclosure_facts() -> None:

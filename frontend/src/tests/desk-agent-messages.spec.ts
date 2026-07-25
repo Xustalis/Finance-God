@@ -127,20 +127,52 @@ describe('DeskAgentPanel message bubbles', () => {
     await wrapper.vm.$nextTick()
 
     const receipt = wrapper.get('.agent-chat-message.is-workflow')
-    expect(receipt.text()).toContain('正式任务已创建')
+    expect(receipt.text()).toContain('正式任务已开始执行')
     expect(receipt.text()).toContain('运行信息')
     expect(wrapper.find('[aria-label="当前工作流运行状态"]').exists()).toBe(false)
 
     const refresh = vi.spyOn(store, 'refreshWorkflow').mockResolvedValue()
     const details = receipt.get<HTMLDetailsElement>('.workflow-message-detail')
-    expect(details.element.open).toBe(false)
-    details.element.open = true
+    expect(details.element.open).toBe(true)
     await details.trigger('toggle')
     await wrapper.vm.$nextTick()
     expect(refresh).toHaveBeenCalled()
     expect(details.text()).toContain('1 / 2 个节点产物')
     expect(details.text()).toContain('核查行情与估值')
     expect(details.find('.agent-task-list').exists()).toBe(true)
+  })
+
+  it('shows accepted and started workflow states directly in the Agent conversation', async () => {
+    const { store, wrapper } = mountAgent()
+    store.agentMessages = [{
+      id: 'workflow-run-queued',
+      role: 'assistant',
+      kind: 'workflow',
+      createdAt: '2026-07-25T00:00:00Z',
+      runId: 'run-queued',
+      intent: '研究贵州茅台',
+      status: 'queued',
+    }]
+    await wrapper.vm.$nextTick()
+
+    const receipt = wrapper.get('.agent-chat-message.is-workflow')
+    expect(receipt.text()).toContain('正式任务已受理')
+    expect(receipt.text()).not.toContain('正式任务已开始执行')
+    expect(receipt.get<HTMLDetailsElement>('.workflow-message-detail').element.open).toBe(true)
+
+    store.agentMessages = [{
+      id: 'workflow-run-queued',
+      role: 'assistant',
+      kind: 'workflow',
+      createdAt: '2026-07-25T00:00:00Z',
+      runId: 'run-queued',
+      intent: '研究贵州茅台',
+      status: 'running',
+    }]
+    await wrapper.vm.$nextTick()
+
+    expect(receipt.text()).toContain('正式任务已开始执行')
+    expect(receipt.get<HTMLDetailsElement>('.workflow-message-detail').element.open).toBe(true)
   })
 
   it('explains a known quality-gate error instead of exposing its internal code', async () => {
@@ -268,7 +300,7 @@ describe('DeskAgentPanel message bubbles', () => {
     }]
     await wrapper.vm.$nextTick()
     const bubble = wrapper.get('.agent-chat-message.is-order_draft')
-    expect(bubble.text()).toContain('仿真订单草稿')
+    expect(bubble.text()).toContain('模拟订单草稿')
     expect(bubble.text()).toContain('600519.SH')
     expect(bubble.text()).toContain('尚未提交')
     expect(bubble.get('button').text()).toContain('前往复核')

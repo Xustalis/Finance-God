@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTradingDeskStore, type DeskSection } from '@/stores/tradingDesk'
-import { canUseQuoteAsDraftReference, draftReferenceBlockedReason } from '@/services/tradingDesk'
 import DeskAgentPanel from '@/components/desk/DeskAgentPanel.vue'
 import OverviewWorkspace from '@/components/desk/OverviewWorkspace.vue'
 
@@ -9,8 +9,11 @@ const MyPanel = defineAsyncComponent(() => import('@/components/desk/MyPanel.vue
 const PortfolioWorkspace = defineAsyncComponent(() => import('@/components/desk/PortfolioWorkspace.vue'))
 const WatchlistWorkspace = defineAsyncComponent(() => import('@/components/desk/WatchlistWorkspace.vue'))
 const TradingWorkspace = defineAsyncComponent(() => import('@/components/desk/TradingWorkspace.vue'))
+const ReviewWorkspace = defineAsyncComponent(() => import('@/components/desk/ReviewWorkspace.vue'))
 
 const desk = useTradingDeskStore()
+const route = useRoute()
+const reviewDemoMode = computed(() => import.meta.env.DEV && route.query.preview === '1')
 const remindersOpen = ref(false)
 const myOpen = ref(false)
 const toastVisible = ref(false)
@@ -21,8 +24,9 @@ const sectionLabels: Record<DeskSection, string> = {
   portfolio: '持仓',
   watchlist: '自选',
   trading: '交易',
+  review: '复盘',
 }
-const sections = (['information', 'portfolio', 'watchlist', 'trading'] as DeskSection[])
+const sections = (['information', 'portfolio', 'watchlist', 'trading', 'review'] as DeskSection[])
   .map((id) => ({ id, label: sectionLabels[id] }))
 
 const firstUnread = computed(() => desk.notifications.find((item) => item.status !== 'read') ?? null)
@@ -41,20 +45,15 @@ async function runWorkspaceAction(action: () => Promise<unknown>): Promise<void>
   try { await action() } catch (error) { workspaceError.value = failureText(error) }
 }
 
-async function createDraft(input: { instrumentId: string; side: 'buy' | 'sell'; orderType: 'market' | 'limit'; quantity: string; limitPrice: string | null }) {
-  if (!desk.account) throw new Error('请先建立仿真账户。')
+async function submitMarketOrder(input: { instrumentId: string; side: 'buy' | 'sell'; quantity: string }) {
+  if (!desk.account) throw new Error('请先建立模拟账户。')
   const instrumentId = input.instrumentId.trim().toUpperCase()
-  // 行情缓存未覆盖的标的向服务端实时查询真实快照，而不是直接拒绝。
-  const quote = await desk.ensureQuote(instrumentId)
-  if (!quote || !canUseQuoteAsDraftReference(quote)) {
-    throw new Error(draftReferenceBlockedReason(quote))
-  }
-  await desk.createDraft({
-    mode: 'manual', account_id: desk.account.account_id, instrument_id: instrumentId,
-    side: input.side, order_type: input.orderType, quantity: input.quantity,
-    limit_price: input.limitPrice ?? undefined, reference_price: String(quote.last),
-    time_in_force: 'day', valid_until: new Date(Date.now() + 15 * 60_000).toISOString(),
-    input_versions: [{ object_type: 'market_quote', object_id: quote.symbol, version: quote.provider_time }],
+  await desk.ensureQuote(instrumentId)
+  await desk.submitMarketOrder({
+    accountId: desk.account.account_id,
+    instrumentId,
+    side: input.side,
+    quantity: input.quantity,
   })
 }
 
@@ -75,8 +74,15 @@ watch(() => desk.requestedReminderId, (reminderId) => {
 watch(firstUnread, (notice) => {
   if (alertTimer) clearTimeout(alertTimer)
   toastVisible.value = Boolean(notice)
-  if (notice) alertTimer = setTimeout(() => { toastVisible.value = false }, 8_000)
+  if (notice && !notice.required && notice.severity !== 'required') {
+    alertTimer = setTimeout(() => { toastVisible.value = false }, 8_000)
+  }
 }, { immediate: true })
+
+async function toggleReminders(): Promise<void> {
+  remindersOpen.value = !remindersOpen.value
+  if (remindersOpen.value) await desk.loadNotificationHistory()
+}
 onBeforeUnmount(() => {
   if (alertTimer) clearTimeout(alertTimer)
   desk.dispose()
@@ -90,7 +96,7 @@ onBeforeUnmount(() => {
         <strong>FINANCE GOD</strong><span>金融教父 · 投研与决策档案</span>
       </RouterLink>
       <div class="topbar-actions editorial-actions">
-        <button class="topbar-text-button" type="button" aria-label="打开提醒" @click="remindersOpen = !remindersOpen">
+        <button class="topbar-text-button" type="button" aria-label="打开提醒" @click="toggleReminders">
           <span>提醒</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.5 21h5"/></svg><sup v-if="desk.unreadCount">{{ desk.unreadCount }}</sup>
         </button>
         <span class="topbar-divider" aria-hidden="true"></span>
@@ -106,6 +112,17 @@ onBeforeUnmount(() => {
           <nav class="desk-nav" aria-label="交易台工作区">
             <button v-for="item in sections" :key="item.id" type="button" :class="{ active: desk.section === item.id }" @click="desk.setSection(item.id)">{{ item.label }}</button>
           </nav>
+          <div v-if="desk.simulationClock" class="simulation-time-strip" role="status">
+            <span>历史演示</span>
+            <strong>{{ new Date(desk.simulationClock.current_time).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</strong>
+            <span>1× · {{ desk.simulationClock.status === 'running' ? '运行中' : '闭市暂停' }}</span>
+            <button
+              v-if="desk.simulationClock.status === 'paused_market_closed'"
+              type="button"
+              class="refresh-button"
+              @click="runWorkspaceAction(() => desk.resumeClock())"
+            >进入下一交易时段</button>
+          </div>
         </div>
 
         <div class="desk-left-content">
@@ -113,8 +130,10 @@ onBeforeUnmount(() => {
             v-if="desk.section === 'information'"
             :quotes="desk.quotes ?? []" :bars="desk.bars ?? []" :selected-symbol="desk.symbol" :loading="desk.loadingMarket" :market-error="desk.marketError" :bars-error="desk.barsError ?? null"
             :market-loaded-at="desk.marketLoadedAt"
-            :sentiment-facts="desk.sentimentFacts" :sentiment-error="desk.sentimentFactsError"
-            :information-facts="desk.informationFacts" :information-error="desk.informationFactsError"
+            :sentiment-facts="desk.simulationClock ? null : desk.sentimentFacts" :sentiment-error="desk.simulationClock ? null : desk.sentimentFactsError"
+            :sentiment-notice="desk.simulationClock ? '历史演示不提供时点还原的市场情绪事实。' : null"
+            :information-facts="desk.simulationClock ? null : desk.informationFacts" :information-error="desk.simulationClock ? null : desk.informationFactsError"
+            :information-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : null"
             :on-select-symbol="desk.setSymbol" :on-refresh="() => desk.refreshMarket({ withBars: true })"
             :on-period-change="(p: string) => desk.setBarsFrequency(p === 'daily' ? undefined : '1m')"
           />
@@ -123,13 +142,15 @@ onBeforeUnmount(() => {
             :account="desk.account ?? null" :account-state="desk.accountState" :portfolio="desk.portfolio ?? null" :quotes="desk.quotes ?? []"
             :loading="desk.loadingSimulation || desk.loadingMarket"
             :error="workspaceError || desk.simulationError || desk.marketError" :on-load="desk.refreshPortfolioWorkspace"
-            :on-create-account="(initialCash) => runWorkspaceAction(() => desk.createAccount(initialCash))"
+            :on-create-account="(input) => runWorkspaceAction(() => desk.createAccount(input.initialCash, input.simulationStartAt))"
           />
           <WatchlistWorkspace
             v-else-if="desk.section === 'watchlist'"
-            :groups="watchlistGroups" :candidates="desk.candidates?.candidates ?? []"
-            :candidate-meta="desk.candidates"
-            :loading="desk.loadingWatchlists || desk.loadingCandidates" :watchlist-error="workspaceError || desk.watchlistError" :candidate-error="desk.candidateError"
+            :groups="watchlistGroups" :candidates="desk.simulationClock ? [] : (desk.candidates?.candidates ?? [])"
+            :candidate-meta="desk.simulationClock ? null : desk.candidates"
+            :loading="desk.loadingWatchlists || desk.loadingCandidates" :watchlist-error="workspaceError || desk.watchlistError"
+            :candidate-error="desk.simulationClock ? null : desk.candidateError"
+            :candidate-notice="desk.simulationClock ? '历史演示不提供研究候选，避免引入未来信息。' : null"
             :on-load="loadWatchlistWorkspace"
             :on-create-group="(input) => runWorkspaceAction(() => desk.createWatchlist(input.name, input.description))"
             :on-rename-group="(input) => runWorkspaceAction(async () => { const group = desk.watchlistGroups.find((item) => item.group_id === input.groupId); if (!group || group.revision !== input.expectedRevision) throw new Error('分组已被更新，请刷新后再试。'); await desk.renameWatchlist(group, input.name, input.description) })"
@@ -141,22 +162,36 @@ onBeforeUnmount(() => {
             :plan-error="desk.tradePlanError"
           />
           <TradingWorkspace
-            v-else
+            v-else-if="desk.section === 'trading'"
             :account="desk.account ?? null" :account-state="desk.accountState" :selected-symbol="desk.symbol" :quotes="desk.quotes ?? []"
-            :draft="desk.activeDraft ?? null" :receipt="desk.activeOrder ?? null"
+            :bars="desk.bars ?? []" :bars-error="desk.barsError ?? null"
+            :portfolio="desk.portfolio ?? null" :receipt="desk.activeOrder ?? null" :fills="desk.fills ?? []"
             :prefill="desk.tradeDraftPrefill"
-            :trade-plan="desk.activeTradePlan ?? null"
             :loading="desk.loadingSimulation || desk.loadingMarket"
-            :error="workspaceError || desk.orderError || desk.tradePlanError || desk.simulationError || desk.marketError"
+            :error="workspaceError || desk.orderError || desk.simulationError || desk.marketError"
             :on-load="desk.refreshTradingWorkspace"
             :on-open-portfolio="() => desk.setSection('portfolio')"
             :on-ensure-quote-symbol="desk.ensureQuoteSymbol"
-            :on-create-draft="(input) => runWorkspaceAction(() => createDraft(input))"
-            :on-review-draft="() => runWorkspaceAction(() => desk.reviewDraft())"
-            :on-confirm-soft-risk="(input) => runWorkspaceAction(() => desk.acknowledgeSoftRisk(input.reasonHash))"
-            :on-confirm-draft="(input) => runWorkspaceAction(() => desk.confirmDraft(input.summaryHash))"
-            :on-submit-draft="() => runWorkspaceAction(() => desk.submitDraft())"
-            :on-reconcile-order="() => runWorkspaceAction(() => desk.reconcileOrder())"
+            :on-select-symbol="desk.setSymbol"
+            :on-period-change="(p: string) => desk.setBarsFrequency(p === 'daily' ? undefined : '1m')"
+            :on-submit="(input) => runWorkspaceAction(() => submitMarketOrder(input))"
+          />
+          <ReviewWorkspace
+            v-else
+            :episodes="desk.tradeEpisodes"
+            :selected="desk.selectedTradeEpisode"
+            :decisions="desk.tradeEpisodeDecisions"
+            :review="desk.tradeEpisodeReview"
+            :loading="desk.tradeReviewLoading || desk.agentLearningLoading"
+            :error="desk.tradeReviewError"
+            :learning-summary="desk.agentLearningSummary"
+            :learning-loading="desk.agentLearningLoading"
+            :learning-error="desk.agentLearningError"
+            :demo-mode="reviewDemoMode"
+            :on-load="desk.loadReviewWorkspace"
+            :on-retry-learning="desk.loadAgentLearningSummary"
+            :on-select="desk.selectTradeEpisode"
+            :on-retry="desk.retrySelectedTradeReview"
           />
         </div>
       </section>
@@ -164,7 +199,7 @@ onBeforeUnmount(() => {
       <DeskAgentPanel />
     </section>
 
-    <aside v-if="remindersOpen" class="reminder-panel" aria-label="提醒记录"><header><h2>提醒记录</h2><button type="button" @click="remindersOpen = false">关闭</button></header><p v-if="desk.notificationError" class="data-error">{{ desk.notificationError }}</p><p v-else-if="!desk.notifications.length">暂无服务端提醒。</p><ol v-else><li v-for="notice in desk.notifications" :key="notice.notification_id"><strong>{{ notice.title }}</strong><p>{{ notice.message }}</p><small>{{ notice.created_at }}</small><button type="button" @click="desk.dismissNotification(notice)">标记已读</button></li></ol></aside>
+    <aside v-if="remindersOpen" class="reminder-panel" aria-label="提醒记录"><header><h2>提醒记录</h2><button type="button" @click="remindersOpen = false">关闭</button></header><p v-if="desk.notificationStreamError" class="data-error" role="status">{{ desk.notificationStreamError }}</p><p v-if="desk.notificationError" class="data-error">{{ desk.notificationError }}</p><p v-else-if="!desk.notificationHistory.length">暂无服务端提醒。</p><ol v-else><li v-for="notice in desk.notificationHistory" :key="notice.notification_id"><strong>{{ notice.required ? '高优先级 · ' : '' }}{{ notice.title }}</strong><p>{{ notice.message }}</p><small v-if="notice.details?.symbol">{{ notice.details.symbol }} · 上游 {{ notice.details.provider_time }} · 检测 {{ notice.details.detected_at }}</small><small>{{ notice.created_at }} · {{ notice.status === 'read' ? '已读' : '未读' }}</small><button v-if="notice.status !== 'read'" type="button" @click="desk.dismissNotification(notice)">标记已读</button></li></ol></aside>
     <aside v-if="toastVisible && firstUnread && !remindersOpen" class="alert-toast" role="status"><strong>{{ firstUnread.title }}</strong><p>{{ firstUnread.message }}</p><button type="button" @click="remindersOpen = true">查看记录</button><button type="button" @click="toastVisible = false">隐藏</button></aside>
 
     <MyPanel v-if="myOpen" @close="myOpen = false" />

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
 
-from finance_god.domain import OrderDraft, OrderSide, OrderType, VersionReference
+from finance_god.domain import OrderDraft, OrderType, VersionReference
 from finance_god.domain.simulation_rules import SIMULATION_RULE_VERSION
 
 from .contracts import (
@@ -106,7 +106,9 @@ class DeterministicMatcher:
                 model_version=self._rules.model_version,
                 rule_version=self._rules.version,
             )
-        price = self._price(draft, bar)
+        historical = bar.evidence.object_type == "simulation_historical_bar"
+        price = bar.open if historical and draft.order_type is OrderType.MARKET else self._price(draft, bar)
+        slippage_bps = Decimal("0") if historical else self._rules.slippage_bps
         fee = (
             price * fill_quantity * self._rules.fee_bps / Decimal("10000")
         ).quantize(Decimal("0.00000001"))
@@ -114,10 +116,44 @@ class DeterministicMatcher:
             fill_quantity=fill_quantity,
             fill_price=price,
             fee=fee,
-            slippage_bps=self._rules.slippage_bps,
+            slippage_bps=slippage_bps,
             triggered=True,
             market_evidence=bar.evidence,
-            model_version=self._rules.model_version,
+            model_version=(
+                "historical-next-minute-open-v1"
+                if historical
+                else self._rules.model_version
+            ),
+            rule_version=self._rules.version,
+        )
+
+    def match_immediate_market(
+        self,
+        draft: OrderDraft,
+        *,
+        quantity: Decimal,
+        price: Decimal,
+        market_evidence: VersionReference,
+    ) -> MatchResult:
+        """Fill a simulation-only market order at the trusted snapshot price."""
+        if draft.order_type is not OrderType.MARKET:
+            raise ExecutionFailure(
+                ExecutionFailureCode.UNSUPPORTED_OPERATION,
+                "immediate execution only supports market orders",
+            )
+        if quantity <= 0 or price <= 0:
+            raise ValueError("immediate market execution requires positive values")
+        fee = (
+            price * quantity * self._rules.fee_bps / Decimal("10000")
+        ).quantize(Decimal("0.00000001"))
+        return MatchResult(
+            fill_quantity=quantity,
+            fill_price=price,
+            fee=fee,
+            slippage_bps=Decimal("0"),
+            triggered=True,
+            market_evidence=market_evidence,
+            model_version="trusted-snapshot-immediate-v1",
             rule_version=self._rules.version,
         )
 
@@ -125,7 +161,7 @@ class DeterministicMatcher:
         if draft.order_type is OrderType.MARKET:
             return True
         assert draft.limit_price is not None
-        if draft.side in {OrderSide.BUY, OrderSide.COVER}:
+        if draft.side.is_buy_direction:
             return bar.low <= draft.limit_price
         return bar.high >= draft.limit_price
 
@@ -133,11 +169,7 @@ class DeterministicMatcher:
         if draft.order_type is OrderType.LIMIT:
             assert draft.limit_price is not None
             return draft.limit_price
-        direction = (
-            Decimal("1")
-            if draft.side in {OrderSide.BUY, OrderSide.COVER}
-            else Decimal("-1")
-        )
+        direction = Decimal("1" if draft.side.is_buy_direction else "-1")
         return (
             bar.open
             * (Decimal("1") + direction * self._rules.slippage_bps / Decimal("10000"))

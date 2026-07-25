@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from decimal import Decimal
-from time import monotonic
+from pathlib import Path
+from time import monotonic, time
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .adapter import PandaCredentials, PandaDataAdapter
+from .bar_cache import PersistentBarCache
 from .capabilities import EXPECTED_SDK_VERSION
 from .contracts import (
     DataCategory,
@@ -183,6 +186,7 @@ class MarketDataService:
         clock: Callable[[], float] = monotonic,
         published_state: PublishedStatePort | None = None,
         quality_gate: QualityGate | None = None,
+        bar_cache: PersistentBarCache | None = None,
     ) -> None:
         if adapter is None:
             if sdk is None:
@@ -205,6 +209,7 @@ class MarketDataService:
         self._now = now or (lambda: datetime.now(_UTC))
         self._clock = clock
         self._readiness_cache: tuple[float, tuple[bool, str]] | None = None
+        self._bar_cache = bar_cache
         self._published_state = published_state or FailClosedPublishedState()
         self._quality_gate = quality_gate or QualityGate(
             InMemoryScopeFreezeRepository()
@@ -216,8 +221,15 @@ class MarketDataService:
         cls,
     ) -> MarketDataService:
         adapter = PandaDataAdapter.from_environment()
+        cache_path = Path(
+            os.getenv(
+                "FINANCE_GOD_MARKET_BAR_CACHE_PATH",
+                str(Path.cwd() / "data" / "market-bars.sqlite3"),
+            )
+        )
         return cls(
             adapter=adapter,
+            bar_cache=PersistentBarCache(cache_path),
             published_state=PandaCalendarPublishedState(adapter),
         )
 
@@ -257,7 +269,7 @@ class MarketDataService:
         limit: int = 80,
         frequency_override: DataFrequency | None = None,
     ) -> MarketBarsResult:
-        """Read normalized bars without starting a durable DQ workflow."""
+        """Read a bounded normalized bar window, using a persistent local cache."""
 
         instrument = self.resolve(symbol)
         now = self._aware_now()
@@ -271,6 +283,15 @@ class MarketDataService:
             frequency = DataFrequency.MINUTE_1
         else:
             frequency = DataFrequency.DAILY
+        cache_key = f"{frequency.value}:{limit}"
+        cached = (
+            self._bar_cache.get(instrument.symbol, cache_key)
+            if self._bar_cache is not None
+            else None
+        )
+        cache_ttl = 5.0 if frequency is DataFrequency.MINUTE_1 else 3_600.0
+        if cached is not None and time() - cached[0] < cache_ttl:
+            return MarketBarsResult.model_validate(cached[1])
 
         if frequency is DataFrequency.MINUTE_1:
             start = end = market_today.strftime("%Y%m%d")
@@ -312,7 +333,7 @@ class MarketDataService:
             if not envelope.items
             else None
         )
-        return MarketBarsResult(
+        live_result = MarketBarsResult(
             frequency=_display_frequency(frequency),
             bars=tuple(_bar(item) for item in envelope.items),
             quality=outcome.decision,
@@ -320,6 +341,30 @@ class MarketDataService:
             error_message=error_message,
             error_kind=_envelope_error_kind(envelope) if not envelope.items else None,
         )
+        if not live_result.bars:
+            return live_result
+        cached_bars = (
+            MarketBarsResult.model_validate(cached[1]).bars
+            if cached is not None
+            else ()
+        )
+        merged_by_time = {item.time: item for item in cached_bars}
+        merged_by_time.update({item.time: item for item in live_result.bars})
+        merged_result = live_result.model_copy(
+            update={
+                "bars": tuple(
+                    merged_by_time[key]
+                    for key in sorted(merged_by_time, reverse=True)
+                )
+            }
+        )
+        if self._bar_cache is not None:
+            self._bar_cache.put(
+                instrument.symbol,
+                cache_key,
+                merged_result.model_dump(mode="json"),
+            )
+        return merged_result
 
     def read_historical_daily_bars(
         self,
@@ -357,6 +402,44 @@ class MarketDataService:
         )
         return MarketBarsResult(
             frequency=_display_frequency(DataFrequency.DAILY),
+            bars=tuple(_bar(item) for item in envelope.items),
+            quality=outcome.decision,
+            dq_request=outcome.dq_request,
+            error_message=error_message,
+            error_kind=_envelope_error_kind(envelope) if not envelope.items else None,
+        )
+
+    def read_historical_minute_bars(
+        self,
+        symbol: str,
+        *,
+        trading_date: str,
+        limit: int = 1_000,
+    ) -> MarketBarsResult:
+        """Read released A-share one-minute bars for one historical trading day."""
+
+        instrument = self.resolve(symbol)
+        envelope = self._adapter.fetch_bars(
+            instrument,
+            frequency=DataFrequency.MINUTE_1,
+            start_date=trading_date,
+            end_date=trading_date,
+            limit=limit,
+            release_state=ReleaseState.RELEASED,
+        )
+        outcome = self.evaluate_quality(
+            envelope,
+            f"{instrument.symbol}:{DataFrequency.MINUTE_1.value}",
+            category=DataCategory.BAR,
+            frequency=DataFrequency.MINUTE_1,
+        )
+        error_message = (
+            envelope.diagnostics[-1].message
+            if envelope.diagnostics and not envelope.items
+            else ("PandaData returned no historical minute bars" if not envelope.items else None)
+        )
+        return MarketBarsResult(
+            frequency=_display_frequency(DataFrequency.MINUTE_1),
             bars=tuple(_bar(item) for item in envelope.items),
             quality=outcome.decision,
             dq_request=outcome.dq_request,

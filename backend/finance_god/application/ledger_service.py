@@ -71,6 +71,7 @@ class IdempotentCommand(FrozenModel):
     correlation_id: str = Field(min_length=1, max_length=160)
     causation_id: str = Field(min_length=1, max_length=160)
     source: VersionReference
+    business_time: datetime | None = None
 
 
 class CreateAccountCommand(IdempotentCommand):
@@ -230,7 +231,7 @@ class SimulationLedgerService:
                 return prior
             if await uow.accounts.get_current(command.owner_user_id):
                 raise DomainInvariantViolation("owner already has a current account")
-            now = self._now()
+            now = self._command_now(command)
             account = SimulationAccount(
                 account_id=self._ids.new_id("account"),
                 owner_user_id=command.owner_user_id,
@@ -276,7 +277,7 @@ class SimulationLedgerService:
                 return prior
             old = await self._owned_account(uow, command.account_id, command.owner_user_id)
             await self._assert_resettable(uow, old)
-            now = self._now()
+            now = self._command_now(command)
             new_id = self._ids.new_id("account")
             if new_id == old.account_id:
                 raise DomainInvariantViolation("account reset requires a new account id")
@@ -345,7 +346,7 @@ class SimulationLedgerService:
             cash = await self._cash(uow, account.account_id, CNY)
             if cash.rmb_available < rmb_amount:
                 raise DomainInvariantViolation("insufficient available cash")
-            now = self._now()
+            now = self._command_now(command)
             reservation = Reservation(
                 reservation_id=self._ids.new_id("reservation"),
                 account_id=account.account_id,
@@ -411,7 +412,7 @@ class SimulationLedgerService:
             if reservation.kind is ReservationKind.FUND_REDEMPTION:
                 raise DomainInvariantViolation("position reservation requires position release")
             cash = await self._cash(uow, account.account_id, CNY)
-            now = self._now()
+            now = self._command_now(command)
             released = reservation.release()
             event = await self._event(
                 uow,
@@ -466,7 +467,7 @@ class SimulationLedgerService:
             position = await self._position(uow, account.account_id, command.instrument_id)
             if position.settled_quantity - position.frozen_quantity < command.quantity:
                 raise DomainInvariantViolation("insufficient settled position")
-            now = self._now()
+            now = self._command_now(command)
             reservation = Reservation(
                 reservation_id=self._ids.new_id("reservation"),
                 account_id=account.account_id,
@@ -591,7 +592,7 @@ class SimulationLedgerService:
                     rule_version=rule_version,
                     label="cover margin release",
                 )
-            now = self._now()
+            now = self._command_now(command)
             payload = TradeFillPayload(
                 side=side,
                 reservation_id=command.reservation_id,
@@ -680,7 +681,7 @@ class SimulationLedgerService:
                 if isinstance(original_reservation_id, str)
                 else None
             )
-            now = self._now()
+            now = self._command_now(command)
             reversal = await self._event(
                 uow,
                 account,
@@ -746,7 +747,7 @@ class SimulationLedgerService:
             position = await uow.position_projections.get(
                 account.account_id, command.instrument_id
             )
-            now = self._now()
+            now = self._command_now(command)
             payload = FundFillPayload(
                 action=action,
                 reservation_id=reservation.reservation_id,
@@ -1401,6 +1402,13 @@ class SimulationLedgerService:
 
     def _now(self) -> datetime:
         return canonical_utc(self._clock.now())
+
+    def _command_now(self, command: IdempotentCommand) -> datetime:
+        return (
+            canonical_utc(command.business_time)
+            if command.business_time is not None
+            else self._now()
+        )
 
 
 def _request_hash(command: FrozenModel) -> str:

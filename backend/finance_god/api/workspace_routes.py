@@ -267,6 +267,7 @@ def create_workspace_routes(
         Query params:
         - limit: 1..200 (default 50)
         - include_read: true|false (default true)
+        - cursor: last notification_id from the previous page
 
         Toast hide ≠ read ≠ handled. History only exposes persisted unread|read.
         """
@@ -287,6 +288,7 @@ def create_workspace_routes(
                     owner_user_id,
                     limit=limit,
                     include_read=include_read,
+                    cursor=request.query_params.get("cursor"),
                 )
 
         return await _respond(action)

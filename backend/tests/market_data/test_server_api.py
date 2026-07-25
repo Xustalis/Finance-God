@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -34,6 +35,70 @@ from finance_god.orchestration.workflows import (
 from .conftest import NOW, FakeSDK, adapter, bar, stock_snapshot
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_workflow_market_context_derives_index_snapshot_from_daily_bars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unsupported_snapshot(symbols: list[str]):
+        assert symbols == ["000001.SH"]
+        return SimpleNamespace(
+            requested_at=NOW,
+            cache_hit=False,
+            quotes=(),
+            errors={
+                "000001.SH": "asset class has no verified snapshot endpoint"
+            },
+            diagnostics=(),
+            quality={},
+        )
+
+    bars = tuple(
+        SimpleNamespace(
+            open=Decimal("3500"),
+            high=Decimal("3560"),
+            low=Decimal("3480"),
+            close=close,
+            volume=Decimal("1000000"),
+            amount=Decimal("2000000"),
+            provider_time=provider_time,
+            freshness="latest_released",
+            source_endpoint="get_index_daily",
+            capability_version="panda-data-0.0.12",
+            instrument_master_identity="000001.SH",
+            instrument_master_version="test",
+        )
+        for close, provider_time in (
+            (Decimal("3510"), "2026-07-23T15:00:00+08:00"),
+            (Decimal("3530"), "2026-07-24T15:00:00+08:00"),
+        )
+    )
+
+    class HistoricalApplication:
+        async def historical_daily_bars(self, symbol: str, **_: object):
+            assert symbol == "000001.SH"
+            return SimpleNamespace(frequency="1d", bars=bars)
+
+    monkeypatch.setattr(server, "_candidate_quotes", unsupported_snapshot)
+    monkeypatch.setattr(
+        server,
+        "_services",
+        lambda: (SimpleNamespace(), HistoricalApplication()),
+    )
+
+    result = asyncio.run(
+        server._workflow_market_context_quotes(["000001.SH"])
+    )
+
+    assert result.errors == {}
+    assert len(result.quotes) == 1
+    quote = result.quotes[0]
+    assert quote.symbol == "000001.SH"
+    assert quote.last == Decimal("3530")
+    assert quote.previous_close == Decimal("3510")
+    assert quote.change == Decimal("20")
+    assert quote.source_endpoint == "get_index_daily"
+    assert quote.session_alignment == "latest_released_session"
 
 
 class FailingApplication:
@@ -76,6 +141,80 @@ class FactService(StubService):
                 "arguments": kwargs,
             }
         )
+
+
+class FailingCrawlerService:
+    async def get_news(self, **_: object):
+        raise RuntimeError("upstream news unavailable")
+
+    async def get_sentiment(self):
+        raise RuntimeError("upstream sentiment unavailable")
+
+
+def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "_crawler_service_instance", FailingCrawlerService)
+    monkeypatch.setattr(
+        server.settings,
+        "market_reference_mock_fallback",
+        True,
+    )
+
+    information = asyncio.run(
+        server.information_facts(_request(b"symbol=600519.SH&limit=3"))
+    )
+    sentiment = asyncio.run(
+        server.sentiment_facts(_request(b"symbol=600519.SH"))
+    )
+    information_payload = _payload(information)
+    sentiment_payload = _payload(sentiment)
+
+    assert information.status_code == 200
+    assert information_payload["data_mode"] == "mock"
+    assert information_payload["provider"] == "Finance-God Mock"
+    assert information_payload["trade_eligible"] is False
+    assert information_payload["fallback_reason"]
+    assert information_payload["symbol"] == "600519.SH"
+    assert all(
+        next(
+            field["value"]
+            for field in fact["fields"]
+            if field["name"] == "source"
+        )
+        == "Finance-God Mock"
+        for fact in information_payload["facts"]
+    )
+
+    assert sentiment.status_code == 200
+    assert sentiment_payload["data_mode"] == "mock"
+    assert sentiment_payload["provider"] == "Finance-God Mock"
+    assert sentiment_payload["trade_eligible"] is False
+    assert sentiment_payload["fallback_reason"]
+    assert sentiment_payload["symbol"] == "600519.SH"
+
+
+def test_reference_fact_endpoints_keep_explicit_error_when_mock_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(server, "_crawler_service_instance", FailingCrawlerService)
+    monkeypatch.setattr(
+        server.settings,
+        "market_reference_mock_fallback",
+        False,
+    )
+
+    information = asyncio.run(
+        server.information_facts(_request(b"symbol=600519.SH"))
+    )
+    sentiment = asyncio.run(
+        server.sentiment_facts(_request(b"symbol=600519.SH"))
+    )
+
+    assert information.status_code == 500
+    assert sentiment.status_code == 500
+    assert _payload(information)["error"]["code"] == "MARKET_DATA_INTERNAL_ERROR"
+    assert _payload(sentiment)["error"]["code"] == "MARKET_DATA_INTERNAL_ERROR"
 
 
 def test_market_api_returns_stable_safe_errors_without_raw_exception_text(

@@ -26,6 +26,40 @@ class DraftMode(str, Enum):
     MANUAL = "manual"
 
 
+class ProtectiveStrategyStatus(str, Enum):
+    ACTIVE = "active"
+    TRIGGERED = "triggered"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class ProtectiveStrategy(StrictModel):
+    strategy_id: str = Field(min_length=1, max_length=160)
+    owner_id: str = Field(min_length=1, max_length=160)
+    account_id: str = Field(min_length=1, max_length=160)
+    instrument_id: str = Field(min_length=1, max_length=160)
+    quantity: Decimal = Field(gt=0)
+    take_profit_price: Decimal | None = Field(default=None, gt=0)
+    stop_loss_price: Decimal | None = Field(default=None, gt=0)
+    status: ProtectiveStrategyStatus = ProtectiveStrategyStatus.ACTIVE
+    revision: int = Field(default=1, ge=1)
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    triggered_at: AwareDatetime | None = None
+    trigger_kind: str | None = Field(
+        default=None, pattern=r"^(take_profit|stop_loss)$"
+    )
+    trigger_price: Decimal | None = Field(default=None, gt=0)
+    order_id: str | None = Field(default=None, max_length=160)
+    error: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> ProtectiveStrategy:
+        if self.take_profit_price is None and self.stop_loss_price is None:
+            raise ValueError("at least one protective threshold is required")
+        return self
+
+
 class ExecutionFailureCode(str, Enum):
     PANDADATA_CAPABILITY_UNAVAILABLE = "PANDADATA_CAPABILITY_UNAVAILABLE"
     MARKET_DATA_MISSING = "MARKET_DATA_MISSING"
@@ -336,3 +370,24 @@ class ExecutionRepositoryPort(Protocol):
     async def append_fill(self, fill: SimulationFill) -> None: ...
     async def list_fills(self, order_id: str | None = None) -> tuple[SimulationFill, ...]: ...
     async def list_orders(self, owner_id: str) -> tuple[StoredOrder, ...]: ...
+    async def create_strategy(
+        self,
+        strategy: ProtectiveStrategy,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> ProtectiveStrategy: ...
+    async def list_strategies(
+        self,
+        owner_id: str | None = None,
+        *,
+        instrument_id: str | None = None,
+        status: ProtectiveStrategyStatus | None = None,
+    ) -> tuple[ProtectiveStrategy, ...]: ...
+    async def get_strategy(self, strategy_id: str) -> ProtectiveStrategy | None: ...
+    async def save_strategy(
+        self,
+        strategy: ProtectiveStrategy,
+        *,
+        expected_revision: int,
+    ) -> None: ...

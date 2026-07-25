@@ -52,7 +52,6 @@ services:
 
   learning:
     build: ./backend
-    profiles: ["learning"]
     init: true
     env_file:
       - .env

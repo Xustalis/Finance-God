@@ -30,6 +30,8 @@ _LOGGER = logging.getLogger(__name__)
 QuotesProvider = Callable[[list[str]], Awaitable[object]]
 Clock = Callable[[], datetime]
 IdGenerator = Callable[[], str]
+SnapshotObserver = Callable[[MarketSnapshot], Awaitable[None]]
+AlertDispatcher = Callable[[], Awaitable[int]]
 
 
 class MarketPoller:
@@ -42,6 +44,8 @@ class MarketPoller:
         uow_factory: Callable[[], MarketMonitorUnitOfWork],
         threshold: Decimal,
         escalate_threshold: Decimal | None = None,
+        snapshot_observer: SnapshotObserver | None = None,
+        alert_dispatcher: AlertDispatcher | None = None,
         clock: Clock | None = None,
         ids: IdGenerator | None = None,
     ) -> None:
@@ -49,6 +53,8 @@ class MarketPoller:
         self._uow_factory = uow_factory
         self._threshold = threshold
         self._escalate_threshold = escalate_threshold
+        self._snapshot_observer = snapshot_observer
+        self._alert_dispatcher = alert_dispatcher
         self._clock = clock or (lambda: datetime.now(UTC))
         self._ids = ids or (lambda: f"market-alert-{uuid4().hex}")
 
@@ -58,6 +64,7 @@ class MarketPoller:
         quotes = list(getattr(batch, "quotes", ()) or ())
         now = self._clock()
         created: list[MarketAlert] = []
+        persisted: list[MarketSnapshot] = []
         if not quotes:
             return created
         async with self._uow_factory() as uow:
@@ -75,10 +82,29 @@ class MarketPoller:
                     escalate_threshold=self._escalate_threshold,
                 )
                 await uow.monitor.upsert_snapshot(current)
+                persisted.append(current)
                 if alert is not None:
                     await uow.monitor.insert_alert(alert)
                     created.append(alert)
             await uow.commit()
+        if self._snapshot_observer is not None:
+            for snapshot in persisted:
+                try:
+                    await self._snapshot_observer(snapshot)
+                except Exception as error:  # noqa: BLE001 - one strategy must not stop market ingestion
+                    _LOGGER.exception(
+                        "market snapshot observer failed for %s: %s",
+                        snapshot.symbol,
+                        type(error).__name__,
+                    )
+        if self._alert_dispatcher is not None:
+            try:
+                await self._alert_dispatcher()
+            except Exception as error:  # noqa: BLE001 - durable outbox retries next cycle
+                _LOGGER.exception(
+                    "market alert projection failed; outbox remains pending: %s",
+                    type(error).__name__,
+                )
         if created:
             _LOGGER.info("market poller recorded %d alert(s)", len(created))
         return created

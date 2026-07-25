@@ -41,6 +41,8 @@ build/
 
 # Local runtime databases
 backend/*.db
+backend/data/*.sqlite3
+data/*.sqlite3
 # Local PandaData credential caches, including OS-created numbered copies.
 backend/user*.json
 backend/uv.lock

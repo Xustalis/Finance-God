@@ -14,6 +14,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,18 +26,22 @@ from finance_god.api.simulation import (
 )
 from finance_god.application.ledger_service import (
     CreateAccountCommand,
+    FreezeCashCommand,
     RecordBuyFillCommand,
     RecordSellFillCommand,
     ResetAccountCommand,
     SimulationLedgerService,
 )
 from finance_god.application.ports import UnitOfWorkFactory
+from finance_god.application.simulation_clock import SimulationClockService
 from finance_god.domain import (
     AccountStatus,
     AuditReference,
     ExchangeOrder,
+    Money,
     OrderDraft,
     OrderSide,
+    ReservationKind,
     RiskCheckResult,
     RiskCheckStatus,
     RiskReason,
@@ -254,8 +259,13 @@ class SimulationSubmissionTransport:
 class MarketDataBarProvider:
     """Adapt normalized PandaData bars into deterministic simulation bars."""
 
-    def __init__(self, market_data: MarketDataService) -> None:
+    def __init__(
+        self,
+        market_data: MarketDataService,
+        simulation_clock: SimulationClockService,
+    ) -> None:
         self._market_data = market_data
+        self._simulation_clock = simulation_clock
 
     async def next_bar(
         self,
@@ -263,9 +273,14 @@ class MarketDataBarProvider:
         *,
         submitted_at: datetime,
     ) -> SimulationBar | None:
+        current = await self._simulation_clock.get_for_account(draft.account_id)
+        trading_date = submitted_at.astimezone(
+            ZoneInfo("Asia/Shanghai")
+        ).strftime("%Y%m%d")
         result = await asyncio.to_thread(
-            self._market_data.read_bars,
+            self._market_data.read_historical_minute_bars,
             draft.instrument_id,
+            trading_date=trading_date,
             limit=500,
         )
         candidates: list[tuple[datetime, MarketBar]] = []
@@ -273,7 +288,7 @@ class MarketDataBarProvider:
             observed_at = datetime.fromisoformat(bar.provider_time)
             if observed_at.tzinfo is None:
                 continue
-            if observed_at > submitted_at:
+            if submitted_at < observed_at <= current.current_time:
                 candidates.append((observed_at, bar))
         if not candidates:
             return None
@@ -291,9 +306,9 @@ class MarketDataBarProvider:
             ingested_at=datetime.now(UTC),
             frequency=result.frequency,
             evidence=VersionReference(
-                object_type="market_bar",
+                object_type="simulation_historical_bar",
                 object_id=draft.instrument_id,
-                version=selected.provider_time,
+                version=f"{selected.provider_time}:clock:{current.revision}",
             ),
             stale=selected.freshness in {
                 "stale",
@@ -359,9 +374,26 @@ class LedgerFillAdapter:
             "model_version": model_version,
         }
         if draft.side is OrderSide.BUY:
+            reservation_id = await self._ledger.freeze_cash(
+                FreezeCashCommand(
+                    owner_user_id=owner_id,
+                    idempotency_key=f"{idempotency_key}:reserve",
+                    correlation_id=self._ids.new_id("corr"),
+                    causation_id=self._ids.new_id("caus"),
+                    source=source,
+                    account_id=draft.account_id,
+                    order_id=order.order_id,
+                    instrument_id=draft.instrument_id,
+                    amount=Money(
+                        currency=CNY,
+                        amount=price * quantity + fee,
+                    ),
+                    reservation_kind=ReservationKind.CASH_BUY,
+                )
+            )
             command = RecordBuyFillCommand(
                 **base,
-                reservation_id=self._ids.new_id("reservation"),
+                reservation_id=reservation_id,
             )
             return await self._ledger.record_buy_fill(command)
         command = RecordSellFillCommand(**base)
@@ -382,11 +414,13 @@ class SimulationAccountApplicationImpl:
         uow_factory: UnitOfWorkFactory,
         clock: SystemClock,
         ids: UuidIdGenerator,
+        simulation_clock: SimulationClockService,
     ) -> None:
         self._ledger = ledger
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
+        self._simulation_clock = simulation_clock
 
     async def create(
         self,
@@ -408,8 +442,10 @@ class SimulationAccountApplicationImpl:
             causation_id=self._ids.new_id("caus"),
             source=source,
             initial_cash_rmb=request.initial_cash_rmb,
+            business_time=request.simulation_start_at,
         )
         account_id = await self._ledger.create_account(command)
+        await self._simulation_clock.create(account_id, request.simulation_start_at)
         return await self._view(owner_id, account_id)
 
     async def reset(
@@ -434,8 +470,10 @@ class SimulationAccountApplicationImpl:
             source=source,
             account_id=account_id,
             initial_cash_rmb=request.initial_cash_rmb,
+            business_time=request.simulation_start_at,
         )
         new_id = await self._ledger.reset_account(command)
+        await self._simulation_clock.create(new_id, request.simulation_start_at)
         return await self._view(owner_id, new_id)
 
     async def current(self, *, owner_id: str) -> SimulationAccountView | None:
@@ -447,6 +485,9 @@ class SimulationAccountApplicationImpl:
             cny = next(
                 (c for c in cash_list if c.currency == CNY), None
             )
+            simulation_clock = await self._simulation_clock.find_for_account(
+                account.account_id
+            )
             return SimulationAccountView(
                 account_id=account.account_id,
                 owner_id=account.owner_user_id,
@@ -456,6 +497,9 @@ class SimulationAccountApplicationImpl:
                 cash_frozen_rmb=cny.frozen if cny else ZERO,
                 margin_rmb=cny.margin if cny else ZERO,
                 revision=account.revision,
+                simulation_time=(
+                    simulation_clock.current_time if simulation_clock else None
+                ),
             )
 
     async def positions(
@@ -493,6 +537,9 @@ class SimulationAccountApplicationImpl:
             cny = next(
                 (c for c in cash_list if c.currency == CNY), None
             )
+            simulation_clock = await self._simulation_clock.find_for_account(
+                account.account_id
+            )
             return SimulationAccountView(
                 account_id=account.account_id,
                 owner_id=account.owner_user_id,
@@ -502,6 +549,9 @@ class SimulationAccountApplicationImpl:
                 cash_frozen_rmb=cny.frozen if cny else ZERO,
                 margin_rmb=cny.margin if cny else ZERO,
                 revision=account.revision,
+                simulation_time=(
+                    simulation_clock.current_time if simulation_clock else None
+                ),
             )
 
 
@@ -517,10 +567,12 @@ def build_simulation_services(
     ledger: SimulationLedgerService,
     market_data: MarketDataService,
     authorization: PersistentAuthorizationProvider | None = None,
+    simulation_clock: SimulationClockService | None = None,
 ) -> tuple[SimulationExecutionService, SimulationAccountApplicationImpl]:
     """Wire all port adapters and return (execution, accounts) pair."""
     clock = SystemClock()
     ids = UuidIdGenerator()
+    account_clock = simulation_clock or SimulationClockService(simulation_session_factory)
 
     execution = SimulationExecutionService(
         uow_factory=lambda: SimulationUnitOfWork(
@@ -531,11 +583,13 @@ def build_simulation_services(
         manual_review=AutoPassManualReview(),
         risk=SimulationRiskAdapter(clock, ids, authorization),
         transport=SimulationSubmissionTransport(),
-        bars=MarketDataBarProvider(market_data),
+        bars=MarketDataBarProvider(market_data, account_clock),
         ledger=LedgerFillAdapter(ledger, clock, ids),
         matcher=DeterministicMatcher(),
         clock=clock,
         ids=ids,
     )
-    accounts = SimulationAccountApplicationImpl(ledger, uow_factory, clock, ids)
+    accounts = SimulationAccountApplicationImpl(
+        ledger, uow_factory, clock, ids, account_clock
+    )
     return execution, accounts

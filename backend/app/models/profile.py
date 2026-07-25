@@ -35,7 +35,7 @@ class InvestmentProfile(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    session_id: Mapped[str] = mapped_column(ForeignKey("onboarding_sessions.id"), nullable=False, unique=True)
+    session_id: Mapped[str | None] = mapped_column(ForeignKey("onboarding_sessions.id"), nullable=True, unique=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     objective_profile: Mapped[dict] = mapped_column(JSON, nullable=False)
     dimension_scores: Mapped[dict] = mapped_column(JSON, nullable=False)
@@ -48,6 +48,13 @@ class InvestmentProfile(Base):
     completeness: Mapped[float] = mapped_column(Float, nullable=False)
     education_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     report_summary: Mapped[dict] = mapped_column(JSON, nullable=False)
+    parent_profile_id: Mapped[str | None] = mapped_column(
+        ForeignKey("investment_profiles.id"), nullable=True
+    )
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="onboarding"
+    )
+    source_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, nullable=False)
 
 

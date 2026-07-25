@@ -16,9 +16,9 @@ from starlette.routing import Route
 
 from finance_god.api.auth import AuthenticationError, OwnerResolver
 
-DeskSection = Literal["information", "portfolio", "watchlist", "trading"]
+DeskSection = Literal["information", "portfolio", "watchlist", "trading", "review"]
 QuickCommandStage = Literal["initial", "after_answer", "after_workflow"]
-_DESK_SECTIONS = frozenset(("information", "portfolio", "watchlist", "trading"))
+_DESK_SECTIONS = frozenset(("information", "portfolio", "watchlist", "trading", "review"))
 _LOGGER = logging.getLogger(__name__)
 
 ProfileProvider = Callable[[str], Awaitable[dict | None]]
@@ -40,6 +40,7 @@ QuickCommandContextProvider = Callable[
     Awaitable[str | dict],
 ]
 InstrumentNameProvider = Callable[[str], str]
+MarketFocusRecorder = Callable[[str, str, datetime], Awaitable[None]]
 # Live capability probe: only report True when the dependency is actually reachable.
 # Static True is forbidden — callers must probe runtime / worker / market before enabling.
 CapabilityProvider = Callable[[], dict[str, bool] | Awaitable[dict[str, bool]]]
@@ -236,6 +237,7 @@ def create_desk_routes(
     quick_command_provider: QuickCommandProvider | None = None,
     quick_command_context_provider: QuickCommandContextProvider | None = None,
     instrument_name_provider: InstrumentNameProvider | None = None,
+    market_focus_recorder: MarketFocusRecorder | None = None,
 ) -> list[Route]:
     clock = now or (lambda: datetime.now(UTC))
 
@@ -245,6 +247,8 @@ def create_desk_routes(
             section = _section(request)
             symbol = _symbol(request, default_symbol)
             generated_at = clock()
+            if market_focus_recorder is not None:
+                await market_focus_recorder(owner_id, symbol, generated_at)
             projection, capabilities = await asyncio.gather(
                 _profile_projection(profile_provider, owner_id),
                 _resolve_capabilities(
@@ -470,7 +474,7 @@ class UiActionReceipt(APIModel):
     applied_at: datetime
 
 
-_SECTIONS = frozenset({"information", "portfolio", "watchlist", "trading"})
+_SECTIONS = frozenset({"information", "portfolio", "watchlist", "trading", "review"})
 _DRAFT_SIDES = frozenset({"buy", "sell"})
 _PRICE_TYPES = frozenset({"market", "limit"})
 _CANDIDATE_TARGETS = frozenset({"watchlist", "research"})
@@ -607,7 +611,7 @@ def _section(request: Request) -> DeskSection:
     raw = request.query_params.get("section", "information").strip().lower()
     if raw in _DESK_SECTIONS:
         return raw  # type: ignore[return-value]
-    raise ValueError("section must be information|portfolio|watchlist|trading")
+    raise ValueError("section must be information|portfolio|watchlist|trading|review")
 
 
 def _symbol(request: Request, default_symbol: str) -> str:

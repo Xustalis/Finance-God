@@ -7,6 +7,7 @@ export interface SimulationAccount {
   cash_available_rmb: string | number
   cash_frozen_rmb: string | number
   revision: number
+  simulation_time: string | null
 }
 
 export interface PortfolioPosition {
@@ -41,11 +42,12 @@ const props = defineProps<{
   loading: boolean
   error: string | null
   onLoad: () => void | Promise<void>
-  onCreateAccount: (initialCash: string) => void | Promise<void>
+  onCreateAccount: (input: { initialCash: string; simulationStartAt: string }) => void | Promise<void>
 }>()
 
 const quoteBySymbol = computed(() => new Map(props.quotes.map((quote) => [quote.symbol, quote])))
 const initialCash = ref('100000')
+const simulationStartAt = ref(defaultHistoricalStart())
 const hasUnavailableMarketValue = computed(() => (
   props.portfolio?.positions.some((position) => marketValue(position) === null) ?? false
 ))
@@ -79,34 +81,46 @@ function unrealizedLabel(position: PortfolioPosition): string {
   if (value !== null) return money(value)
   return marketValue(position) === null ? marketValueLabel(position) : '—'
 }
+function defaultHistoricalStart(): string {
+  const value = new Date(Date.now() + 8 * 60 * 60_000)
+  value.setUTCDate(value.getUTCDate() - 1)
+  while (value.getUTCDay() === 0 || value.getUTCDay() === 6) {
+    value.setUTCDate(value.getUTCDate() - 1)
+  }
+  value.setUTCHours(9, 30, 0, 0)
+  return value.toISOString().slice(0, 16)
+}
+function asShanghaiIso(value: string): string {
+  return new Date(`${value}:00+08:00`).toISOString()
+}
 </script>
 
 <template>
   <section class="information-workspace" aria-labelledby="portfolio-title">
     <header class="overview-heading"><h1 id="portfolio-title">持仓</h1><button class="refresh-button" type="button" :disabled="loading" @click="onLoad">{{ loading ? '正在刷新' : '刷新' }}</button></header>
-    <p class="chapter">仿真账户与仿真持仓；市值/浮盈仅在有真实行情最新价时计算，缺失时显示不可用，不编造数字。</p>
 
     <section v-if="accountState === 'unknown' && !account" class="not-connected-workspace" aria-live="polite">
-      <h2>正在确认仿真账户</h2>
+      <h2>正在确认模拟账户</h2>
       <p>账户状态确认前不会开放建立账户操作。</p>
     </section>
 
     <section v-else-if="accountState === 'absent'" class="not-connected-workspace" aria-labelledby="account-title">
-      <h2 id="account-title">建立仿真账户</h2>
-      <p>尚未建立仿真账户。初始资金只在你确认后提交到服务端。</p>
-      <form class="form-workspace" @submit.prevent="onCreateAccount(initialCash)">
+      <h2 id="account-title">建立模拟账户</h2>
+      <p>尚未建立模拟账户。初始资金只在你确认后提交到服务端。</p>
+      <form class="form-workspace" @submit.prevent="onCreateAccount({ initialCash, simulationStartAt: asShanghaiIso(simulationStartAt) })">
         <label>初始资金（人民币）<input v-model="initialCash" type="number" min="1" step="0.01" required></label>
-        <button class="ink-button" type="submit" :disabled="loading">建立仿真账户</button>
+        <label>历史起点（上海时间）<input v-model="simulationStartAt" type="datetime-local" step="60" required></label>
+        <button class="ink-button" type="submit" :disabled="loading">建立模拟账户</button>
       </form>
     </section>
 
     <template v-else-if="account">
       <section class="overview-section" aria-labelledby="account-summary-title">
-        <header><h2 id="account-summary-title">仿真账户</h2><small>修订 {{ account.revision }}</small></header>
+        <header><h2 id="account-summary-title">模拟账户</h2><small>修订 {{ account.revision }}</small></header>
         <dl class="market-sheet"><div><dt>现金总额</dt><dd>{{ money(account.cash_total_rmb) }}</dd></div><div><dt>可用现金</dt><dd>{{ money(account.cash_available_rmb) }}</dd></div><div><dt>冻结资金</dt><dd>{{ money(account.cash_frozen_rmb) }}</dd></div></dl>
       </section>
       <section class="overview-section" aria-labelledby="position-title">
-        <header><h2 id="position-title">仿真持仓</h2><small v-if="portfolio">{{ portfolio.as_of }} · {{ portfolio.rule_version }}</small></header>
+        <header><h2 id="position-title">模拟持仓</h2><small v-if="portfolio">{{ portfolio.as_of }} · {{ portfolio.rule_version }}</small></header>
         <div v-if="portfolio?.positions.length" class="market-table-wrap">
           <table class="market-table">
             <thead><tr><th scope="col">标的</th><th scope="col" class="numeric">数量</th><th scope="col" class="numeric">可用</th><th scope="col" class="numeric">成本</th><th scope="col" class="numeric">市值</th><th scope="col" class="numeric">浮盈</th><th scope="col" class="numeric">已实现</th></tr></thead>
@@ -129,14 +143,14 @@ function unrealizedLabel(position: PortfolioPosition): string {
             </tbody>
           </table>
         </div>
-        <p v-else class="empty-data">当前仿真账户没有持仓。</p>
+        <p v-else class="empty-data">当前模拟账户没有持仓。</p>
         <p v-if="hasUnavailableMarketValue" class="data-footnote" role="status">
-          部分持仓缺少可用最新价，市值与浮盈标记为不可用；成本与已实现盈亏仍来自仿真账本。可点「刷新」重新拉取真实行情，不会用本地估算填充。
+          部分持仓缺少可用最新价，市值与浮盈标记为不可用；成本与已实现盈亏仍来自模拟账本。可点「刷新」重新拉取真实行情，不会用本地估算填充。
         </p>
       </section>
     </template>
     <section v-else class="not-connected-workspace" aria-live="polite">
-      <h2>仿真账户状态不可用</h2>
+      <h2>模拟账户状态不可用</h2>
       <p>服务端未能确认账户是否存在，已暂停建立账户操作。请刷新后重试。</p>
     </section>
     <p v-if="error" class="data-error" role="alert">持仓读取失败：{{ error }}</p>

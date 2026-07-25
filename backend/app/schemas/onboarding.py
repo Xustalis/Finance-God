@@ -294,7 +294,7 @@ class ProfileReportSummary(BaseModel):
 class ProfileResponse(BaseModel):
     id: str
     user_id: str
-    session_id: str
+    session_id: str | None
     version: int
     objective_profile: ObjectiveProfileInput
     dimension_scores: ProfileDimensionScores
@@ -314,6 +314,9 @@ class ProfileResponse(BaseModel):
     master_name: str
     master_name_en: str
     master_match_reason: str
+    parent_profile_id: str | None = None
+    source_type: str = "onboarding"
+    source_id: str | None = None
 
 
 class DirectionRecommendationResponse(BaseModel):

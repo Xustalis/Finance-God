@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Index, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .models import Base, UTCDateTime
@@ -49,3 +49,17 @@ class MarketAlertRow(Base):
     message: Mapped[str] = mapped_column(String(1000), nullable=False)
     provider_time: Mapped[str] = mapped_column(String(80), nullable=False)
     detected_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class MarketAlertDispatchRow(Base):
+    """Durable outbox entry; user projection retries independently of ingestion."""
+
+    __tablename__ = "market_alert_dispatch_outbox"
+
+    alert_id: Mapped[str] = mapped_column(
+        ForeignKey("market_alerts.alert_id"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    dispatched_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(String(500))

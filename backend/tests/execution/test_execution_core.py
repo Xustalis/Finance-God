@@ -23,6 +23,8 @@ from finance_god.execution import (
     ExecutionFailure,
     ExecutionFailureCode,
     ManualReviewResult,
+    ProtectiveStrategy,
+    ProtectiveStrategyStatus,
     SimulationBar,
     SimulationExecutionService,
     SimulationRuleSet,
@@ -155,6 +157,19 @@ class MatcherTest(unittest.TestCase):
                 )
             self.assertEqual(caught.exception.code, code)
 
+    def test_immediate_market_order_uses_trusted_price_without_slippage(self) -> None:
+        result = DeterministicMatcher().match_immediate_market(
+            draft(),
+            quantity=Decimal("100"),
+            price=Decimal("100"),
+            market_evidence=MARKET,
+        )
+
+        self.assertEqual(result.fill_quantity, Decimal("100"))
+        self.assertEqual(result.fill_price, Decimal("100"))
+        self.assertEqual(result.slippage_bps, Decimal("0"))
+        self.assertEqual(result.fee, Decimal("3.00000000"))
+
 
 class MemoryRepository:
     def __init__(self) -> None:
@@ -163,6 +178,8 @@ class MemoryRepository:
         self.fills = []
         self.draft_keys: dict[tuple[str, str], tuple[str, str]] = {}
         self.order_keys: dict[tuple[str, str], tuple[str, str]] = {}
+        self.strategies: dict[str, ProtectiveStrategy] = {}
+        self.strategy_keys: dict[tuple[str, str], tuple[str, str]] = {}
 
     async def create_draft(
         self,
@@ -254,6 +271,52 @@ class MemoryRepository:
         return tuple(
             value for value in self.orders.values() if value.owner_id == owner_id
         )
+
+    async def create_strategy(
+        self,
+        value: ProtectiveStrategy,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> ProtectiveStrategy:
+        key = (value.owner_id, idempotency_key)
+        prior = self.strategy_keys.get(key)
+        if prior is not None:
+            prior_id, prior_hash = prior
+            if prior_hash != request_hash:
+                raise ValueError("idempotency conflict")
+            return self.strategies[prior_id]
+        self.strategies[value.strategy_id] = value
+        self.strategy_keys[key] = (value.strategy_id, request_hash)
+        return value
+
+    async def list_strategies(
+        self,
+        owner_id: str | None = None,
+        instrument_id: str | None = None,
+        status: ProtectiveStrategyStatus | None = None,
+    ) -> tuple[ProtectiveStrategy, ...]:
+        return tuple(
+            value
+            for value in self.strategies.values()
+            if (owner_id is None or value.owner_id == owner_id)
+            and (instrument_id is None or value.instrument_id == instrument_id)
+            and (status is None or value.status is status)
+        )
+
+    async def get_strategy(self, strategy_id: str) -> ProtectiveStrategy | None:
+        return self.strategies.get(strategy_id)
+
+    async def save_strategy(
+        self,
+        value: ProtectiveStrategy,
+        *,
+        expected_revision: int,
+    ) -> None:
+        current = self.strategies[value.strategy_id]
+        if current.revision != expected_revision:
+            raise ValueError("revision conflict")
+        self.strategies[value.strategy_id] = value
 
 
 class MemoryUnitOfWork:
@@ -439,6 +502,62 @@ class ExecutionServiceTest(unittest.IsolatedAsyncioTestCase):
         confirmed = await self._confirmed()
         self.assertEqual(confirmed.draft.status, OrderDraftStatus.CONFIRMED)
         self.assertEqual(confirmed.risk_result.status, RiskCheckStatus.PASSED)
+
+    async def test_immediate_market_order_is_filled_and_idempotent(self) -> None:
+        arguments = {
+            "owner_id": "owner-1",
+            "account_id": "account-1",
+            "instrument_id": "600519.SSE",
+            "side": OrderSide.BUY,
+            "quantity": Decimal("100"),
+            "trusted_price": Decimal("100"),
+            "market_evidence": INPUT,
+            "idempotency_key": "immediate-key",
+            "request_hash": HASH,
+        }
+
+        first = await self.service.execute_immediate_market_order(**arguments)
+        second = await self.service.execute_immediate_market_order(**arguments)
+
+        self.assertEqual(first.order_id, second.order_id)
+        self.assertEqual(first.status, "filled")
+        self.assertEqual(first.average_fill_price, Decimal("100"))
+        self.assertEqual(first.cumulative_filled, Decimal("100"))
+        self.assertEqual(len(first.fills), 1)
+        self.assertEqual(len(self.repository.orders), 1)
+        self.assertEqual(len(self.repository.fills), 1)
+        self.assertEqual(self.transport.submit_calls, 1)
+
+    async def test_take_profit_triggers_one_immediate_market_sell(self) -> None:
+        strategy = await self.service.create_protective_strategy(
+            owner_id="owner-1",
+            account_id="account-1",
+            instrument_id="600519.SSE",
+            quantity=Decimal("100"),
+            take_profit_price=Decimal("110"),
+            stop_loss_price=Decimal("90"),
+            reference_price=Decimal("100"),
+            idempotency_key="strategy-key",
+            request_hash=HASH,
+        )
+
+        triggered = await self.service.evaluate_protective_strategies(
+            instrument_id="600519.SSE",
+            trusted_price=Decimal("111"),
+            market_evidence=INPUT,
+        )
+        replay = await self.service.evaluate_protective_strategies(
+            instrument_id="600519.SSE",
+            trusted_price=Decimal("112"),
+            market_evidence=INPUT,
+        )
+
+        self.assertEqual(triggered[0].strategy_id, strategy.strategy_id)
+        self.assertEqual(triggered[0].status, ProtectiveStrategyStatus.TRIGGERED)
+        self.assertEqual(triggered[0].trigger_kind, "take_profit")
+        self.assertEqual(replay, ())
+        self.assertEqual(len(self.repository.orders), 1)
+        self.assertEqual(len(self.repository.fills), 1)
 
     async def test_submit_is_idempotent_and_reconcile_records_partial_fill(self) -> None:
         confirmed = await self._confirmed()

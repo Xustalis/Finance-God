@@ -18,6 +18,8 @@ export interface OverviewQuote {
   provider_time: string
   frequency: string
   freshness: string
+  market_status?: string
+  session_alignment?: string
 }
 
 export interface MarketFact {
@@ -27,8 +29,12 @@ export interface MarketFact {
 
 interface FactBatch {
   provider?: string
+  fact_kind?: 'company_disclosure' | 'margin_balance' | 'market_sentiment' | 'industry_news'
   symbol: string
   requested_at: string
+  generated_at?: string
+  data_mode?: 'real' | 'mock'
+  fallback_reason?: string | null
   facts: MarketFact[]
 }
 
@@ -42,8 +48,10 @@ const props = defineProps<{
   marketLoadedAt: string | null
   sentimentFacts: FactBatch | null
   sentimentError: string | null
+  sentimentNotice?: string | null
   informationFacts: FactBatch | null
   informationError: string | null
+  informationNotice?: string | null
   onSelectSymbol: (symbol: string) => void
   onRefresh: () => void | Promise<void>
   onPeriodChange?: (period: string) => void
@@ -59,6 +67,8 @@ const currentSentimentFacts = computed(() => (
 const currentInformationFacts = computed(() => (
   props.informationFacts?.symbol === props.selectedSymbol ? props.informationFacts : null
 ))
+const sentimentIsMock = computed(() => currentSentimentFacts.value?.data_mode === 'mock')
+const informationIsMock = computed(() => currentInformationFacts.value?.data_mode === 'mock')
 
 function field(value: string | number | boolean | null): string {
   return value === null ? '—' : String(value)
@@ -143,7 +153,7 @@ function time(value: string): string {
         :on-period-change="onPeriodChange"
       />
       <p v-if="marketError" class="data-error" role="alert">
-        真实行情刷新失败：{{ marketError }}
+        {{ quotes.length ? '部分行情未显示' : '真实行情刷新失败' }}：{{ marketError }}
         <small v-if="marketLoadedAt">当前保留数据最后成功读取于 {{ time(marketLoadedAt) }}。</small>
       </p>
       <p v-else-if="marketLoadedAt" class="data-footnote">客户端最后成功读取于 {{ time(marketLoadedAt) }}。</p>
@@ -156,14 +166,30 @@ function time(value: string): string {
         <span class="sentiment-detail-value">{{ field(item.value) }}</span>
       </span>
     </div>
+    <p v-if="sentimentIsMock && currentSentimentFacts" class="mock-data-disclosure" role="status">
+      <strong>模拟数据</strong>
+      {{ currentSentimentFacts.fallback_reason }}
+      生成于 {{ time(currentSentimentFacts.generated_at || currentSentimentFacts.requested_at) }}；
+      来源：{{ currentSentimentFacts.provider || 'Finance-God Mock' }}。刷新可重试真实数据。
+    </p>
     <p v-if="sentimentError" class="data-error" role="alert">市场情绪事实刷新失败：{{ sentimentError }}</p>
+    <p v-else-if="sentimentNotice" class="empty-data" role="status">{{ sentimentNotice }}</p>
 
     <section class="overview-section facts-section" aria-labelledby="information-title">
-      <header><h2 id="information-title">市场资讯</h2><small>爬虫实时财经要闻与研报（东方财富）</small></header>
+      <header>
+        <h2 id="information-title">市场资讯 <span v-if="informationIsMock" class="mock-data-label">模拟数据</span></h2>
+        <small>{{ informationIsMock ? 'Finance-God 模拟参考内容' : '爬虫实时财经要闻与研报（东方财富）' }}</small>
+      </header>
       <template v-if="currentInformationFacts">
+        <p v-if="informationIsMock" class="mock-data-disclosure" role="status">
+          {{ currentInformationFacts.fallback_reason }}
+          生成于 {{ time(currentInformationFacts.generated_at || currentInformationFacts.requested_at) }}；
+          来源：{{ currentInformationFacts.provider || 'Finance-God Mock' }}。刷新可重试真实数据。
+        </p>
         <ul class="news-list">
           <li v-for="(fact, idx) in currentInformationFacts.facts.slice(0, 8)" :key="idx" class="news-item">
             <a
+              v-if="fact.fields.find(f => f.name === 'url')?.value"
               :href="String(fact.fields.find(f => f.name === 'url')?.value || '#')"
               target="_blank"
               rel="noopener noreferrer"
@@ -173,10 +199,17 @@ function time(value: string): string {
               <span class="news-title">{{ fact.fields.find(f => f.name === 'title')?.value }}</span>
               <small class="news-source">{{ fact.fields.find(f => f.name === 'source')?.value }}</small>
             </a>
+            <div v-else class="news-link">
+              <span class="news-sector">{{ fact.fields.find(f => f.name === 'sector')?.value || '综合' }}</span>
+              <span class="news-title">{{ fact.fields.find(f => f.name === 'title')?.value }}</span>
+              <small class="news-source">{{ fact.fields.find(f => f.name === 'source')?.value }}</small>
+            </div>
           </li>
         </ul>
       </template>
-      <p v-else class="empty-data">{{ informationError || '正在读取服务端市场资讯。' }}</p>
+      <p v-else-if="informationError" class="data-error" role="alert">市场资讯刷新失败：{{ informationError }}</p>
+      <p v-else-if="informationNotice" class="empty-data" role="status">{{ informationNotice }}</p>
+      <p v-else class="empty-data">正在读取服务端市场资讯。</p>
     </section>
   </section>
 </template>

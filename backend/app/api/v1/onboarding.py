@@ -809,6 +809,9 @@ def serialize_profile(profile: InvestmentProfile) -> dict:
         "master_name": style.master_name,
         "master_name_en": style.master_name_en,
         "master_match_reason": style.match_reason,
+        "parent_profile_id": profile.parent_profile_id,
+        "source_type": profile.source_type,
+        "source_id": profile.source_id,
     }
 
 

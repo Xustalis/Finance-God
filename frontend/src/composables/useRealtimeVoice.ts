@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
+import { v1ApiBase } from '@/services/apiBase'
 
 export type VoiceSurface = 'onboarding' | 'desk'
 export type VoicePhase = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error'
@@ -47,7 +48,7 @@ registerProcessor('finance-god-pcm', FinanceGodPcmProcessor)
 `
 
 function websocketUrl(): string {
-  const configured = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+  const configured = v1ApiBase()
   const base = configured.startsWith('http')
     ? configured.replace(/^http/, 'ws')
     : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${configured}`

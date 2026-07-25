@@ -37,6 +37,8 @@ from .contracts import (
     LedgerExecutionPort,
     ManualReviewPort,
     OrderTimelineEntry,
+    ProtectiveStrategy,
+    ProtectiveStrategyStatus,
     SimulationFill,
     StoredDraft,
     StoredOrder,
@@ -47,7 +49,7 @@ from .contracts import (
     TradePlanPort,
     TrustedRiskPort,
 )
-from .matcher import DeterministicMatcher
+from .matcher import DeterministicMatcher, MatchResult
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -234,6 +236,279 @@ class SimulationExecutionService:
             request_hash=request_hash,
             reference_price=reference_price,
         )
+
+    @_transactional(commit=True)
+    async def execute_immediate_market_order(
+        self,
+        *,
+        owner_id: str,
+        account_id: str,
+        instrument_id: str,
+        side: OrderSide,
+        quantity: Decimal,
+        trusted_price: Decimal,
+        market_evidence: VersionReference,
+        idempotency_key: str,
+        request_hash: str,
+        business_time: datetime | None = None,
+    ) -> StoredOrderView:
+        """Create and submit a simulation order for next-minute-bar execution."""
+        recorded_at = self._clock.now()
+        now = business_time or recorded_at
+        await self._accounts.require_current_account(owner_id, account_id)
+        draft = OrderDraft.model_validate(
+            {
+                "draft_id": self._ids.new_id("draft"),
+                "revision": 1,
+                "status": OrderDraftStatus.DRAFT,
+                "account_id": account_id,
+                "instrument_id": instrument_id,
+                "side": side,
+                "order_type": OrderType.MARKET,
+                "quantity": quantity,
+                "amount": None,
+                "limit_price": None,
+                "time_in_force": TimeInForce.DAY,
+                "fund_rule_version": None,
+                "valid_until": max(now, recorded_at) + timedelta(minutes=1),
+                "input_versions": (market_evidence,),
+                "audit_reference": AuditReference(
+                    audit_id=self._ids.new_id("audit"),
+                    actor_id=owner_id,
+                    recorded_at=recorded_at,
+                ),
+            }
+        )
+        initial = StoredDraft(
+            owner_id=owner_id,
+            mode=DraftMode.MANUAL,
+            draft=draft,
+            reference_price=trusted_price,
+        )
+        review = await self._manual_review.review(initial)
+        pending = draft.transition(
+            OrderDraftStatus.PENDING_REVIEW,
+            audit_reference=self._next_audit(
+                draft.audit_reference,
+                owner_id,
+                "immediate-market-review",
+            ),
+        )
+        candidate = initial.model_copy(
+            update={
+                "draft": pending,
+                "review": review,
+                "cost_estimate": self._project_cost(initial),
+            }
+        )
+        risk_result = await self._risk.evaluate(candidate)
+        self._validate_risk_binding(pending, risk_result)
+        if risk_result.status is not RiskCheckStatus.PASSED:
+            raise ExecutionFailure(
+                ExecutionFailureCode.RISK_CHECK_REQUIRED,
+                "order requires changes before immediate execution",
+            )
+        confirmed = pending.transition(
+            OrderDraftStatus.CONFIRMED,
+            audit_reference=self._next_audit(
+                pending.audit_reference,
+                owner_id,
+                "immediate-market-confirm",
+            ),
+        )
+        proposed = candidate.model_copy(
+            update={
+                "draft": confirmed,
+                "risk_result": risk_result,
+                "immutable_summary_hash": _summary_hash(candidate, risk_result),
+                "confirmed_at": now,
+            }
+        )
+        stored = await self._repository.create_draft(
+            proposed,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if stored.draft.status is not OrderDraftStatus.CONFIRMED:
+            raise ExecutionFailure(
+                ExecutionFailureCode.USER_CONFIRMATION_REQUIRED,
+                "immediate market order was not confirmed",
+            )
+        order = await self.submit(
+            owner_id=owner_id,
+            draft_id=stored.draft.draft_id,
+            idempotency_key=f"{idempotency_key}:submit",
+            request_hash=request_hash,
+        )
+        exchange = order.exchange_order
+        if exchange is None:
+            raise ExecutionFailure(
+                ExecutionFailureCode.UNSUPPORTED_OPERATION,
+                "immediate execution only supports exchange orders",
+            )
+        if exchange.status is ExchangeOrderStatus.FILLED:
+            return await self.get_order_view(owner_id=owner_id, order_id=order.order_id)
+        if exchange.status is not ExchangeOrderStatus.ACCEPTED:
+            raise ExecutionFailure(
+                ExecutionFailureCode.UNSUPPORTED_OPERATION,
+                "simulation order was not accepted for immediate execution",
+            )
+        if business_time is None:
+            result = self._matcher.match_immediate_market(
+                stored.draft,
+                quantity=quantity,
+                price=trusted_price,
+                market_evidence=market_evidence,
+            )
+            await self._record_fill(
+                owner_id=owner_id,
+                stored=order,
+                draft=stored,
+                result=result,
+            )
+        return await self.get_order_view(owner_id=owner_id, order_id=order.order_id)
+
+    @_transactional(commit=True)
+    async def create_protective_strategy(
+        self,
+        *,
+        owner_id: str,
+        account_id: str,
+        instrument_id: str,
+        quantity: Decimal,
+        take_profit_price: Decimal | None,
+        stop_loss_price: Decimal | None,
+        reference_price: Decimal,
+        idempotency_key: str,
+        request_hash: str,
+    ) -> ProtectiveStrategy:
+        await self._accounts.require_current_account(owner_id, account_id)
+        if take_profit_price is None and stop_loss_price is None:
+            raise ValueError("take-profit or stop-loss price is required")
+        if take_profit_price is not None and take_profit_price <= reference_price:
+            raise ValueError("take-profit price must exceed the latest price")
+        if stop_loss_price is not None and stop_loss_price >= reference_price:
+            raise ValueError("stop-loss price must be below the latest price")
+        now = self._clock.now()
+        strategy = ProtectiveStrategy(
+            strategy_id=self._ids.new_id("strategy"),
+            owner_id=owner_id,
+            account_id=account_id,
+            instrument_id=instrument_id,
+            quantity=quantity,
+            take_profit_price=take_profit_price,
+            stop_loss_price=stop_loss_price,
+            created_at=now,
+            updated_at=now,
+        )
+        return await self._repository.create_strategy(
+            strategy,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+
+    @_transactional(commit=False)
+    async def list_protective_strategies(
+        self, *, owner_id: str
+    ) -> tuple[ProtectiveStrategy, ...]:
+        return await self._repository.list_strategies(owner_id)
+
+    @_transactional(commit=True)
+    async def cancel_protective_strategy(
+        self, *, owner_id: str, strategy_id: str
+    ) -> ProtectiveStrategy:
+        current = await self._repository.get_strategy(strategy_id)
+        if current is None or current.owner_id != owner_id:
+            raise LookupError("protective strategy not found")
+        if current.status is not ProtectiveStrategyStatus.ACTIVE:
+            raise ValueError("only active protective strategies can be cancelled")
+        updated = current.model_copy(
+            update={
+                "status": ProtectiveStrategyStatus.CANCELLED,
+                "revision": current.revision + 1,
+                "updated_at": self._clock.now(),
+            }
+        )
+        await self._repository.save_strategy(
+            updated, expected_revision=current.revision
+        )
+        return updated
+
+    async def evaluate_protective_strategies(
+        self,
+        *,
+        instrument_id: str,
+        trusted_price: Decimal,
+        market_evidence: VersionReference,
+    ) -> tuple[ProtectiveStrategy, ...]:
+        active = await self._active_strategies_for(instrument_id)
+        triggered: list[ProtectiveStrategy] = []
+        for strategy in active:
+            trigger_kind = _protective_trigger(strategy, trusted_price)
+            if trigger_kind is None:
+                continue
+            result = await self._trigger_protective_strategy(
+                strategy_id=strategy.strategy_id,
+                trigger_kind=trigger_kind,
+                trusted_price=trusted_price,
+                market_evidence=market_evidence,
+            )
+            triggered.append(result)
+        return tuple(triggered)
+
+    @_transactional(commit=False)
+    async def _active_strategies_for(
+        self, instrument_id: str
+    ) -> tuple[ProtectiveStrategy, ...]:
+        return await self._repository.list_strategies(
+            instrument_id=instrument_id,
+            status=ProtectiveStrategyStatus.ACTIVE,
+        )
+
+    @_transactional(commit=True)
+    async def _trigger_protective_strategy(
+        self,
+        *,
+        strategy_id: str,
+        trigger_kind: str,
+        trusted_price: Decimal,
+        market_evidence: VersionReference,
+    ) -> ProtectiveStrategy:
+        current = await self._repository.get_strategy(strategy_id)
+        if current is None or current.status is not ProtectiveStrategyStatus.ACTIVE:
+            raise LookupError("active protective strategy not found")
+        if _protective_trigger(current, trusted_price) != trigger_kind:
+            raise ValueError("protective threshold is no longer met")
+        request_hash = hashlib.sha256(
+            f"{strategy_id}:{trigger_kind}:{market_evidence.version}".encode()
+        ).hexdigest()
+        order = await self.execute_immediate_market_order(
+            owner_id=current.owner_id,
+            account_id=current.account_id,
+            instrument_id=current.instrument_id,
+            side=OrderSide.SELL,
+            quantity=current.quantity,
+            trusted_price=trusted_price,
+            market_evidence=market_evidence,
+            idempotency_key=f"protective:{strategy_id}",
+            request_hash=request_hash,
+        )
+        now = self._clock.now()
+        updated = current.model_copy(
+            update={
+                "status": ProtectiveStrategyStatus.TRIGGERED,
+                "revision": current.revision + 1,
+                "updated_at": now,
+                "triggered_at": now,
+                "trigger_kind": trigger_kind,
+                "trigger_price": trusted_price,
+                "order_id": order.order_id,
+            }
+        )
+        await self._repository.save_strategy(
+            updated, expected_revision=current.revision
+        )
+        return updated
 
     @_transactional(commit=False)
     async def get_draft(self, *, owner_id: str, draft_id: str) -> StoredDraft:
@@ -631,7 +906,14 @@ class SimulationExecutionService:
             raise ValueError("order draft not found")
         bar = await self._bars.next_bar(
             draft.draft,
-            submitted_at=order.audit_reference.recorded_at,
+            submitted_at=(
+                draft.confirmed_at
+                if any(
+                    item.object_type == "simulation_historical_bar"
+                    for item in draft.draft.input_versions
+                )
+                else order.audit_reference.recorded_at
+            ),
         )
         if bar is None:
             return stored
@@ -642,6 +924,27 @@ class SimulationExecutionService:
         )
         if result.fill_quantity == 0 or result.fill_price is None:
             return stored
+        await self._record_fill(
+            owner_id=owner_id,
+            stored=stored,
+            draft=draft,
+            result=result,
+        )
+        return await self._owned_order(owner_id, order_id)
+
+    async def _record_fill(
+        self,
+        *,
+        owner_id: str,
+        stored: StoredOrder,
+        draft: StoredDraft,
+        result: MatchResult,
+    ) -> StoredOrder:
+        if result.fill_price is None:
+            raise ValueError("a concrete fill result is required")
+        order = stored.exchange_order
+        if order is None:
+            raise ValueError("exchange order is required")
         ledger_fill_id = await self._ledger.record_exchange_fill(
             owner_id=owner_id,
             draft=draft.draft,
@@ -778,11 +1081,7 @@ class SimulationExecutionService:
             price = draft.limit_price
             price_source = "limit_price"
         elif draft.order_type is OrderType.MARKET and stored.reference_price is not None:
-            direction = (
-                Decimal("1")
-                if draft.side in {OrderSide.BUY, OrderSide.COVER}
-                else Decimal("-1")
-            )
+            direction = Decimal("1" if draft.side.is_buy_direction else "-1")
             price = (
                 stored.reference_price
                 * (Decimal("1") + direction * rules.slippage_bps / Decimal("10000"))
@@ -793,7 +1092,7 @@ class SimulationExecutionService:
         cents = Decimal("0.01")
         notional = (price * quantity).quantize(cents)
         fee = (price * quantity * rules.fee_bps / Decimal("10000")).quantize(cents)
-        is_outflow = draft.side in {OrderSide.BUY, OrderSide.COVER}
+        is_outflow = draft.side.is_buy_direction
         total = notional + fee if is_outflow else notional - fee
         return CostEstimate(
             reference_price=price,
@@ -868,3 +1167,16 @@ def _summary_hash(draft: StoredDraft, risk: RiskCheckResult) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _protective_trigger(
+    strategy: ProtectiveStrategy, price: Decimal
+) -> str | None:
+    if (
+        strategy.take_profit_price is not None
+        and price >= strategy.take_profit_price
+    ):
+        return "take_profit"
+    if strategy.stop_loss_price is not None and price <= strategy.stop_loss_price:
+        return "stop_loss"
+    return None

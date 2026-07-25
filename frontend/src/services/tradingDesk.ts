@@ -1,11 +1,13 @@
-import axios from 'axios'
+import axios, { type AxiosError } from 'axios'
 import type { ProfileWithRecommendations } from '@/types/api'
+import { financeApiBase } from '@/services/apiBase'
+import { expireBrowserSession, USER_SESSION } from '@/services/authSession'
 
 // 交易台裸 JSON 域（/api/market、/api/simulation 等）。与 /api/v1 包络域使用
 // 不同的基址变量：VITE_API_BASE_URL 属于 v1 客户端，两者默认值互斥，混用会
 // 打断其中一方（见 api/client.ts 与 useRealtimeVoice）。
-const FINANCE_API_BASE_URL = import.meta.env.VITE_FINANCE_API_BASE_URL || '/api'
-const client = axios.create({ baseURL: FINANCE_API_BASE_URL, timeout: 30_000 })
+const client = axios.create({ baseURL: financeApiBase(), timeout: 30_000 })
+export const DESK_AGENT_REQUEST_TIMEOUT_MS = 70_000
 
 export class DeskApiError extends Error {
   constructor(
@@ -21,6 +23,10 @@ client.interceptors.request.use((config) => {
   const token = localStorage.getItem('finance-god-token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
+})
+client.interceptors.response.use(undefined, (error: AxiosError) => {
+  if (error.response?.status === 401) expireBrowserSession(USER_SESSION)
+  return Promise.reject(error)
 })
 
 client.interceptors.response.use(undefined, (error: unknown) => {
@@ -52,6 +58,18 @@ export interface DeskQuote {
   frequency: string
   freshness: string
   market_status: string
+  session_alignment?: string
+}
+
+export interface DeskMarketWarning {
+  code: string
+  message: string
+  symbol?: string
+}
+
+export interface DeskMarketOverview {
+  quotes: DeskQuote[]
+  warnings: DeskMarketWarning[]
 }
 
 /** PandaData 常以字符串返回价格；统一成有限数字或 null。 */
@@ -81,11 +99,12 @@ export function normalizeDeskQuote(raw: Record<string, unknown>): DeskQuote {
     frequency: String(raw.frequency ?? ''),
     freshness: String(raw.freshness ?? 'unknown'),
     market_status: String(raw.market_status ?? 'unknown'),
+    session_alignment: String(raw.session_alignment ?? ''),
   }
 }
 
 /**
- * 仿真草稿引用价门禁：与后端对齐——
+ * 模拟草稿引用价门禁：与后端对齐——
  * 交易中或已发布收盘（released）且有有效最新价即可；
  * 允许 stale（收盘后缓存），拒绝无价或明确不可用。
  */
@@ -231,7 +250,7 @@ export interface DeskEvidenceBundle {
   }>
 }
 
-export type DeskSectionKey = 'information' | 'portfolio' | 'watchlist' | 'trading'
+export type DeskSectionKey = 'information' | 'portfolio' | 'watchlist' | 'trading' | 'review'
 
 export interface DeskUiActionDescriptor {
   id: string
@@ -291,6 +310,8 @@ export interface DeskNotification {
   message: string
   created_at: string
   status: string
+  required?: boolean
+  details?: Record<string, string>
 }
 
 export interface DeskFact {
@@ -333,6 +354,10 @@ export interface DeskFactBatch {
   fact_kind: 'company_disclosure' | 'margin_balance' | 'market_sentiment' | 'industry_news'
   symbol: string
   requested_at: string
+  generated_at?: string
+  data_mode?: 'real' | 'mock'
+  fallback_reason?: string | null
+  trade_eligible?: false
   facts: DeskFact[]
   sentiment?: CrawlerSentiment
   news?: Array<{
@@ -371,6 +396,17 @@ export interface SimulationAccount {
   cash_available_rmb: string
   cash_frozen_rmb: string
   margin_rmb: string
+  revision: number
+  simulation_time: string | null
+}
+
+export interface SimulationClock {
+  account_id: string
+  current_time: string
+  speed: 1
+  status: 'running' | 'paused_market_closed'
+  session_close_at: string
+  next_session_open_at: string
   revision: number
 }
 
@@ -483,6 +519,118 @@ export interface SimulationOrder {
     fee: string
     occurred_at: string
   }>
+  episode_id?: string
+  decision_snapshot_id?: string
+  review_triggered?: boolean
+}
+
+export type TradeEpisodeStatus = 'open' | 'closed_pending_review' | 'review_completed' | 'review_failed'
+export type TradeReviewStatus = 'pending' | 'completed' | 'failed'
+
+export interface TradeEpisode {
+  episode_id: string
+  owner_id: string
+  account_id: string
+  instrument_id: string
+  status: TradeEpisodeStatus
+  review_status: TradeReviewStatus | null
+  opened_at: string
+  closed_at: string | null
+  opening_quantity: string
+  current_quantity: string
+  revision: number
+  created_at: string
+  updated_at: string
+}
+
+export interface TradeDecisionField {
+  status: 'available' | 'unavailable'
+  value: string | null
+  unavailable_reason: string | null
+}
+
+export interface TradeDecisionSnapshot {
+  snapshot_id: string
+  episode_id: string
+  order_id: string
+  fill_id: string
+  instrument_id: string
+  side: string
+  quantity: string
+  price: string
+  fee: string
+  occurred_at: string
+  market_evidence: Record<string, string>
+  profile_version: number | null
+  thesis: TradeDecisionField
+  expected_return: TradeDecisionField
+  primary_risks: TradeDecisionField
+  contrary_evidence: TradeDecisionField
+  expected_holding_period: TradeDecisionField
+  confidence: TradeDecisionField
+}
+
+export interface TradeReview {
+  review_id: string
+  episode_id: string
+  status: TradeReviewStatus
+  kind: 'interim' | 'final'
+  expected_return_assessment: string
+  actual_return_rmb: string
+  actual_return_percent: string | null
+  holding_period_seconds: number
+  execution_assessment: string
+  established_points: string[]
+  failed_points: string[]
+  unknown_points: string[]
+  next_adjustments: string[]
+  evidence_references: Array<Record<string, string>>
+  profile_feedback_id: string | null
+  error: string | null
+  completed_at: string | null
+}
+
+export type AgentLearningStatus = 'healthy' | 'stale' | 'unavailable' | 'error'
+
+export interface AgentLearningSummary {
+  status: AgentLearningStatus
+  message: string | null
+  last_cycle: {
+    cycle: number
+    topic: string
+    status: string
+    started_at: string | null
+    completed_at: string | null
+    summary: string | null
+  } | null
+  snapshot: {
+    version: number
+    total_lessons: number
+    topics: Record<string, number>
+    updated_at: string
+  } | null
+  recent_verified_lessons: Array<{
+    lesson_id: string
+    statement: string
+    topic: string
+    validation_method: string | null
+    cycle: number
+    created_at: string
+    tags: string[]
+    invalidation_conditions: string[]
+  }>
+  freshness: {
+    configured_interval_seconds: number
+    age_seconds: number | null
+    is_stale: boolean
+  }
+}
+
+export interface ImmediateMarketOrderInput {
+  account_id: string
+  instrument_id: string
+  side: 'buy' | 'sell'
+  quantity: string
 }
 
 export interface SimulationFill {
@@ -580,13 +728,17 @@ export interface TradePlan {
   [key: string]: unknown
 }
 
-function apiError(error: unknown): DeskApiError {
+export function apiError(error: unknown): DeskApiError {
   if (axios.isAxiosError(error)) {
     const responseError = error.response?.data?.error
     const message = responseError?.message || error.response?.data?.detail
     const code = responseError?.code
     const activeRunId = responseError?.active_run_id
-    const text = typeof message === 'string' ? message : error.message
+    const text = typeof message === 'string'
+      ? message
+      : error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+        ? 'Agent 服务响应超时，请重新连接'
+        : error.message
     return new DeskApiError(
       typeof code === 'string' ? `${code} · ${text}` : text,
       typeof code === 'string' ? code : undefined,
@@ -600,16 +752,42 @@ async function request<T>(call: () => Promise<{ data: T }>): Promise<T> {
   try { return (await call()).data } catch (error) { throw apiError(error) }
 }
 
+async function envelopedRequest<T>(call: () => Promise<{ data: { success: boolean; data: T; error?: { message?: string } } }>): Promise<T> {
+  const envelope = await request(call)
+  if (!envelope.success) throw new DeskApiError(envelope.error?.message || '请求失败')
+  return envelope.data
+}
+
 function idempotencyHeaders(idempotencyKey: IdempotencyKey): { 'Idempotency-Key': IdempotencyKey } {
   return { 'Idempotency-Key': idempotencyKey }
 }
 
-export async function fetchMarketOverview(symbols: readonly string[]): Promise<DeskQuote[]> {
-  const result = await request<{ data?: { quotes?: Array<Record<string, unknown>> }; quotes?: Array<Record<string, unknown>> }>(
+export async function fetchMarketOverview(symbols: readonly string[]): Promise<DeskMarketOverview> {
+  const result = await request<{
+    data?: { quotes?: Array<Record<string, unknown>> }
+    quotes?: Array<Record<string, unknown>>
+    warnings?: DeskMarketWarning[]
+  }>(
     () => client.get('/market/overview', { params: { symbols: symbols.join(',') } }),
   )
   const raw = result.data?.quotes ?? result.quotes ?? []
-  return raw.map((item) => normalizeDeskQuote(item))
+  return {
+    quotes: raw.map((item) => normalizeDeskQuote(item)),
+    warnings: result.warnings ?? [],
+  }
+}
+
+export async function fetchSimulationMarketOverview(symbols: readonly string[]): Promise<DeskMarketOverview> {
+  const result = await request<{
+    data?: { quotes?: Array<Record<string, unknown>> }
+    warnings?: DeskMarketWarning[]
+  }>(
+    () => client.get('/simulation/market/overview', { params: { symbols: symbols.join(',') } }),
+  )
+  return {
+    quotes: (result.data?.quotes ?? []).map((item) => normalizeDeskQuote(item)),
+    warnings: result.warnings ?? [],
+  }
 }
 
 export function completedFinancialQuarterRange(now = new Date()): {
@@ -639,13 +817,52 @@ export interface DeskBar {
   freshness?: string
 }
 
+function finiteBarNumber(value: unknown, field: string): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) {
+    throw new DeskApiError(`K线字段 ${field} 不是有效数字`)
+  }
+  return parsed
+}
+
+export function normalizeDeskBars(rawBars: readonly Record<string, unknown>[]): DeskBar[] {
+  const byTime = new Map<number, DeskBar>()
+  for (const raw of rawBars) {
+    const time = String(raw.time ?? '').trim()
+    const timestamp = Date.parse(time)
+    if (!time || !Number.isFinite(timestamp)) {
+      throw new DeskApiError('K线时间不是有效时间')
+    }
+    byTime.set(timestamp, {
+      time: new Date(timestamp).toISOString(),
+      open: finiteBarNumber(raw.open, 'open'),
+      high: finiteBarNumber(raw.high, 'high'),
+      low: finiteBarNumber(raw.low, 'low'),
+      close: finiteBarNumber(raw.close, 'close'),
+      volume: finiteBarNumber(raw.volume, 'volume'),
+      ...(raw.amount == null ? {} : { amount: finiteBarNumber(raw.amount, 'amount') }),
+      ...(typeof raw.freshness === 'string' ? { freshness: raw.freshness } : {}),
+    })
+  }
+  return [...byTime.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, bar]) => bar)
+}
+
 export async function fetchBars(symbol: string, limit = 120, frequency?: string): Promise<DeskBar[]> {
   const params: Record<string, string | number> = { symbol, limit }
   if (frequency) params.frequency = frequency
-  const result = await request<{ bars?: DeskBar[] }>(() =>
+  const result = await request<{ bars?: Array<Record<string, unknown>> }>(() =>
     client.get('/market/bars', { params })
   )
-  return result.bars ?? []
+  return normalizeDeskBars(result.bars ?? [])
+}
+
+export async function fetchSimulationBars(symbol: string): Promise<DeskBar[]> {
+  const result = await request<{ bars?: Array<Record<string, unknown>> }>(() =>
+    client.get('/simulation/market/bars', { params: { symbol } })
+  )
+  return normalizeDeskBars(result.bars ?? [])
 }
 
 export function fetchInformationFacts(symbol: string): Promise<DeskFactBatch> {
@@ -706,12 +923,14 @@ export async function fetchNotifications(): Promise<DeskNotification[]> {
 export async function fetchNotificationHistory(input?: {
   limit?: number
   includeRead?: boolean
+  cursor?: string
 }): Promise<DeskNotification[]> {
   const result = await request<DeskNotification[] | { notifications?: DeskNotification[] }>(() =>
     client.get('/workspace/notifications/history', {
       params: {
         limit: input?.limit ?? 50,
         include_read: input?.includeRead ?? true,
+        cursor: input?.cursor,
       },
     }),
   )
@@ -771,7 +990,7 @@ export async function decideDeskAgent(input: {
           order_draft_version: input.orderDraft.version,
         }
       : {}),
-  }))
+  }, { timeout: DESK_AGENT_REQUEST_TIMEOUT_MS }))
 }
 
 export async function previewDeskAgent(input: {
@@ -797,7 +1016,7 @@ export async function previewDeskAgent(input: {
           order_draft_version: input.orderDraft.version,
         }
       : {}),
-  }))
+  }, { timeout: DESK_AGENT_REQUEST_TIMEOUT_MS }))
 }
 
 export async function streamDeskAgentDecision(
@@ -805,7 +1024,8 @@ export async function streamDeskAgentDecision(
   onDelta: (delta: string) => void,
 ): Promise<DeskAgentDecision> {
   const token = localStorage.getItem('finance-god-token')
-  const response = await fetch(`${FINANCE_API_BASE_URL}/agent/desk/decision/stream`, {
+  const baseUrl = financeApiBase()
+  const response = await fetch(`${baseUrl}/agent/desk/decision/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -828,6 +1048,7 @@ export async function streamDeskAgentDecision(
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: { message?: string; code?: string } } | null
+    if (response.status === 401) expireBrowserSession(USER_SESSION)
     throw new DeskApiError(
       payload?.error?.message ?? `Agent 流式请求失败（HTTP ${response.status}）`,
       payload?.error?.code,
@@ -893,7 +1114,7 @@ export function fetchDeskQuickCommands(input: {
     context_version: input.contextVersion,
     ...(input.decisionId ? { decision_id: input.decisionId } : {}),
     ...(input.runId ? { run_id: input.runId } : {}),
-  }))
+  }, { timeout: DESK_AGENT_REQUEST_TIMEOUT_MS }))
 }
 
 export async function runDeskDirectAnswer(message: string): Promise<DeskDirectAnswer> {
@@ -902,7 +1123,7 @@ export async function runDeskDirectAnswer(message: string): Promise<DeskDirectAn
     task_type: 'research',
     asset_kind: 'equity',
     max_agents: 1,
-  }))
+  }, { timeout: DESK_AGENT_REQUEST_TIMEOUT_MS }))
 }
 
 export async function createWorkflow(input: {
@@ -999,12 +1220,28 @@ export function fetchSimulationAccount(): Promise<SimulationAccount | null> {
   return request(() => client.get('/simulation/accounts/current'))
 }
 
-export function createSimulationAccount(initialCashRmb: string, idempotencyKey: IdempotencyKey): Promise<SimulationAccount> {
-  return request(() => client.post('/simulation/accounts', { initial_cash_rmb: initialCashRmb }, { headers: idempotencyHeaders(idempotencyKey) }))
+export function createSimulationAccount(initialCashRmb: string, simulationStartAt: string, idempotencyKey: IdempotencyKey): Promise<SimulationAccount> {
+  return request(() => client.post('/simulation/accounts', {
+    initial_cash_rmb: initialCashRmb,
+    simulation_start_at: simulationStartAt,
+  }, { headers: idempotencyHeaders(idempotencyKey) }))
 }
 
-export function resetSimulationAccount(accountId: string, initialCashRmb: string, idempotencyKey: IdempotencyKey): Promise<SimulationAccount> {
-  return request(() => client.post(`/simulation/accounts/${encodeURIComponent(accountId)}/reset`, { initial_cash_rmb: initialCashRmb }, { headers: idempotencyHeaders(idempotencyKey) }))
+export function resetSimulationAccount(accountId: string, initialCashRmb: string, simulationStartAt: string, idempotencyKey: IdempotencyKey): Promise<SimulationAccount> {
+  return request(() => client.post(`/simulation/accounts/${encodeURIComponent(accountId)}/reset`, {
+    initial_cash_rmb: initialCashRmb,
+    simulation_start_at: simulationStartAt,
+  }, { headers: idempotencyHeaders(idempotencyKey) }))
+}
+
+export function fetchSimulationClock(): Promise<SimulationClock> {
+  return request(() => client.get('/simulation/clock'))
+}
+
+export function resumeSimulationClock(expectedRevision: number, idempotencyKey: IdempotencyKey): Promise<SimulationClock> {
+  return request(() => client.post('/simulation/clock/resume-next-session', {
+    expected_revision: expectedRevision,
+  }, { headers: idempotencyHeaders(idempotencyKey) }))
 }
 
 export function fetchSimulationPortfolio(): Promise<SimulationPortfolio> {
@@ -1060,6 +1297,48 @@ export function submitSimulationDraft(draftId: string, idempotencyKey: Idempoten
     {},
     { headers: idempotencyHeaders(idempotencyKey) },
   ))
+}
+
+export function submitSimulationMarketOrder(input: ImmediateMarketOrderInput, idempotencyKey: IdempotencyKey): Promise<SimulationOrder> {
+  return request(() => client.post(
+    '/simulation/market-orders',
+    input,
+    { headers: idempotencyHeaders(idempotencyKey) },
+  ))
+}
+
+export function fetchTradeEpisodes(filters: {
+  instrumentId?: string
+  status?: TradeEpisodeStatus
+  reviewStatus?: TradeReviewStatus
+} = {}): Promise<TradeEpisode[]> {
+  return envelopedRequest(() => client.get('/trade-episodes', {
+    params: {
+      ...(filters.instrumentId ? { instrument_id: filters.instrumentId } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.reviewStatus ? { review_status: filters.reviewStatus } : {}),
+    },
+  }))
+}
+
+export function fetchTradeEpisodeDecisions(episodeId: string): Promise<TradeDecisionSnapshot[]> {
+  return envelopedRequest(() => client.get(`/trade-episodes/${encodeURIComponent(episodeId)}/decisions`))
+}
+
+export function fetchTradeEpisodeReview(episodeId: string): Promise<TradeReview> {
+  return envelopedRequest(() => client.get(`/trade-episodes/${encodeURIComponent(episodeId)}/review`))
+}
+
+export function retryTradeEpisodeReview(episodeId: string, idempotencyKey: IdempotencyKey): Promise<TradeReview> {
+  return envelopedRequest(() => client.post(
+    `/trade-episodes/${encodeURIComponent(episodeId)}/review/retry`,
+    {},
+    { headers: idempotencyHeaders(idempotencyKey) },
+  ))
+}
+
+export function fetchAgentLearningSummary(): Promise<AgentLearningSummary> {
+  return request(() => client.get('/agent-learning/summary'))
 }
 
 export function reconcileSimulationOrder(orderId: string): Promise<SimulationOrder> {

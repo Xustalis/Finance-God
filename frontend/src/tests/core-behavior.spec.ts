@@ -7,13 +7,16 @@ import { objectiveSteps, useOnboardingStore } from '@/stores/onboarding'
 import { createSpeechController } from '@/composables/useSpeech'
 import { emitProfileCompleted, saveAndEmitProfileCompleted } from '@/services/workbench'
 import { ApiClientError, errorMessageFromEnvelope, unwrapEnvelope } from '@/api/client'
+import { apiClientErrorFromAxios } from '@/api/client'
+import { ONBOARDING_MESSAGE_TIMEOUT_MS } from '@/api'
+import { AxiosError } from 'axios'
 import { adminUpdatePayload } from '@/services/admin'
 import { bootstrapApplication } from '@/bootstrap'
 import { directionScore } from '@/services/profile'
 import { shouldAutoLoginLocalTestUser } from '@/services/localTestLogin'
 import { resolveWorkbenchOrigin } from '../../config/env'
 import { readFileSync } from 'node:fs'
-import type { ProfileWithRecommendations, Session } from '@/types/api'
+import type { ApiEnvelope, ProfileWithRecommendations, Session } from '@/types/api'
 
 const baseSession = (): Session => ({
   id: 'session-1', user_id: 'user-1', step: 'conversation', status: 'active', round_count: 0,
@@ -150,6 +153,15 @@ describe('objective profile state', () => {
 })
 
 describe('direct conversation updates', () => {
+  it('keeps the browser timeout above the backend AI request budget', () => {
+    expect(ONBOARDING_MESSAGE_TIMEOUT_MS).toBe(70_000)
+  })
+
+  it('does not expose the raw Axios timeout message', () => {
+    const error = new AxiosError<ApiEnvelope<unknown>>('timeout of 30000ms exceeded', AxiosError.ECONNABORTED)
+    expect(apiClientErrorFromAxios(error).message).toBe('服务响应超时，请重试；已提交的访谈回答不会重复记录')
+  })
+
   it('reuses a content request id after a lost response', async () => {
     setActivePinia(createPinia());const result={session:{...baseSession(),round_count:1,current_dimension:'liquidity_need'},user_message:{id:'u',content:'我能承受一些波动',input_mode:'text'},assistant_message:{id:'a',content:'收到'},turn:{reply:'收到'}};const sendMessage=vi.fn().mockRejectedValueOnce(new Error('lost')).mockResolvedValueOnce(result);const store=useOnboardingStore();store.session=baseSession();store.configureApi({sendMessage} as never)
     await expect(store.sendContent('我能承受一些波动')).rejects.toThrow('lost');await store.sendContent('我能承受一些波动');expect(sendMessage.mock.calls[0][1].request_id).toBe(sendMessage.mock.calls[1][1].request_id)
