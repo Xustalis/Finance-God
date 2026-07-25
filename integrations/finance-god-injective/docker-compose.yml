@@ -1,0 +1,56 @@
+name: finance-god-injective
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: finance_god_injective
+      POSTGRES_USER: injective_bridge
+      POSTGRES_PASSWORD: ${INJECTIVE_DB_PASSWORD:?INJECTIVE_DB_PASSWORD is required}
+    volumes:
+      - finance_god_injective_postgres_data:/var/lib/postgresql/data
+    networks:
+      - finance_god_injective_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U injective_bridge -d finance_god_injective"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  bridge:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BRIDGE_DATABASE_URL: postgresql+asyncpg://injective_bridge:${INJECTIVE_DB_PASSWORD}@db:5432/finance_god_injective
+      BRIDGE_NETWORK: testnet
+    ports:
+      - "127.0.0.1:18081:8080"
+    networks:
+      - finance_god_injective_internal
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/live', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  finance_god_injective_postgres_data:
+    name: finance_god_injective_postgres_data
+
+networks:
+  finance_god_injective_internal:
+    name: finance_god_injective_internal
+    internal: false
