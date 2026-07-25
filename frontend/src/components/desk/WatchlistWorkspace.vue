@@ -2,6 +2,23 @@
 import { computed, ref, watch } from 'vue'
 
 export interface WatchlistInstrument { instrument_id: string; added_at?: string }
+export interface WatchlistQuote {
+  symbol: string
+  name: string
+  last: number | null
+  open?: number | null
+  high?: number | null
+  low?: number | null
+  previous_close?: number | null
+  change: number | null
+  change_percent: number | null
+  volume?: number | null
+  amount?: number | null
+  provider_time: string
+  frequency: string
+  freshness: string
+  market_status?: string
+}
 export interface WatchlistGroup { group_id: string; name: string; description: string | null; revision: number; instruments: readonly WatchlistInstrument[] }
 export interface ResearchDimension { dimension: string; label: string; rating: string; detail: string; missing_fields: readonly string[] }
 export interface ResearchCandidate {
@@ -19,8 +36,16 @@ export interface ResearchCandidate {
   provider: string | null
 }
 
+const ratingColorMap: Record<string, string> = {
+  '优': 'rating-good',
+  '良': 'rating-fair',
+  '中': 'rating-neutral',
+  '差': 'rating-poor',
+}
+
 const props = defineProps<{
   groups: readonly WatchlistGroup[]
+  quotes: readonly WatchlistQuote[]
   candidates: readonly ResearchCandidate[]
   candidateMeta?: {
     generated_at: string
@@ -40,6 +65,7 @@ const props = defineProps<{
   onDeleteGroup: (input: { groupId: string; expectedRevision: number }) => void | Promise<void>
   onAddInstrument: (input: { groupId: string; instrumentId: string }) => void | Promise<void>
   onRemoveInstrument: (input: { groupId: string; instrumentId: string }) => void | Promise<void>
+  onSelectSymbol?: (symbol: string) => void
   onIgnoreCandidate: (input: { instrumentId: string; reason: 'not_now' | 'already_covered' | 'disagree' | 'data_error'; note: string | null }) => void | Promise<void>
   onCreateTradePlan?: (instrumentId: string) => void | Promise<void>
 }>()
@@ -87,6 +113,54 @@ const candidateUnavailableIsError = computed(() => (
   )
 ))
 
+function quoteFor(instrumentId: string): WatchlistQuote | null {
+  return props.quotes.find((q) => q.symbol === instrumentId) ?? null
+}
+function formatPrice(value: number | null): string {
+  if (value === null || value === undefined) return '—'
+  return value.toFixed(2)
+}
+function formatChange(value: number | null): string {
+  if (value === null || value === undefined) return '—'
+  return (value >= 0 ? '+' : '') + value.toFixed(2)
+}
+function formatPercent(value: number | null): string {
+  if (value === null || value === undefined) return '—'
+  return (value >= 0 ? '+' : '') + value.toFixed(2) + '%'
+}
+function formatVolume(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  if (value >= 1e8) return (value / 1e8).toFixed(2) + '亿'
+  if (value >= 1e4) return (value / 1e4).toFixed(0) + '万'
+  return String(value)
+}
+function formatAmount(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  if (value >= 1e8) return (value / 1e8).toFixed(2) + '亿'
+  if (value >= 1e4) return (value / 1e4).toFixed(0) + '万'
+  return value.toFixed(2)
+}
+function changeClass(value: number | null): string {
+  if (value === null || value === undefined) return ''
+  if (value > 0) return 'quote-up'
+  if (value < 0) return 'quote-down'
+  return ''
+}
+function formatDate(iso: string | undefined): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hours = String(d.getHours()).padStart(2, '0')
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    return `${month}-${day} ${hours}:${minutes}`
+  } catch { return iso.slice(0, 10) }
+}
+function ratingClass(rating: string): string {
+  return ratingColorMap[rating] ?? 'rating-neutral'
+}
+
 function selectGroup(group: WatchlistGroup) {
   selectedGroupId.value = group.group_id
   groupName.value = group.name
@@ -129,19 +203,23 @@ watch(
 
 <template>
   <section class="watchlist-workspace" aria-labelledby="watchlist-title">
-    <header class="overview-heading">
-      <h1 id="watchlist-title">自选</h1>
-      <button class="refresh-button" type="button" :disabled="loading" @click="onLoad">{{ loading ? '正在刷新…' : '刷新' }}</button>
+    <!-- 紧凑页头：工具栏式 -->
+    <header class="wl-page-header">
+      <h1 id="watchlist-title" class="wl-page-title">
+        自选
+        <span v-if="groups.length" class="wl-stock-count">{{ groups.reduce((s, g) => s + g.instruments.length, 0) }} 只标的</span>
+      </h1>
+      <button class="wl-text-action" type="button" :disabled="loading" @click="onLoad">
+        <span v-if="loading" class="wl-spin">↻</span>
+        {{ loading ? '刷新中…' : '刷新行情' }}
+      </button>
     </header>
 
-    <!-- 自选分组 -->
+    <!-- 分组与行情 -->
     <section class="wl-section" aria-labelledby="group-title">
-      <header class="wl-section-header">
-        <h2 id="group-title">自选分组</h2>
-        <button v-if="groups.length" class="refresh-button" type="button" @click="showCreateForm = !showCreateForm">{{ showCreateForm ? '取消' : '+ 新建分组' }}</button>
-      </header>
+      <h2 id="group-title" class="sr-only">自选分组</h2>
 
-      <!-- 有分组时：标签选择器 -->
+      <!-- 有分组时 -->
       <template v-if="groups.length">
         <nav class="wl-group-tabs" aria-label="自选分组">
           <button
@@ -151,6 +229,9 @@ watch(
           >
             <span class="wl-tab-name">{{ group.name }}</span>
             <span class="wl-tab-count">{{ group.instruments.length }}</span>
+          </button>
+          <button class="wl-tab wl-tab--add" type="button" @click="showCreateForm = !showCreateForm">
+            {{ showCreateForm ? '取消' : '+ 新建' }}
           </button>
         </nav>
 
@@ -163,10 +244,14 @@ watch(
 
         <!-- 选中分组详情 -->
         <div v-if="selectedGroup" class="wl-group-detail">
+          <!-- 紧凑操作栏：仅在有描述时显示描述，操作紧靠右 -->
           <div class="wl-group-toolbar">
-            <span class="wl-group-meta">{{ selectedGroup.name }}<small v-if="selectedGroup.description"> · {{ selectedGroup.description }}</small></span>
-            <button class="refresh-button" type="button" @click="showEditForm = !showEditForm">{{ showEditForm ? '取消' : '编辑' }}</button>
-            <button class="refresh-button wl-delete-btn" type="button" @click="onDeleteGroup({ groupId: selectedGroup.group_id, expectedRevision: selectedGroup.revision })">删除</button>
+            <small v-if="selectedGroup.description" class="wl-group-desc">{{ selectedGroup.description }}</small>
+            <span v-else class="wl-group-desc"></span>
+            <div class="wl-toolbar-actions">
+              <button class="wl-text-action wl-text-action--subtle" type="button" @click="showEditForm = !showEditForm">{{ showEditForm ? '取消' : '编辑' }}</button>
+              <button class="wl-text-action wl-text-action--subtle wl-text-action--danger" type="button" @click="onDeleteGroup({ groupId: selectedGroup.group_id, expectedRevision: selectedGroup.revision })">删除</button>
+            </div>
           </div>
 
           <!-- 编辑分组（折叠） -->
@@ -176,24 +261,50 @@ watch(
             <button class="ink-button" type="submit">保存</button>
           </form>
 
-          <!-- 标的列表 -->
-          <div v-if="selectedGroup.instruments.length" class="market-table-wrap">
-            <table class="market-table">
+          <!-- 行情表格 -->
+          <div class="wl-quote-table-wrap">
+            <table class="wl-quote-table">
               <thead>
-                <tr><th scope="col">标的代码</th><th scope="col">加入时间</th><th scope="col">操作</th></tr>
+                <tr>
+                  <th scope="col">标的</th>
+                  <th scope="col" class="num-col">最新价</th>
+                  <th scope="col" class="num-col">涨跌额</th>
+                  <th scope="col" class="num-col">涨跌幅</th>
+                  <th scope="col" class="num-col wl-col-vol">成交量</th>
+                  <th scope="col" class="num-col wl-col-amt">成交额</th>
+                  <th scope="col" class="wl-col-op">操作</th>
+                </tr>
               </thead>
               <tbody>
                 <tr v-for="instrument in selectedGroup.instruments" :key="instrument.instrument_id">
-                  <th scope="row">{{ instrument.instrument_id }}</th>
-                  <td>{{ instrument.added_at ?? '—' }}</td>
-                  <td><button class="refresh-button" type="button" @click="onRemoveInstrument({ groupId: selectedGroup!.group_id, instrumentId: instrument.instrument_id })">移除</button></td>
+                  <th scope="row">
+                    <button v-if="onSelectSymbol" class="instrument-select" type="button" @click="onSelectSymbol(instrument.instrument_id)">
+                      <span class="instrument-name">{{ quoteFor(instrument.instrument_id)?.name || instrument.instrument_id }}</span>
+                      <small class="instrument-code">{{ instrument.instrument_id }}</small>
+                    </button>
+                    <span v-else class="instrument-select">
+                      <span class="instrument-name">{{ quoteFor(instrument.instrument_id)?.name || instrument.instrument_id }}</span>
+                      <small class="instrument-code">{{ instrument.instrument_id }}</small>
+                    </span>
+                  </th>
+                  <td class="num-col" :class="changeClass(quoteFor(instrument.instrument_id)?.change ?? null)">{{ formatPrice(quoteFor(instrument.instrument_id)?.last ?? null) }}</td>
+                  <td class="num-col" :class="changeClass(quoteFor(instrument.instrument_id)?.change ?? null)">{{ formatChange(quoteFor(instrument.instrument_id)?.change ?? null) }}</td>
+                  <td class="num-col" :class="changeClass(quoteFor(instrument.instrument_id)?.change_percent ?? null)">{{ formatPercent(quoteFor(instrument.instrument_id)?.change_percent ?? null) }}</td>
+                  <td class="num-col wl-col-vol">{{ formatVolume(quoteFor(instrument.instrument_id)?.volume) }}</td>
+                  <td class="num-col wl-col-amt">{{ formatAmount(quoteFor(instrument.instrument_id)?.amount) }}</td>
+                  <td class="wl-col-op">
+                    <button class="wl-remove-btn" type="button" @click="onRemoveInstrument({ groupId: selectedGroup!.group_id, instrumentId: instrument.instrument_id })">移除</button>
+                  </td>
+                </tr>
+                <!-- 空分组占位行 -->
+                <tr v-if="!selectedGroup.instruments.length" class="wl-empty-row">
+                  <td colspan="7">暂无标的，在下方输入代码添加</td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p v-else class="wl-empty-hint">该分组暂无标的，请在下方添加。</p>
 
-          <!-- 添加标的 -->
+          <!-- 添加标的：紧贴表格底部 -->
           <form class="wl-inline-form wl-add-form" @submit.prevent="addInstrument">
             <input v-model="instrumentId" placeholder="输入代码，如 000001.SZ" required>
             <button class="ink-button" type="submit">加入</button>
@@ -220,27 +331,28 @@ watch(
     </section>
 
     <!-- 可研究候选 -->
-    <section class="wl-section" aria-labelledby="candidate-title">
+    <section class="wl-section wl-candidate-section" aria-labelledby="candidate-title">
       <header class="wl-section-header">
         <h2 id="candidate-title">可研究候选</h2>
-        <small v-if="candidateMeta" class="wl-meta">
-          画像 v{{ candidateMeta.profile_version ?? '—' }} ·
-          {{ candidateDirectionsText }} ·
-          {{ candidateMeta.generated_at }}
-        </small>
+        <div v-if="candidateMeta" class="wl-meta-tags">
+          <span class="wl-meta-tag">画像 v{{ candidateMeta.profile_version ?? '—' }}</span>
+          <span class="wl-meta-tag">{{ candidateDirectionsText }}</span>
+          <span class="wl-meta-tag">{{ formatDate(candidateMeta.generated_at) }}</span>
+        </div>
         <small v-else class="wl-meta">基于画像投影与市场事实生成</small>
       </header>
 
       <div v-if="candidates.length" class="wl-candidate-list">
-        <article v-for="candidate in candidates" :key="candidate.instrument_id" class="wl-candidate-card">
+        <article v-for="candidate in candidates" :key="candidate.instrument_id" :class="['wl-candidate-card', { 'wl-candidate-card--ignored': candidate.ignored }]">
           <header class="wl-candidate-header">
-            <div>
+            <div class="wl-candidate-identity">
               <strong>{{ candidate.name || candidate.symbol }}</strong>
-              <span class="wl-candidate-symbol">{{ candidate.symbol }} · {{ candidate.direction_label }}</span>
+              <span class="wl-candidate-symbol">{{ candidate.symbol }}</span>
+              <span class="wl-candidate-direction">{{ candidate.direction_label }}</span>
             </div>
             <div class="wl-candidate-actions" v-if="!candidate.ignored">
-              <button class="refresh-button" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button>
-              <button v-if="onCreateTradePlan" class="ink-button" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button>
+              <button class="wl-text-action" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button>
+              <button v-if="onCreateTradePlan" class="ink-button wl-plan-btn" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button>
             </div>
             <small v-else class="wl-ignored-label">已忽略：{{ candidate.ignore_reason || '—' }}</small>
           </header>
@@ -249,30 +361,31 @@ watch(
             <div class="wl-dimensions">
               <div v-for="dimension in candidate.dimensions.slice(0, 5)" :key="dimension.dimension" class="wl-dimension-item">
                 <span class="wl-dim-label">{{ dimension.label }}</span>
-                <span class="wl-dim-rating">{{ dimension.rating }}</span>
+                <span :class="['wl-dim-rating', ratingClass(dimension.rating)]">{{ dimension.rating }}</span>
                 <span class="wl-dim-detail">{{ dimension.detail }}</span>
               </div>
             </div>
             <aside v-if="candidate.exclusions.length || candidate.dimensions.some((item) => item.missing_fields.length)" class="wl-exclusions">
               <p v-for="exclusion in candidate.exclusions" :key="exclusion.reason_code">{{ exclusion.detail }}</p>
-              <p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">未知：{{ dimension.missing_fields.join('、') }}</p>
+              <p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">缺失：{{ dimension.missing_fields.join('、') }}</p>
             </aside>
           </div>
           <footer class="wl-candidate-footer">
-            <small>{{ candidate.provider || '—' }} · {{ candidate.as_of || '—' }}</small>
+            <small>{{ candidate.provider || '—' }} · {{ formatDate(candidate.as_of ?? undefined) }}</small>
           </footer>
         </article>
       </div>
 
-      <p
+      <!-- 无候选状态卡 -->
+      <div
         v-else-if="candidateUnavailableText"
         data-test="candidate-status"
-        :class="candidateUnavailableIsError ? 'data-error' : 'wl-empty-hint'"
+        :class="['wl-candidate-status', { 'wl-candidate-status--error': candidateUnavailableIsError }]"
         role="status"
       >
-        {{ candidateUnavailableText }}
-        <a v-if="!candidateUnavailableIsError" href="/app/profile-report">调整画像方向</a>
-      </p>
+        <p class="wl-candidate-status-text">{{ candidateUnavailableText }}</p>
+        <a v-if="!candidateUnavailableIsError" href="/app/profile-report" class="ink-button wl-candidate-status-btn">调整画像方向</a>
+      </div>
       <p v-else-if="candidateNotice" data-test="candidate-status" class="wl-empty-hint" role="status">{{ candidateNotice }}</p>
       <p v-else-if="!candidateError" data-test="candidate-status" class="wl-empty-hint" role="status">暂无可研究候选。候选需同时具备画像投影与 PandaData 实时快照。</p>
       <p v-if="candidateError" class="data-error" role="alert">候选读取失败：{{ candidateError }}</p>

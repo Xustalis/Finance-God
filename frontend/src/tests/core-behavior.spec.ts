@@ -43,11 +43,22 @@ describe('route permissions', () => {
 
   it('guards the desk and legacy trading URLs behind an authenticated session', async () => {
     const router = createAppRouter(createMemoryHistory())
-    for (const path of ['/rebuilding', '/markets', '/desk', '/overview', '/portfolio', '/orders', '/reviews', '/data', '/settings']) {
+    const cases = new Map([
+      ['/rebuilding', '/desk'],
+      ['/markets', '/desk'],
+      ['/desk', '/desk'],
+      ['/overview', '/desk'],
+      ['/portfolio', '/desk/portfolio'],
+      ['/orders', '/desk/trading'],
+      ['/reviews', '/desk/review'],
+      ['/data', '/desk'],
+      ['/settings', '/desk'],
+    ])
+    for (const [path, redirect] of cases) {
       await router.push(path)
       await router.isReady()
       expect(router.currentRoute.value.path).toBe('/login')
-      expect(router.currentRoute.value.query.redirect).toBe('/desk')
+      expect(router.currentRoute.value.query.redirect).toBe(redirect)
     }
   })
 
@@ -211,7 +222,7 @@ describe('workbench handoff', () => {
     expect(postMessage).toHaveBeenCalledTimes(1)
   })
 
-  it('does not post to the current window when no parent or opener exists',()=>{const self={postMessage:vi.fn()} as any;self.parent=self;self.opener=null;expect(emitProfileCompleted(self,'https://workbench.example',{profileId:'p',sessionId:'s',selectedDirection:'equities',archetypeCode:'X',riskLevel:'growth',completeness:1},new Set())).toBe('no_target');expect(self.postMessage).not.toHaveBeenCalled()})
+  it('does not post to the current window when no parent or opener exists',()=>{const self={postMessage:vi.fn(),parent:null,opener:null} as {postMessage:ReturnType<typeof vi.fn>;parent:unknown;opener:null};self.parent=self;expect(emitProfileCompleted(self as never,'https://workbench.example',{profileId:'p',sessionId:'s',selectedDirection:'equities',archetypeCode:'X',riskLevel:'growth',completeness:1},new Set())).toBe('no_target');expect(self.postMessage).not.toHaveBeenCalled()})
   it('suppresses only consecutive duplicates and emits A to B to A',()=>{const postMessage=vi.fn(),host={parent:{postMessage},opener:null} as never,sent=new Set<string>(),base={profileId:'p',sessionId:'s',archetypeCode:'X',riskLevel:'growth',completeness:1};expect(emitProfileCompleted(host,'https://workbench.example',{...base,selectedDirection:'equities'},sent)).toBe('sent');expect(emitProfileCompleted(host,'https://workbench.example',{...base,selectedDirection:'equities'},sent)).toBe('already_sent');expect(emitProfileCompleted(host,'https://workbench.example',{...base,selectedDirection:'public_funds'},sent)).toBe('sent');expect(emitProfileCompleted(host,'https://workbench.example',{...base,selectedDirection:'equities'},sent)).toBe('sent');expect(postMessage.mock.calls.map(call=>call[0].payload.selectedDirection)).toEqual(['equities','public_funds','equities'])})
   it('does not post when saving the selection fails',async()=>{const postMessage=vi.fn(),parent={postMessage},host={parent,opener:null} as never,payload={profileId:'p',sessionId:'s',selectedDirection:'equities',archetypeCode:'X',riskLevel:'growth',completeness:1};await expect(saveAndEmitProfileCompleted(()=>Promise.reject(new Error('save failed')),host,'https://workbench.example',payload,new Set())).rejects.toThrow('save failed');expect(postMessage).not.toHaveBeenCalled()})
 })

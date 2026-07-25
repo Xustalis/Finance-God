@@ -8,6 +8,8 @@ import { useRealtimeVoice } from '@/composables/useRealtimeVoice'
 const desk = useTradingDeskStore()
 const voiceSession = reactive(useRealtimeVoice())
 const prompt = ref('')
+const guideQuantityInput = ref('')
+const guideSymbolInput = ref('')
 const historyOpen = ref(false)
 const historyStatus = ref('')
 const thread = ref<HTMLElement | null>(null)
@@ -520,6 +522,16 @@ watch(prompt, (value) => {
                   </li>
                 </ul>
               </details>
+              <div class="report-followup-actions">
+                <button type="button" class="report-action-button" @click="desk.applyReportAction('trade', message.evidence)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M2 12h20"/></svg>
+                  跳转交易
+                </button>
+                <button type="button" class="report-action-button" @click="desk.applyReportAction('watchlist', message.evidence)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                  加入自选
+                </button>
+              </div>
             </section>
 
             <section v-else-if="message.kind === 'order_draft'" class="agent-order-bubble" aria-label="模拟订单草稿气泡">
@@ -543,6 +555,81 @@ watch(prompt, (value) => {
                 <div><dt>数量</dt><dd>{{ message.order.quantity }}</dd></div>
               </dl>
             </section>
+
+            <section v-else-if="message.kind === 'trade_guide' && desk.guidedTrade?.id === message.guideId" class="guided-trade-panel" aria-label="引导式下单">
+              <header class="guided-trade-header">
+                <h3>引导式下单</h3>
+                <button type="button" class="refresh-button" @click="desk.cancelGuidedTrade">取消</button>
+              </header>
+
+              <div class="guided-trade-progress">
+                <span :class="{ active: desk.guidedTrade.step === 'symbol', done: ['side','quantity','confirm'].includes(desk.guidedTrade.step) }">① 标的</span>
+                <span :class="{ active: desk.guidedTrade.step === 'side', done: ['quantity','confirm'].includes(desk.guidedTrade.step) }">② 方向</span>
+                <span :class="{ active: desk.guidedTrade.step === 'quantity', done: desk.guidedTrade.step === 'confirm' }">③ 数量</span>
+                <span :class="{ active: desk.guidedTrade.step === 'confirm' }">④ 确认</span>
+              </div>
+
+              <!-- Step 1: Symbol -->
+              <div v-if="desk.guidedTrade.step === 'symbol'" class="guided-trade-step">
+                <p class="guided-trade-question">请确认交易标的：</p>
+                <div class="guided-trade-options">
+                  <button type="button" class="guided-option" @click="desk.advanceGuidedTrade('symbol', desk.guidedTrade.symbol || desk.symbol)">
+                    {{ desk.guidedTrade.symbolName || desk.guidedTrade.symbol || desk.symbol }}
+                    <small>{{ desk.guidedTrade.lastPrice ? `¥${desk.guidedTrade.lastPrice.toFixed(2)}` : '' }}</small>
+                  </button>
+                </div>
+                <div class="guided-trade-custom">
+                  <input v-model="guideSymbolInput" placeholder="输入其他标的代码" @keydown.enter.prevent="guideSymbolInput.trim() && desk.advanceGuidedTrade('symbol', guideSymbolInput.trim())">
+                  <button type="button" :disabled="!guideSymbolInput.trim()" @click="desk.advanceGuidedTrade('symbol', guideSymbolInput.trim())">确认</button>
+                </div>
+              </div>
+
+              <!-- Step 2: Side -->
+              <div v-else-if="desk.guidedTrade.step === 'side'" class="guided-trade-step">
+                <p class="guided-trade-question">
+                  标的 <strong>{{ desk.guidedTrade.symbolName || desk.guidedTrade.symbol }}</strong>
+                  <template v-if="desk.guidedTrade.lastPrice">，最新价 ¥{{ desk.guidedTrade.lastPrice.toFixed(2) }}</template>。请选择方向：
+                </p>
+                <div class="guided-trade-options">
+                  <button type="button" class="guided-option is-buy" @click="desk.advanceGuidedTrade('side', 'buy')">买入</button>
+                  <button type="button" class="guided-option is-sell" @click="desk.advanceGuidedTrade('side', 'sell')">卖出</button>
+                </div>
+              </div>
+
+              <!-- Step 3: Quantity -->
+              <div v-else-if="desk.guidedTrade.step === 'quantity'" class="guided-trade-step">
+                <p class="guided-trade-question">
+                  {{ desk.guidedTrade.side === 'buy' ? '买入' : '卖出' }}
+                  <strong>{{ desk.guidedTrade.symbolName || desk.guidedTrade.symbol }}</strong>，请输入数量：
+                </p>
+                <div class="guided-trade-quantity">
+                  <input v-model="guideQuantityInput" type="number" min="1" step="100" placeholder="输入股数" @keydown.enter.prevent="Number(guideQuantityInput) > 0 && desk.advanceGuidedTrade('quantity', guideQuantityInput)">
+                  <button type="button" :disabled="!(Number(guideQuantityInput) > 0)" @click="desk.advanceGuidedTrade('quantity', guideQuantityInput)">确认数量</button>
+                </div>
+                <p v-if="desk.guidedTrade.availableCash" class="guided-trade-hint">
+                  可用现金：¥{{ desk.guidedTrade.availableCash.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
+                  <template v-if="desk.guidedTrade.lastPrice && Number(guideQuantityInput) > 0">
+                     · 预估金额：¥{{ (desk.guidedTrade.lastPrice * Number(guideQuantityInput)).toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}
+                  </template>
+                </p>
+              </div>
+
+              <!-- Step 4: Confirm -->
+              <div v-else-if="desk.guidedTrade.step === 'confirm'" class="guided-trade-step">
+                <p class="guided-trade-question">请确认交易信息：</p>
+                <dl class="guided-trade-summary">
+                  <div><dt>标的</dt><dd>{{ desk.guidedTrade.symbolName || desk.guidedTrade.symbol }}</dd></div>
+                  <div><dt>方向</dt><dd>{{ desk.guidedTrade.side === 'buy' ? '买入' : '卖出' }}</dd></div>
+                  <div><dt>数量</dt><dd>{{ desk.guidedTrade.quantity }} 股</dd></div>
+                  <div v-if="desk.guidedTrade.estimatedAmount"><dt>预估金额</dt><dd>¥{{ desk.guidedTrade.estimatedAmount.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}</dd></div>
+                </dl>
+                <p class="guided-trade-hint">信息已填入左侧交易表单，点击下方“确认并提交”或直接在左侧点击提交按钮。</p>
+                <div class="guided-trade-actions">
+                  <button type="button" class="primary-button compact" @click="desk.confirmGuidedTrade">确认并提交</button>
+                  <button type="button" class="secondary-button" @click="desk.cancelGuidedTrade">取消</button>
+                </div>
+              </div>
+            </section>
           </article>
         </section>
 
@@ -562,6 +649,25 @@ watch(prompt, (value) => {
       </details>
 
       <form v-if="!historyOpen && !voiceSession.active" class="agent-composer" @submit.prevent="send()">
+        <div v-if="desk.contextualActions.length" class="agent-actions-bar" aria-label="预制动作">
+          <span class="actions-bar-label">快速操作</span>
+          <div class="actions-bar-chips">
+            <button
+              v-for="action in desk.contextualActions"
+              :key="action.id"
+              type="button"
+              class="action-chip"
+              :class="`is-${action.icon}`"
+              @click="desk.executeQuickAction(action.id)"
+            >
+              <svg v-if="action.icon === 'navigate'" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <svg v-else-if="action.icon === 'fill'" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              <svg v-else-if="action.icon === 'add'" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              {{ action.label }}
+            </button>
+          </div>
+        </div>
         <div class="quick-command-toolbar">
           <span>{{ desk.quickCommandsLoading ? '正在生成下一步建议…' : '快捷指令' }}</span>
           <button
@@ -608,9 +714,7 @@ watch(prompt, (value) => {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-7 18-4-8-8-4Z"/><path d="m10 13 4-4"/></svg>
           </button>
         </div>
-        <p v-if="voiceSession.unavailableReason" class="workflow-note" role="status">
-          {{ voiceSession.unavailableReason }}
-        </p>
+
         <p v-if="voiceSession.error" class="data-error" role="alert">{{ voiceSession.error }}</p>
       </form>
     </div>

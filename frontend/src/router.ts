@@ -5,6 +5,7 @@ declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
     requiresAdmin?: boolean
+    deskSection?: string
     pageLabel?: string
     pageKicker?: string
     pageDesc?: string
@@ -23,18 +24,7 @@ function profileCompleted(): boolean {
   return localStorage.getItem('finance-god-profile-completed') === 'true'
 }
 
-const LEGACY_TRADING_PATHS = [
-  '/markets',
-  '/watchlist',
-  '/overview',
-  '/portfolio',
-  '/trade-plans/:planId',
-  '/orders',
-  '/reviews',
-  '/data',
-  '/data/evidence/:id',
-  '/settings',
-] as const
+const deskView = () => import('@/views/TradingDeskView.vue')
 
 export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({ history, routes: [
@@ -43,13 +33,25 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     { path: '/app/exe', name: 'onboarding', component: () => import('@/views/OnboardingView.vue'), meta: { requiresAuth: true } },
     { path: '/app/profile-report', name: 'report', component: () => import('@/views/ProfileReportView.vue'), meta: { requiresAuth: true } },
 
-    { path: '/desk', name: 'desk', component: () => import('@/views/TradingDeskView.vue'), meta: { requiresAuth: true } },
-    { path: '/rebuilding', redirect: '/desk', meta: { requiresAuth: true } },
-    ...LEGACY_TRADING_PATHS.map((path) => ({
-      path,
-      redirect: '/desk',
-      meta: { requiresAuth: true },
-    })),
+    // ─── 交易台：每个工作区独立路由 ───
+    { path: '/desk', name: 'desk', component: deskView, meta: { requiresAuth: true, deskSection: 'information' } },
+    { path: '/desk/portfolio', name: 'desk-portfolio', component: deskView, meta: { requiresAuth: true, deskSection: 'portfolio' } },
+    { path: '/desk/watchlist', name: 'desk-watchlist', component: deskView, meta: { requiresAuth: true, deskSection: 'watchlist' } },
+    { path: '/desk/trading', name: 'desk-trading', component: deskView, meta: { requiresAuth: true, deskSection: 'trading' } },
+    { path: '/desk/review', name: 'desk-review', component: deskView, meta: { requiresAuth: true, deskSection: 'review' } },
+
+    // ─── 遗留路径重定向 ───
+    { path: '/rebuilding', redirect: '/desk' },
+    { path: '/markets', redirect: '/desk' },
+    { path: '/overview', redirect: '/desk' },
+    { path: '/portfolio', redirect: '/desk/portfolio' },
+    { path: '/watchlist', redirect: '/desk/watchlist' },
+    { path: '/orders', redirect: '/desk/trading' },
+    { path: '/trade-plans/:planId', redirect: '/desk/trading' },
+    { path: '/reviews', redirect: '/desk/review' },
+    { path: '/data', redirect: '/desk' },
+    { path: '/data/evidence/:id', redirect: '/desk' },
+    { path: '/settings', redirect: '/desk' },
 
     // ─── 管理路由 ───────────────────────────────
     { path: '/admin/login', name: 'admin-login', component: () => import('@/views/AdminLoginView.vue') },

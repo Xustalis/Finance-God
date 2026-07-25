@@ -623,6 +623,16 @@ export interface ImmediateMarketOrderInput {
   side: 'buy' | 'sell'
   quantity: string
   market_mode: 'live' | 'historical'
+  decision_context: TradeDecisionContextInput
+}
+
+export interface TradeDecisionContextInput {
+  thesis: string
+  expected_return: string
+  primary_risks: string
+  contrary_evidence: string
+  expected_holding_period: string
+  confidence: string
 }
 
 export interface SimulationFill {

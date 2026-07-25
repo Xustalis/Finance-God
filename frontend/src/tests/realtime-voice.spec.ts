@@ -112,6 +112,7 @@ describe('useRealtimeVoice connection lifecycle', () => {
     vi.stubGlobal('WebSocket', MockWebSocket)
     vi.stubGlobal('AudioContext', MockAudioContext)
     vi.stubGlobal('AudioWorkletNode', MockAudioWorkletNode)
+    vi.stubGlobal('isSecureContext', true)
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: { getUserMedia },

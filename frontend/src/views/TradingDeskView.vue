@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useTradingDeskStore, type DeskSection } from '@/stores/tradingDesk'
+import type { TradeDecisionContextInput } from '@/services/tradingDesk'
 import DeskAgentPanel from '@/components/desk/DeskAgentPanel.vue'
 import OverviewWorkspace from '@/components/desk/OverviewWorkspace.vue'
 
@@ -10,6 +12,8 @@ const WatchlistWorkspace = defineAsyncComponent(() => import('@/components/desk/
 const TradingWorkspace = defineAsyncComponent(() => import('@/components/desk/TradingWorkspace.vue'))
 const ReviewWorkspace = defineAsyncComponent(() => import('@/components/desk/ReviewWorkspace.vue'))
 
+const route = useRoute()
+const router = useRouter()
 const desk = useTradingDeskStore()
 const remindersOpen = ref(false)
 const myOpen = ref(false)
@@ -23,8 +27,36 @@ const sectionLabels: Record<DeskSection, string> = {
   trading: '交易',
   review: '复盘',
 }
+const sectionRouteMap: Record<DeskSection, string> = {
+  information: '/desk',
+  portfolio: '/desk/portfolio',
+  watchlist: '/desk/watchlist',
+  trading: '/desk/trading',
+  review: '/desk/review',
+}
 const sections = (['information', 'portfolio', 'watchlist', 'trading', 'review'] as DeskSection[])
   .map((id) => ({ id, label: sectionLabels[id] }))
+
+function navigateSection(sectionId: DeskSection) {
+  const path = sectionRouteMap[sectionId]
+  if (route.path !== path) router.push(path)
+  desk.setSection(sectionId)
+}
+
+// 路由驱动 section：页面加载或路由变化时同步
+watch(() => route.meta.deskSection, (routeSection) => {
+  if (routeSection && routeSection !== desk.section) {
+    desk.setSection(routeSection as DeskSection)
+  }
+}, { immediate: true })
+
+// store 内部变更 section 时同步 URL（如 agent 触发的切换）
+watch(() => desk.section, (newSection) => {
+  const targetPath = sectionRouteMap[newSection]
+  if (targetPath && route.path !== targetPath) {
+    router.replace(targetPath)
+  }
+})
 
 const firstUnread = computed(() => desk.notifications.find((item) => item.status !== 'read') ?? null)
 const watchlistGroups = computed(() => (desk.watchlistGroups ?? []).map((group) => ({
@@ -42,7 +74,12 @@ async function runWorkspaceAction(action: () => Promise<unknown>): Promise<void>
   try { await action() } catch (error) { workspaceError.value = failureText(error) }
 }
 
-async function submitMarketOrder(input: { instrumentId: string; side: 'buy' | 'sell'; quantity: string }) {
+async function submitMarketOrder(input: {
+  instrumentId: string
+  side: 'buy' | 'sell'
+  quantity: string
+  decisionContext: TradeDecisionContextInput
+}) {
   if (!desk.account) throw new Error('请先建立模拟账户。')
   const instrumentId = input.instrumentId.trim().toUpperCase()
   await desk.ensureQuote(instrumentId)
@@ -51,12 +88,13 @@ async function submitMarketOrder(input: { instrumentId: string; side: 'buy' | 's
     instrumentId,
     side: input.side,
     quantity: input.quantity,
+    decisionContext: input.decisionContext,
   })
 }
 
 async function createTradePlanFromCandidate(instrumentId: string) {
   await desk.startCandidateTradePlan(instrumentId)
-  desk.setSection('trading')
+  navigateSection('trading')
 }
 
 async function loadWatchlistWorkspace(): Promise<void> {
@@ -107,7 +145,7 @@ onBeforeUnmount(() => {
       <section class="desk-left" aria-label="信息与交易工作区">
         <div class="desk-workspace-bar">
           <nav class="desk-nav" aria-label="交易台工作区">
-            <button v-for="item in sections" :key="item.id" type="button" :class="{ active: desk.section === item.id }" @click="desk.setSection(item.id)">{{ item.label }}</button>
+            <button v-for="item in sections" :key="item.id" type="button" :class="{ active: desk.section === item.id }" @click="navigateSection(item.id)">{{ item.label }}</button>
           </nav>
         </div>
 
@@ -134,12 +172,14 @@ onBeforeUnmount(() => {
           />
           <WatchlistWorkspace
             v-else-if="desk.section === 'watchlist'"
-            :groups="watchlistGroups" :candidates="desk.simulationClock ? [] : (desk.candidates?.candidates ?? [])"
+            :groups="watchlistGroups" :quotes="desk.quotes ?? []"
+            :candidates="desk.simulationClock ? [] : (desk.candidates?.candidates ?? [])"
             :candidate-meta="desk.simulationClock ? null : desk.candidates"
             :loading="desk.loadingWatchlists || desk.loadingCandidates" :watchlist-error="workspaceError || desk.watchlistError"
             :candidate-error="desk.simulationClock ? null : desk.candidateError"
             :candidate-notice="desk.simulationClock ? '历史演示不提供研究候选，避免引入未来信息。' : null"
             :on-load="loadWatchlistWorkspace"
+            :on-select-symbol="desk.setSymbol"
             :on-create-group="(input) => runWorkspaceAction(() => desk.createWatchlist(input.name, input.description))"
             :on-rename-group="(input) => runWorkspaceAction(async () => { const group = desk.watchlistGroups.find((item) => item.group_id === input.groupId); if (!group || group.revision !== input.expectedRevision) throw new Error('分组已被更新，请刷新后再试。'); await desk.renameWatchlist(group, input.name, input.description) })"
             :on-delete-group="(input) => runWorkspaceAction(async () => { const group = desk.watchlistGroups.find((item) => item.group_id === input.groupId); if (!group || group.revision !== input.expectedRevision) throw new Error('分组已被更新，请刷新后再试。'); await desk.removeWatchlist(group) })"
@@ -156,14 +196,27 @@ onBeforeUnmount(() => {
             :minute-periods-available="desk.minuteBarsSupported"
             :portfolio="desk.portfolio ?? null" :receipt="desk.activeOrder ?? null" :fills="desk.fills ?? []"
             :prefill="desk.tradeDraftPrefill"
+            :active-draft="desk.activeDraft ?? null"
+            :active-trade-plan="desk.activeTradePlan ?? null"
+            :trade-plan-error="desk.tradePlanError"
+            :draft-loading="desk.loadingSimulation"
+            :index-switch-notice="desk.indexSwitchNotice"
             :loading="desk.loadingSimulation || desk.loadingMarket"
             :error="workspaceError || desk.orderError || desk.simulationError || desk.marketError"
             :on-load="desk.refreshTradingWorkspace"
-            :on-open-portfolio="() => desk.setSection('portfolio')"
+            :on-open-portfolio="() => navigateSection('portfolio')"
             :on-ensure-quote-symbol="desk.ensureQuoteSymbol"
             :on-select-symbol="desk.setSymbol"
             :on-period-change="(p: string) => desk.setBarsFrequency(p === 'daily' ? undefined : '1m')"
             :on-submit="(input) => runWorkspaceAction(() => submitMarketOrder(input))"
+            :on-review-draft="() => runWorkspaceAction(() => desk.reviewDraft())"
+            :on-acknowledge-soft-risk="(hash: string) => runWorkspaceAction(() => desk.acknowledgeSoftRisk(hash))"
+            :on-confirm-draft="(hash: string) => runWorkspaceAction(() => desk.confirmDraft(hash))"
+            :on-submit-draft="() => runWorkspaceAction(() => desk.submitDraft())"
+            :on-dismiss-draft="() => { desk.activeDraft = null }"
+            :on-revise-plan="(actions) => runWorkspaceAction(() => desk.reviseActiveTradePlan(actions))"
+            :on-confirm-plan="() => runWorkspaceAction(() => desk.confirmActiveTradePlan())"
+            :on-dismiss-plan="() => { desk.activeTradePlan = null }"
           />
           <ReviewWorkspace
             v-else

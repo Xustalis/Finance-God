@@ -88,6 +88,7 @@ import {
   type SimulationPortfolio,
   type TradePlan,
   type TradePlanActionRevision,
+  type TradeDecisionContextInput,
   type TradeDecisionSnapshot,
   type TradeEpisode,
   type TradeReview,
@@ -114,7 +115,21 @@ export type AgentThreadMessage =
   | { id: string; role: 'assistant'; kind: 'research_report'; createdAt: string; runId: string; evidence: DeskEvidenceBundle }
   | { id: string; role: 'assistant'; kind: 'order_draft'; createdAt: string; draft: SimulationDraft }
   | { id: string; role: 'assistant'; kind: 'order_receipt'; createdAt: string; order: SimulationOrder }
+  | { id: string; role: 'assistant'; kind: 'trade_guide'; createdAt: string; guideId: string }
   | { id: string; role: 'assistant'; kind: 'error'; createdAt: string; text: string }
+
+export type GuidedTradeStep = 'symbol' | 'side' | 'quantity' | 'confirm'
+export interface GuidedTradeState {
+  id: string
+  step: GuidedTradeStep
+  symbol: string | null
+  symbolName: string | null
+  side: 'buy' | 'sell' | null
+  quantity: string | null
+  lastPrice: number | null
+  estimatedAmount: number | null
+  availableCash: number | null
+}
 
 const DEFAULT_SYMBOL = '000001.SZ'
 const BASELINE_SYMBOLS = ['000001.SH', '399001.SZ', '000300.SH'] as const
@@ -152,12 +167,13 @@ function deskContextStorageKey(): string {
   }
 }
 
-function restoreDeskContext(): { section: DeskSection; symbol: string } {
-  const fallback = { section: 'information' as DeskSection, symbol: DEFAULT_SYMBOL }
+function restoreDeskContext(): { section: DeskSection; symbol: string; reviewEpisodeId: string | null } {
+  const fallback = { section: 'information' as DeskSection, symbol: DEFAULT_SYMBOL, reviewEpisodeId: null }
   try {
     const saved = JSON.parse(localStorage.getItem(deskContextStorageKey()) || 'null') as {
       section?: unknown
       symbol?: unknown
+      reviewEpisodeId?: unknown
     } | null
     if (
       !saved
@@ -166,8 +182,9 @@ function restoreDeskContext(): { section: DeskSection; symbol: string } {
       || typeof saved.symbol !== 'string'
     ) return fallback
     const instrumentId = parseInstrumentId(saved.symbol)
+    const reviewEpisodeId = typeof saved.reviewEpisodeId === 'string' ? saved.reviewEpisodeId : null
     return instrumentId
-      ? { section: saved.section as DeskSection, symbol: instrumentId }
+      ? { section: saved.section as DeskSection, symbol: instrumentId, reviewEpisodeId }
       : fallback
   } catch {
     localStorage.removeItem(deskContextStorageKey())
@@ -389,6 +406,305 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   const selectedWatchlist = computed(() => watchlistGroups.value.find((item) => item.group_id === selectedWatchlistId.value) ?? null)
   const selectedWatchlistInstruments = computed(() => selectedWatchlistId.value ? watchlistInstruments.value[selectedWatchlistId.value] ?? [] : [])
   const quickCommands = computed<readonly string[]>(() => serverQuickCommands.value)
+
+  /** Contextual quick actions: direct left-panel operations based on current state */
+  const contextualActions = computed<{ id: string; label: string; icon: 'navigate' | 'fill' | 'add' | 'refresh' }[]>(() => {
+    const actions: { id: string; label: string; icon: 'navigate' | 'fill' | 'add' | 'refresh' }[] = []
+    if (section.value !== 'trading' && accountState.value === 'available') {
+      actions.push({ id: 'goto_trading', label: '跳转到交易', icon: 'navigate' })
+    }
+    if (section.value !== 'portfolio' && accountState.value === 'available') {
+      actions.push({ id: 'goto_portfolio', label: '查看持仓', icon: 'navigate' })
+    }
+    if (section.value === 'trading' && accountState.value === 'available' && selectedQuote.value) {
+      actions.push({ id: 'prefill_buy', label: `买入 ${symbol.value}`, icon: 'fill' })
+      const pos = portfolio.value?.positions.find((p) => p.instrument_id === symbol.value)
+      if (pos && Number(pos.available_quantity) > 0) {
+        actions.push({ id: 'prefill_sell', label: `卖出 ${symbol.value}`, icon: 'fill' })
+      }
+    }
+    if (accountState.value === 'available' && !guidedTrade.value) {
+      actions.push({ id: 'start_guided_trade', label: '引导下单', icon: 'fill' })
+    }
+    if (section.value !== 'trading' && selectedQuote.value && accountState.value === 'available') {
+      actions.push({ id: 'trade_current', label: `交易 ${symbol.value}`, icon: 'fill' })
+    }
+    if (section.value !== 'watchlist') {
+      actions.push({ id: 'goto_watchlist', label: '查看自选', icon: 'navigate' })
+    }
+    if (watchlistGroups.value.length > 0) {
+      const allInstruments = Object.values(watchlistInstruments.value).flat()
+      const isInWatchlist = allInstruments.some((item) => item.instrument_id === symbol.value)
+      if (!isInWatchlist) {
+        actions.push({ id: 'add_watchlist', label: `${symbol.value} 加入自选`, icon: 'add' })
+      }
+    }
+    return actions.slice(0, 4)
+  })
+
+  /** Execute a quick action directly on the left panel without going through agent intent */
+  function executeQuickAction(actionId: string) {
+    switch (actionId) {
+      case 'goto_trading':
+        setSection('trading')
+        appendAgentMessage({
+          id: nextMessageId('action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: `已跳转到交易工作区，当前标的 ${symbol.value}。`,
+          status: 'complete',
+        })
+        break
+      case 'goto_portfolio':
+        setSection('portfolio')
+        appendAgentMessage({
+          id: nextMessageId('action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: '已跳转到持仓工作区。',
+          status: 'complete',
+        })
+        break
+      case 'goto_watchlist':
+        setSection('watchlist')
+        appendAgentMessage({
+          id: nextMessageId('action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: '已跳转到自选工作区。',
+          status: 'complete',
+        })
+        break
+      case 'prefill_buy':
+        tradeDraftPrefill.value = {
+          side: 'buy',
+          quantity: '',
+          priceType: 'market',
+          limitPrice: null,
+        }
+        if (section.value !== 'trading') setSection('trading')
+        appendAgentMessage({
+          id: nextMessageId('action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: `已为 ${symbol.value} 填写买入方向，请输入数量后手动提交。`,
+          status: 'complete',
+        })
+        break
+      case 'prefill_sell': {
+        const pos = portfolio.value?.positions.find((p) => p.instrument_id === symbol.value)
+        tradeDraftPrefill.value = {
+          side: 'sell',
+          quantity: pos ? String(pos.available_quantity) : '',
+          priceType: 'market',
+          limitPrice: null,
+        }
+        if (section.value !== 'trading') setSection('trading')
+        appendAgentMessage({
+          id: nextMessageId('action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: `已为 ${symbol.value} 填写卖出方向${pos ? `（可卖 ${pos.available_quantity}）` : ''}，请确认后手动提交。`,
+          status: 'complete',
+        })
+        break
+      }
+      case 'trade_current':
+        setSymbol(symbol.value)
+        setSection('trading')
+        appendAgentMessage({
+          id: nextMessageId('action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: `已跳转到交易工作区，标的 ${symbol.value}，请填写方向和数量。`,
+          status: 'complete',
+        })
+        break
+      case 'add_watchlist': {
+        const targetGroupId = selectedWatchlistId.value ?? watchlistGroups.value[0]?.group_id
+        if (!targetGroupId) break
+        void addToWatchlist(targetGroupId, symbol.value).then(() => {
+          setSection('watchlist')
+          appendAgentMessage({
+            id: nextMessageId('action'),
+            role: 'assistant',
+            kind: 'text',
+            createdAt: new Date().toISOString(),
+            text: `已将 ${symbol.value} 加入自选，已跳转到自选工作区。`,
+            status: 'complete',
+          })
+        })
+        break
+      }
+      case 'start_guided_trade':
+        startGuidedTrade()
+        break
+    }
+  }
+
+  /** Apply evidence-based follow-up action (e.g. from research report) */
+  function applyReportAction(actionType: 'trade' | 'watchlist', evidence: DeskEvidenceBundle) {
+    const targetSymbol = symbol.value
+    if (actionType === 'trade') {
+      setSymbol(targetSymbol)
+      const buySignal = evidence.conclusion?.toLowerCase().includes('买入')
+        || evidence.conclusion?.toLowerCase().includes('buy')
+      tradeDraftPrefill.value = {
+        side: buySignal ? 'buy' : 'sell',
+        quantity: '',
+        priceType: 'market',
+        limitPrice: null,
+        source: 'agent_strategy',
+      }
+      setSection('trading')
+      appendAgentMessage({
+        id: nextMessageId('report-action'),
+        role: 'assistant',
+        kind: 'text',
+        createdAt: new Date().toISOString(),
+        text: `已根据研究报告跳转到交易，标的 ${targetSymbol}。请核对行情后填写数量并手动提交。`,
+        status: 'complete',
+      })
+    } else if (actionType === 'watchlist') {
+      const targetGroupId = selectedWatchlistId.value ?? watchlistGroups.value[0]?.group_id
+      if (!targetGroupId) return
+      void addToWatchlist(targetGroupId, targetSymbol).then(() => {
+        setSymbol(targetSymbol)
+        setSection('watchlist')
+        appendAgentMessage({
+          id: nextMessageId('report-action'),
+          role: 'assistant',
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          text: `已将 ${targetSymbol} 加入自选并跳转到自选工作区。`,
+          status: 'complete',
+        })
+      })
+    }
+  }
+
+  // ── Guided Trade Flow (引导式下单) ──────────────────────────────────────
+  const guidedTrade = ref<GuidedTradeState | null>(null)
+
+  function startGuidedTrade(presetSymbol?: string) {
+    const guideId = makeRequestId()
+    const startSymbol = presetSymbol ?? symbol.value
+    const quote = quotes.value.find((q) => q.symbol === startSymbol)
+    guidedTrade.value = {
+      id: guideId,
+      step: 'symbol',
+      symbol: startSymbol,
+      symbolName: quote?.name ?? null,
+      side: null,
+      quantity: null,
+      lastPrice: quote?.last ?? null,
+      estimatedAmount: null,
+      availableCash: account.value ? Number(account.value.cash_available_rmb) : null,
+    }
+    // Navigate to trading workspace
+    if (section.value !== 'trading') setSection('trading')
+    setSymbol(startSymbol)
+    // Add guide message to thread
+    appendAgentMessage({
+      id: `trade-guide-${guideId}`,
+      role: 'assistant',
+      kind: 'trade_guide',
+      createdAt: new Date().toISOString(),
+      guideId,
+    })
+  }
+
+  function advanceGuidedTrade(field: 'symbol' | 'side' | 'quantity', value: string) {
+    if (!guidedTrade.value) return
+    const guide = guidedTrade.value
+
+    if (field === 'symbol') {
+      const normalizedSymbol = value.trim().toUpperCase()
+      const quote = quotes.value.find((q) => q.symbol === normalizedSymbol)
+      guide.symbol = normalizedSymbol
+      guide.symbolName = quote?.name ?? null
+      guide.lastPrice = quote?.last ?? null
+      guide.step = 'side'
+      setSymbol(normalizedSymbol)
+      // Auto-fill symbol on left side
+      tradeDraftPrefill.value = {
+        side: 'buy',
+        quantity: '',
+        priceType: 'market',
+        limitPrice: null,
+        source: 'agent_strategy',
+      }
+    } else if (field === 'side') {
+      guide.side = value as 'buy' | 'sell'
+      guide.step = 'quantity'
+      // Update left side direction
+      tradeDraftPrefill.value = {
+        side: guide.side,
+        quantity: guide.quantity ?? '',
+        priceType: 'market',
+        limitPrice: null,
+        source: 'agent_strategy',
+      }
+    } else if (field === 'quantity') {
+      guide.quantity = value
+      const qty = Number(value)
+      guide.estimatedAmount = guide.lastPrice && qty > 0 ? guide.lastPrice * qty : null
+      guide.availableCash = account.value ? Number(account.value.cash_available_rmb) : null
+      guide.step = 'confirm'
+      // Fill quantity on left side
+      tradeDraftPrefill.value = {
+        side: guide.side ?? 'buy',
+        quantity: value,
+        priceType: 'market',
+        limitPrice: null,
+        source: 'agent_strategy',
+      }
+    }
+    guidedTrade.value = { ...guide }
+  }
+
+  function confirmGuidedTrade() {
+    if (!guidedTrade.value || guidedTrade.value.step !== 'confirm') return
+    const guide = guidedTrade.value
+    // Ensure final prefill is complete
+    tradeDraftPrefill.value = {
+      side: guide.side ?? 'buy',
+      quantity: guide.quantity ?? '',
+      priceType: 'market',
+      limitPrice: null,
+      source: 'agent_strategy',
+    }
+    appendAgentMessage({
+      id: nextMessageId('guide-done'),
+      role: 'assistant',
+      kind: 'text',
+      createdAt: new Date().toISOString(),
+      text: `交易信息已全部填入左侧：${guide.side === 'buy' ? '买入' : '卖出'} ${guide.symbol} ${guide.quantity} 股。请核对行情后点击提交按钮完成交易。`,
+      status: 'complete',
+    })
+    guidedTrade.value = null
+  }
+
+  function cancelGuidedTrade() {
+    if (!guidedTrade.value) return
+    guidedTrade.value = null
+    tradeDraftPrefill.value = null
+    appendAgentMessage({
+      id: nextMessageId('guide-cancel'),
+      role: 'assistant',
+      kind: 'text',
+      createdAt: new Date().toISOString(),
+      text: '已取消引导式下单。',
+      status: 'complete',
+    })
+  }
+
   let quickCommandRequestId = 0
   let quickCommandStage: QuickCommandStage = 'initial'
   let quickCommandReference: string | null = null
@@ -492,13 +808,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     reference: string | null = quickCommandReference,
     force = false,
   ) {
-    if (
-      !serverContextVersion.value
-      || (
-        activeWorkflow.value
-        && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)
-      )
-    ) return
+    if (!serverContextVersion.value) return
     if (!force && stage === quickCommandStage && reference === quickCommandReference) {
       return
     }
@@ -583,6 +893,12 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         selectedTradeEpisode.value = tradeEpisodes.value.find(
           (item) => item.episode_id === selectedTradeEpisode.value?.episode_id,
         ) ?? null
+      } else if (restoredContext.reviewEpisodeId) {
+        // Restore previously-selected episode after page refresh
+        const restored = tradeEpisodes.value.find(
+          (item) => item.episode_id === restoredContext.reviewEpisodeId,
+        )
+        if (restored) void selectTradeEpisode(restored)
       }
     } catch (error) {
       tradeReviewError.value = failureText(error, '交易案例读取失败')
@@ -609,6 +925,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
 
   async function selectTradeEpisode(episode: TradeEpisode) {
     selectedTradeEpisode.value = episode
+    persistDeskContext()
     tradeEpisodeDecisions.value = []
     tradeEpisodeReview.value = null
     tradeReviewLoading.value = true
@@ -650,6 +967,11 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       : null
   ))
   const minuteBarsSupported = computed(() => !INDEX_SYMBOLS.has(symbol.value))
+  const indexSwitchNotice = computed(() => (
+    section.value === 'trading' && symbol.value === DEFAULT_SYMBOL && INDEX_SYMBOLS.has(restoredContext.symbol)
+      ? `指数标的不能用于模拟交易，已自动切换至 ${DEFAULT_SYMBOL}。`
+      : null
+  ))
 
   function setSymbol(next: string) {
     const normalized = parseInstrumentId(next)
@@ -1275,7 +1597,13 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     } catch (error) { orderError.value = failureText(error, '提交模拟订单失败'); throw error }
   }
 
-  async function submitMarketOrder(input: { accountId: string; instrumentId: string; side: 'buy' | 'sell'; quantity: string }) {
+  async function submitMarketOrder(input: {
+    accountId: string
+    instrumentId: string
+    side: 'buy' | 'sell'
+    quantity: string
+    decisionContext: TradeDecisionContextInput
+  }) {
     orderError.value = null
     try {
       activeOrder.value = await submitSimulationMarketOrder({
@@ -1284,6 +1612,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         side: input.side,
         quantity: input.quantity,
         market_mode: simulationClock.value ? 'historical' : 'live',
+        decision_context: input.decisionContext,
       }, newIdempotencyKey('simulation-market-order'))
       await loadSimulationData()
       return activeOrder.value
@@ -1469,24 +1798,24 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     }
   }
 
-  async function runWorkflow(intent: string) {
+  async function runWorkflow(intent: string): Promise<'started' | 'active_conflict' | 'failed'> {
     const normalizedIntent = intent.trim()
-    if (!normalizedIntent) return
+    if (!normalizedIntent) return 'failed'
     if (workflowActive.value) {
       workflowError.value = '当前任务仍在运行，请等待终态后再创建新任务。'
-      return
+      return 'active_conflict'
     }
     if (!serverContextVersion.value) {
       workflowError.value = '缺少服务端 context_version，无法创建可审计工作流。'
-      return
+      return 'failed'
     }
     if (!isDeskCapabilityEnabled(deskCapabilities.value, 'workflow_create')) {
       workflowError.value = '服务端未确认工作流创建能力（需实际连接 workflow runtime）。'
-      return
+      return 'failed'
     }
     if (!isDeskCapabilityEnabled(deskCapabilities.value, 'workflow_worker')) {
       workflowError.value = '服务端未确认 Workflow Worker 正在运行，当前不能执行新任务。'
-      return
+      return 'failed'
     }
     workflowError.value = null
     workflowEvidenceError.value = null
@@ -1512,23 +1841,32 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       if (activeWorkflow.value && ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
         startWorkflowPolling()
       }
+      return 'started'
     } catch (error) {
       if (
         error instanceof DeskApiError
         && error.code === 'WORKFLOW_ALREADY_ACTIVE'
         && error.activeRunId
       ) {
-        activeWorkflow.value = await fetchWorkflow(error.activeRunId)
-        workflowIntent.value = normalizedIntent
-        await refreshWorkflow()
-        if (ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
-          startWorkflowPolling()
+        try {
+          activeWorkflow.value = await fetchWorkflow(error.activeRunId)
+          workflowIntent.value = activeWorkflow.value.request_intent?.trim() || null
+          await refreshWorkflow()
+          if (ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+            startWorkflowPolling()
+          }
+          return 'active_conflict'
+        } catch (recoveryError) {
+          workflowError.value = failureText(recoveryError, '活动工作流恢复失败')
+          activeWorkflow.value = null
+          workflowIntent.value = null
+          return 'failed'
         }
-        return
       }
       workflowError.value = failureText(error, '工作流请求失败')
       activeWorkflow.value = null
       workflowIntent.value = null
+      return 'failed'
     } finally {
       workflowSubmitting.value = false
     }
@@ -1641,8 +1979,25 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     } finally {
       agentRequestCount.value = Math.max(0, agentRequestCount.value - 1)
     }
-    await runWorkflow(normalizedIntent)
-    if (!activeWorkflow.value) {
+    const startResult = await runWorkflow(normalizedIntent)
+    if (startResult === 'active_conflict') {
+      queuedWorkflowIntents.value = [
+        ...queuedWorkflowIntents.value,
+        { id: makeRequestId(), intent: normalizedIntent, createdAt },
+      ]
+      persistWorkflowQueue()
+      replaceAgentMessage(pendingId, {
+        id: pendingId,
+        role: 'assistant',
+        kind: 'text',
+        createdAt,
+        text: '服务端已有活动任务，本次正式任务已加入待办；当前任务完成后会自动开始。',
+        status: 'complete',
+      })
+      quickCommandsLoading.value = false
+      return
+    }
+    if (startResult === 'failed' || !activeWorkflow.value) {
       quickCommandsLoading.value = false
       replaceAgentMessage(pendingId, {
         id: pendingId,
@@ -1651,26 +2006,25 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
         createdAt,
         text: workflowError.value || '研究任务创建失败',
       })
+      return
     }
-    if (activeWorkflow.value) {
-      replaceAgentMessage(pendingId, {
-        id: pendingId,
-        role: 'assistant',
-        kind: 'text',
-        createdAt,
-        text: '研究任务已创建，以下状态来自服务端。',
-        status: 'complete',
-      })
-      appendAgentMessage({
-        id: `workflow-${activeWorkflow.value.run_id}`,
-        role: 'assistant',
-        kind: 'workflow',
-        createdAt: new Date().toISOString(),
-        runId: activeWorkflow.value.run_id,
-        intent: normalizedIntent,
-        status: activeWorkflow.value.status,
-      })
-    }
+    replaceAgentMessage(pendingId, {
+      id: pendingId,
+      role: 'assistant',
+      kind: 'text',
+      createdAt,
+      text: '研究任务已创建，以下状态来自服务端。',
+      status: 'complete',
+    })
+    appendAgentMessage({
+      id: `workflow-${activeWorkflow.value.run_id}`,
+      role: 'assistant',
+      kind: 'workflow',
+      createdAt: new Date().toISOString(),
+      runId: activeWorkflow.value.run_id,
+      intent: normalizedIntent,
+      status: activeWorkflow.value.status,
+    })
   }
 
   async function refreshWorkflow() {
@@ -1732,8 +2086,12 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     const [next, ...remaining] = queuedWorkflowIntents.value
     queuedWorkflowIntents.value = remaining
     persistWorkflowQueue()
-    await runWorkflow(next.intent)
-    if (!activeWorkflow.value || !ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)) {
+    const startResult = await runWorkflow(next.intent)
+    if (
+      startResult !== 'started'
+      || !activeWorkflow.value
+      || !ACTIVE_WORKFLOW_STATUSES.has(activeWorkflow.value.status)
+    ) {
       queuedWorkflowIntents.value = [next, ...queuedWorkflowIntents.value]
       persistWorkflowQueue()
       return
@@ -1990,8 +2348,16 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       loadMarketFacts(),
       loadMarketNews(),
     ])
+    // Load section-specific data based on the restored active workspace.
+    if (section.value === 'review') void loadReviewWorkspace()
+    else if (section.value === 'portfolio' || section.value === 'trading') void loadSimulationData()
+    else if (section.value === 'watchlist') void Promise.all([loadWatchlists(), loadCandidates()])
     startNotificationStream()
     await restoreActiveWorkflow()
+    // 如果没有活跃工作流但队列中有待执行任务，尝试启动下一个
+    if (!workflowActive.value && queuedWorkflowIntents.value.length) {
+      void startNextQueuedWorkflow()
+    }
     startPolling()
     document.addEventListener('visibilitychange', onVisibilityChange)
   }
@@ -2008,7 +2374,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, marketNews, bars, notifications,
     account, accountState, simulationClock, portfolio, orders, fills, tradeEpisodes, selectedTradeEpisode, tradeEpisodeDecisions, tradeEpisodeReview, agentLearningSummary, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
     selectedWatchlistInstruments, candidates, activeDraft, activeOrder, activeTradePlan, hasSimulationAccount,
-    marketError, profileError, informationFactsError, sentimentFactsError, marketNewsError, marketFactsNotice, minuteBarsSupported, barsError, notificationError, notificationStreamError, simulationError,
+    marketError, profileError, informationFactsError, sentimentFactsError, marketNewsError, marketFactsNotice, minuteBarsSupported, indexSwitchNotice, barsError, notificationError, notificationStreamError, simulationError,
     accountError, ordersError, fillsError, marketLoadedAt, simulationLoadedAt, watchlistError, candidateError,
     orderError, tradePlanError,
     loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates, tradeReviewLoading, tradeReviewError, agentLearningLoading, agentLearningError,
@@ -2028,6 +2394,8 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     acknowledgeSoftRisk, confirmDraft, submitDraft, submitMarketOrder, reconcileOrder, createWatchlist, renameWatchlist, removeWatchlist,
     addToWatchlist, removeFromWatchlist, ignoreCandidate, restoreCandidate, startCandidateTradePlan,
     startPortfolioDeviationTradePlan, loadTradePlan, reviseActiveTradePlan, confirmActiveTradePlan,
+    contextualActions, executeQuickAction, applyReportAction,
+    guidedTrade, startGuidedTrade, advanceGuidedTrade, confirmGuidedTrade, cancelGuidedTrade,
     runWorkflow, submitAgentIntent, previewAgentIntent, appendAgentMessage, removeQueuedWorkflow, refreshWorkflow, refreshBootstrap, refreshQuickCommands, rerollQuickCommands,
     loadWorkflowHistory, openHistoricalWorkflow, closeHistoricalWorkflow, cancelActiveWorkflow, retryHistoricalWorkflow,
     initialize, dispose,

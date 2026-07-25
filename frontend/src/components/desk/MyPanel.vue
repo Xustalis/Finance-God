@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useTradingDeskStore, type DeskSection } from '@/stores/tradingDesk'
+import { resetSimulationAccount } from '@/services/tradingDesk'
 
 type MySection = 'profile' | 'wallet' | 'history' | 'settings'
 
@@ -9,6 +11,7 @@ defineEmits<{
   close: []
 }>()
 
+const router = useRouter()
 const desk = useTradingDeskStore()
 const auth = useAuthStore()
 const section = ref<MySection>('profile')
@@ -17,6 +20,15 @@ const settingMessage = ref<string | null>(null)
 const displayName = ref(auth.user?.display_name ?? '')
 const baseCurrency = ref(auth.user?.base_currency ?? 'CNY')
 const region = ref(auth.user?.region ?? 'CN')
+
+// 退出登录
+const showLogoutConfirm = ref(false)
+const loggingOut = ref(false)
+
+// 钱包重置
+const showResetConfirm = ref(false)
+const resettingWallet = ref(false)
+const resetMessage = ref<string | null>(null)
 
 const sections: ReadonlyArray<{ id: MySection; label: string }> = [
   { id: 'profile', label: '用户画像' },
@@ -125,6 +137,39 @@ async function saveSettings() {
     settingMessage.value = failureText(error)
   } finally {
     savingSettings.value = false
+  }
+}
+
+async function handleLogout() {
+  loggingOut.value = true
+  try {
+    auth.logout()
+    await router.push('/login')
+  } finally {
+    loggingOut.value = false
+    showLogoutConfirm.value = false
+  }
+}
+
+async function handleResetWallet() {
+  if (!desk.account?.account_id) {
+    resetMessage.value = '未找到模拟账户，无法重置。'
+    showResetConfirm.value = false
+    return
+  }
+  resettingWallet.value = true
+  resetMessage.value = null
+  try {
+    const key = `wallet-reset-${Date.now()}`
+    const now = new Date().toISOString()
+    await resetSimulationAccount(desk.account.account_id, '1000000', now, key)
+    resetMessage.value = '钱包已重置为 ¥1,000,000。'
+    await desk.loadSimulationData()
+  } catch (error) {
+    resetMessage.value = failureText(error)
+  } finally {
+    resettingWallet.value = false
+    showResetConfirm.value = false
   }
 }
 
@@ -270,15 +315,64 @@ function openWorkspace(next: DeskSection) {
       <p v-if="desk.simulationLoadedAt" class="data-footnote">订单与成交读取于 {{ formatTime(desk.simulationLoadedAt) }}。</p>
     </section>
 
-    <form v-else class="settings-form" data-test="my-settings" @submit.prevent="saveSettings">
-      <p class="chapter">仅本人可写</p>
-      <h3>设置</h3>
-      <label>显示名称<input v-model="displayName" name="display-name" maxlength="100" autocomplete="name"></label>
-      <label>基础货币<select v-model="baseCurrency" name="base-currency"><option>CNY</option><option>USD</option></select></label>
-      <label>地区<select v-model="region" name="region"><option>CN</option><option>US</option></select></label>
-      <p class="data-footnote">设置不会进入 Agent 上下文、快捷指令或工具调用。</p>
-      <p v-if="settingMessage" :class="{ 'data-error': !settingMessage.includes('已保存') }" role="status">{{ settingMessage }}</p>
-      <button class="ink-button" type="submit" :disabled="savingSettings">{{ savingSettings ? '正在保存' : '保存设置' }}</button>
-    </form>
+    <section v-else class="settings-section" data-test="my-settings">
+      <!-- 账户资料 -->
+      <form class="settings-form" @submit.prevent="saveSettings">
+        <p class="chapter">账户资料</p>
+        <h3>个人信息</h3>
+        <div class="settings-field-row">
+          <label>显示名称<input v-model="displayName" name="display-name" maxlength="100" autocomplete="name" placeholder="输入显示名称"></label>
+        </div>
+        <div class="settings-field-row settings-field-pair">
+          <label>基础货币<select v-model="baseCurrency" name="base-currency"><option>CNY</option><option>USD</option></select></label>
+          <label>地区<select v-model="region" name="region"><option>CN</option><option>US</option></select></label>
+        </div>
+        <p class="data-footnote">设置不会进入 Agent 上下文、快捷指令或工具调用。</p>
+        <p v-if="settingMessage" :class="{ 'data-error': !settingMessage.includes('已保存') }" role="status">{{ settingMessage }}</p>
+        <button class="ink-button" type="submit" :disabled="savingSettings">{{ savingSettings ? '正在保存' : '保存设置' }}</button>
+      </form>
+
+      <!-- 账户信息 -->
+      <div class="settings-info-block">
+        <p class="chapter">账户信息</p>
+        <dl class="settings-account-info">
+          <div><dt>邮箱</dt><dd>{{ auth.user?.email ?? '—' }}</dd></div>
+          <div><dt>账户状态</dt><dd>{{ auth.user?.status === 'active' ? '正常' : (auth.user?.status ?? '—') }}</dd></div>
+          <div><dt>注册时间</dt><dd>{{ formatTime(auth.user?.created_at) }}</dd></div>
+          <div><dt>上次登录</dt><dd>{{ formatTime(auth.user?.last_login_at) }}</dd></div>
+        </dl>
+      </div>
+
+      <!-- 仿真钱包重置 -->
+      <div class="settings-danger-zone">
+        <p class="chapter">仿真账户</p>
+        <h3>钱包重置</h3>
+        <p class="data-footnote">重置后模拟账户将恢复为 ¥1,000,000 初始资金，所有持仓与历史订单将归档至旧账户。此操作不可撤销。</p>
+        <p v-if="resetMessage" :class="{ 'data-error': !resetMessage.includes('已重置') }" role="status">{{ resetMessage }}</p>
+        <template v-if="!showResetConfirm">
+          <button class="ink-button danger-button" type="button" :disabled="!desk.account" @click="showResetConfirm = true">重置钱包</button>
+        </template>
+        <div v-else class="confirm-bar">
+          <span class="confirm-warning">确认重置？所有模拟数据将归档。</span>
+          <button class="ink-button danger-button" type="button" :disabled="resettingWallet" @click="handleResetWallet">{{ resettingWallet ? '正在重置…' : '确认重置' }}</button>
+          <button class="ink-button" type="button" @click="showResetConfirm = false">取消</button>
+        </div>
+      </div>
+
+      <!-- 退出登录 -->
+      <div class="settings-danger-zone settings-logout-zone">
+        <p class="chapter">会话</p>
+        <h3>退出登录</h3>
+        <p class="data-footnote">退出后需重新输入邮箱和密码登录。本地浏览器缓存将被清除。</p>
+        <template v-if="!showLogoutConfirm">
+          <button class="ink-button danger-button" type="button" @click="showLogoutConfirm = true">退出登录</button>
+        </template>
+        <div v-else class="confirm-bar">
+          <span class="confirm-warning">确认退出当前账户？</span>
+          <button class="ink-button danger-button" type="button" :disabled="loggingOut" @click="handleLogout">{{ loggingOut ? '正在退出…' : '确认退出' }}</button>
+          <button class="ink-button" type="button" @click="showLogoutConfirm = false">取消</button>
+        </div>
+      </div>
+    </section>
   </aside>
 </template>

@@ -12,97 +12,92 @@ function baseProps() {
     marketError: null,
     barsError: null,
     marketLoadedAt: null,
-    sentimentError: null,
-    informationError: null,
     marketNews: null,
+    marketNewsError: null,
+    marketNewsNotice: null,
     onSelectSymbol: vi.fn(),
     onRefresh: vi.fn(),
   }
 }
 
-describe('OverviewWorkspace PandaData facts', () => {
-  it('renders only labeled margin business metrics', () => {
+describe('OverviewWorkspace market facts', () => {
+  it('renders the selected real quote with upstream time, frequency, and freshness', () => {
     const wrapper = mount(OverviewWorkspace, {
       props: {
         ...baseProps(),
-        sentimentFacts: {
-          provider: 'PandaData',
-          fact_kind: 'margin_balance' as const,
+        quotes: [{
           symbol: '000001.SZ',
-          requested_at: '2026-06-25T08:00:00Z',
-          facts: [{
-            fields: [
-              { name: 'date', value: '20260625' },
-              { name: 'margin_type', value: 'stock' },
-              { name: 'short_balance', value: 17770268 },
-              { name: 'symbol', value: '000001.SZ' },
-            ],
-          }],
-        },
-        informationFacts: null,
+          name: '平安银行',
+          last: 12.34,
+          change: 0.12,
+          change_percent: 0.98,
+          provider_time: '2026-07-25T01:00:00Z',
+          frequency: '1m',
+          freshness: 'current',
+          market_status: 'in_session',
+        }],
       },
     })
 
-    const strip = wrapper.get('.sentiment-detail-strip')
-    expect(strip.text()).toContain('融券余额')
-    expect(strip.text()).toContain('17,770,268')
-    expect(strip.text()).not.toContain('margin_type')
-    expect(strip.text()).not.toContain('000001.SZ')
+    expect(wrapper.text()).toContain('平安银行')
+    expect(wrapper.text()).toContain('12.34')
+    expect(wrapper.text()).toContain('1m')
+    expect(wrapper.text()).toContain('current')
+    expect(wrapper.text()).toContain('2026/07/25 09:00:00')
   })
 
-  it('skips empty and structural disclosure fields before summarizing', () => {
+  it('shows a real market failure without inventing a last price', () => {
     const wrapper = mount(OverviewWorkspace, {
       props: {
         ...baseProps(),
-        sentimentFacts: null,
-        informationFacts: {
-          provider: 'PandaData',
-          fact_kind: 'company_disclosure' as const,
-          symbol: '000001.SZ',
-          requested_at: '2026-04-25T08:00:00Z',
-          facts: [{
-            source: {
-              data_time: '2026-04-25T08:00:00Z',
-              evidence_ref: 'fact-1',
+        marketError: 'PandaData 暂时不可用',
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('PandaData 暂时不可用')
+    expect(wrapper.find('.chart-last').exists()).toBe(false)
+  })
+
+  it('renders only HTTP crawler links as external navigation', () => {
+    const wrapper = mount(OverviewWorkspace, {
+      props: {
+        ...baseProps(),
+        marketNews: {
+          provider: 'Finance-God Public News Crawler',
+          data_mode: 'real',
+          trade_eligible: false,
+          requested_at: '2026-07-25T07:00:00Z',
+          fetched_at: '2026-07-25T07:00:00Z',
+          freshness: { status: 'fresh', age_seconds: 0, ttl_seconds: 300, cached: false },
+          warnings: [],
+          items: [
+            {
+              id: 'safe',
+              title: '安全链接',
+              summary: '',
+              source: '公开来源',
+              url: 'https://example.com/news',
+              publish_time: '2026-07-25T06:00:00Z',
+              sector: null,
+              tags: [],
             },
-            fields: [
-              { name: 'bs_acc_exp', value: null },
-              { name: 'bs_accounts_pay', value: null },
-              { name: 'date', value: '20260425' },
-              { name: 'revenue', value: 1234567 },
-              { name: 'symbol', value: '000001.SZ' },
-            ],
-          }],
+            {
+              id: 'unsafe',
+              title: '不安全链接',
+              summary: '',
+              source: '未知来源',
+              url: 'javascript:alert(1)',
+              publish_time: null,
+              sector: null,
+              tags: [],
+            },
+          ],
         },
       },
     })
 
-    const title = wrapper.get('.news-title')
-    expect(title.text()).toBe('revenue：1,234,567')
-    expect(title.text()).not.toContain('bs_acc_exp')
-    expect(title.text()).not.toContain('symbol')
-  })
-
-  it('shows an explicit empty state when a disclosure has no usable metric', () => {
-    const wrapper = mount(OverviewWorkspace, {
-      props: {
-        ...baseProps(),
-        sentimentFacts: null,
-        informationFacts: {
-          provider: 'PandaData',
-          fact_kind: 'company_disclosure' as const,
-          symbol: '000001.SZ',
-          requested_at: '2026-04-25T08:00:00Z',
-          facts: [{
-            fields: [
-              { name: 'bs_acc_exp', value: null },
-              { name: 'symbol', value: '000001.SZ' },
-            ],
-          }],
-        },
-      },
-    })
-
-    expect(wrapper.get('.news-title').text()).toBe('本次披露未返回可用财务指标')
+    expect(wrapper.findAll('.news-item')).toHaveLength(2)
+    expect(wrapper.findAll('.news-item a')).toHaveLength(1)
+    expect(wrapper.get('.news-item a').attributes('href')).toBe('https://example.com/news')
   })
 })

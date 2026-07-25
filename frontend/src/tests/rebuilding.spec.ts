@@ -22,6 +22,15 @@ vi.mock('@/services/notificationStream', () => ({
 }))
 
 vi.mock('@/services/tradingDesk', () => ({
+  DeskApiError: class DeskApiError extends Error {
+    constructor(
+      message: string,
+      public readonly code?: string,
+      public readonly activeRunId?: string,
+    ) {
+      super(message)
+    }
+  },
   canUseQuoteAsDraftReference: vi.fn((quote: { last: number | null; freshness: string; market_status: string }) => (
     quote.last !== null
     && quote.last > 0
@@ -79,7 +88,15 @@ vi.mock('@/services/tradingDesk', () => ({
   }),
   fetchWatchlistGroups: vi.fn().mockResolvedValue([]),
   fetchWatchlistInstruments: vi.fn().mockResolvedValue([]),
-  fetchResearchCandidates: vi.fn().mockResolvedValue({ candidates: [] }),
+  fetchResearchCandidates: vi.fn().mockResolvedValue({
+    generated_at: '2026-07-25T01:00:00Z',
+    rule_version: 'candidate-v1',
+    purpose_summary: '当前没有可研究候选。',
+    profile_version: null,
+    directions: [],
+    candidates: [],
+    unavailable_reason: null,
+  }),
   createSimulationAccount: vi.fn(),
   createSimulationDraft: vi.fn(),
   reviewSimulationDraft: vi.fn(),
@@ -183,6 +200,17 @@ beforeEach(() => {
   vi.mocked(tradingDeskApi.fetchSimulationOrders).mockResolvedValue([])
   vi.mocked(tradingDeskApi.fetchSimulationFills).mockResolvedValue([])
   vi.mocked(tradingDeskApi.fetchTradeEpisodes).mockResolvedValue([])
+  vi.mocked(tradingDeskApi.fetchWatchlistGroups).mockResolvedValue([])
+  vi.mocked(tradingDeskApi.fetchWatchlistInstruments).mockResolvedValue([])
+  vi.mocked(tradingDeskApi.fetchResearchCandidates).mockResolvedValue({
+    generated_at: '2026-07-25T01:00:00Z',
+    rule_version: 'candidate-v1',
+    purpose_summary: '当前没有可研究候选。',
+    profile_version: null,
+    directions: [],
+    candidates: [],
+    unavailable_reason: null,
+  })
   vi.mocked(tradingDeskApi.streamDeskAgentDecision).mockImplementation(async (input) => ({
     decision_id: 'decision-test-workflow',
     decision_source: 'agent_generated_policy_approved',
@@ -202,6 +230,29 @@ const LEGACY_TRADING_PATHS = [
   '/markets', '/watchlist', '/overview', '/portfolio', '/trade-plans/plan-1',
   '/orders', '/reviews', '/data', '/data/evidence/evidence-1', '/settings',
 ]
+
+const LEGACY_TRADING_TARGETS = new Map([
+  ['/markets', '/desk'],
+  ['/watchlist', '/desk/watchlist'],
+  ['/overview', '/desk'],
+  ['/portfolio', '/desk/portfolio'],
+  ['/trade-plans/plan-1', '/desk/trading'],
+  ['/orders', '/desk/trading'],
+  ['/reviews', '/desk/review'],
+  ['/data', '/desk'],
+  ['/data/evidence/evidence-1', '/desk'],
+  ['/settings', '/desk'],
+])
+
+function deskTestRoutes() {
+  return [
+    { path: '/desk', component: TradingDeskView, meta: { deskSection: 'information' } },
+    { path: '/desk/portfolio', component: TradingDeskView, meta: { deskSection: 'portfolio' } },
+    { path: '/desk/watchlist', component: TradingDeskView, meta: { deskSection: 'watchlist' } },
+    { path: '/desk/trading', component: TradingDeskView, meta: { deskSection: 'trading' } },
+    { path: '/desk/review', component: TradingDeskView, meta: { deskSection: 'review' } },
+  ]
+}
 
 function authenticate() {
   localStorage.setItem('finance-god-token', 'token')
@@ -446,6 +497,13 @@ describe('trading workspace routing', () => {
       added_by: 'user-1',
       added_at: '2026-07-25T01:00:00Z',
     })
+    vi.mocked(tradingDeskApi.fetchWatchlistGroups).mockResolvedValue(store.watchlistGroups)
+    vi.mocked(tradingDeskApi.fetchWatchlistInstruments).mockResolvedValue([{
+      group_id: 'group-1',
+      instrument_id: '600519.SH',
+      added_by: 'user-1',
+      added_at: '2026-07-25T01:00:00Z',
+    }])
 
     const receipt = await store.applyUiAction('add_to_watchlist', { symbol: '600519.SH' })
 
@@ -455,7 +513,7 @@ describe('trading workspace routing', () => {
       '600519.SH',
       expect.stringMatching(/^watchlist-add-/),
     )
-    expect(store.watchlistInstruments['group-1']).toHaveLength(1)
+    await vi.waitFor(() => expect(store.watchlistInstruments['group-1']).toHaveLength(1))
     expect(store.section).toBe('watchlist')
     expect(store.symbol).toBe('600519.SH')
   })
@@ -466,7 +524,7 @@ describe('trading workspace routing', () => {
     for (const path of LEGACY_TRADING_PATHS) {
       await router.push(path)
       await router.isReady()
-      expect(router.currentRoute.value.path).toBe('/desk')
+      expect(router.currentRoute.value.path).toBe(LEGACY_TRADING_TARGETS.get(path))
     }
   })
 
@@ -482,7 +540,7 @@ describe('trading workspace routing', () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
-        { path: '/desk', component: TradingDeskView },
+        ...deskTestRoutes(),
         { path: '/app/profile-report', component: { template: '<main>画像报告</main>' } },
       ],
     })
@@ -574,7 +632,7 @@ describe('trading workspace routing', () => {
     })
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -629,7 +687,7 @@ describe('trading workspace routing', () => {
     })
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -663,7 +721,7 @@ describe('trading workspace routing', () => {
   it('rerolls the current quick-command stage without bypassing Agent submit', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -689,7 +747,7 @@ describe('trading workspace routing', () => {
     }))
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -997,6 +1055,7 @@ describe('trading workspace routing', () => {
     const wrapper = mount(WatchlistWorkspace, {
       props: {
         groups: [],
+        quotes: [],
         candidates: [],
         candidateMeta: {
           generated_at: '2026-07-25T06:59:46Z',
@@ -1024,8 +1083,8 @@ describe('trading workspace routing', () => {
     const status = wrapper.get('[data-test="candidate-status"]')
     expect(wrapper.text()).toContain('现金与固收')
     expect(status.text()).toContain('当前画像方向不生成股票候选')
-    expect(status.classes()).toContain('wl-empty-hint')
-    expect(status.classes()).not.toContain('data-error')
+    expect(status.classes()).toContain('wl-candidate-status')
+    expect(status.classes()).not.toContain('wl-candidate-status--error')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 
     await wrapper.setProps({
@@ -1037,7 +1096,7 @@ describe('trading workspace routing', () => {
         unavailable_reason: 'MARKET_DATA_UNAVAILABLE',
       },
     })
-    expect(wrapper.get('[data-test="candidate-status"]').classes()).toContain('data-error')
+    expect(wrapper.get('[data-test="candidate-status"]').classes()).toContain('wl-candidate-status--error')
   })
 
   it('queues a second formal task while the current workflow remains active', async () => {
@@ -1077,6 +1136,55 @@ describe('trading workspace routing', () => {
     expect(store.agentMessages.at(-1)).toMatchObject({
       kind: 'text',
       text: expect.stringContaining('已加入待办'),
+    })
+  })
+
+  it('recovers the server-owned active workflow and queues a racing request', async () => {
+    const existingRun = {
+      run_id: 'run-server-active',
+      status: 'running' as const,
+      workflow_key: 'company_research',
+      workflow_version: '1',
+      request_intent: '研究贵州茅台',
+      revision: 2,
+      created_at: '2026-07-25T00:00:00Z',
+      updated_at: '2026-07-25T00:01:00Z',
+      final_artifact: null,
+    }
+    vi.mocked(tradingDeskApi.createWorkflow).mockRejectedValue(
+      new tradingDeskApi.DeskApiError(
+        '已有活动工作流',
+        'WORKFLOW_ALREADY_ACTIVE',
+        existingRun.run_id,
+      ),
+    )
+    vi.mocked(tradingDeskApi.fetchWorkflow).mockResolvedValue(existingRun)
+    vi.mocked(tradingDeskApi.fetchWorkflowProgress).mockResolvedValue({
+      run_id: existingRun.run_id,
+      workflow_key: existingRun.workflow_key,
+      workflow_version: existingRun.workflow_version,
+      status: existingRun.status,
+      revision: existingRun.revision,
+      updated_at: existingRun.updated_at,
+      total_node_count: 2,
+      completed_node_artifact_count: 0,
+      completed_node_artifacts: [],
+      errors: [],
+      is_terminal: false,
+      nodes: [],
+    })
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+
+    await store.submitAgentIntent('研究宁德时代供应链风险')
+
+    expect(store.activeWorkflow?.run_id).toBe(existingRun.run_id)
+    expect(store.workflowIntent).toBe(existingRun.request_intent)
+    expect(store.queuedWorkflowIntents).toHaveLength(1)
+    expect(store.queuedWorkflowIntents[0].intent).toBe('研究宁德时代供应链风险')
+    expect(store.agentMessages.at(-1)).toMatchObject({
+      kind: 'text',
+      text: expect.stringContaining('服务端已有活动任务'),
     })
   })
 
@@ -1167,7 +1275,7 @@ describe('trading workspace routing', () => {
 
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -1307,7 +1415,7 @@ describe('trading workspace routing', () => {
     }])
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -1341,7 +1449,7 @@ describe('trading workspace routing', () => {
       }])
       const router = createRouter({
         history: createMemoryHistory(),
-        routes: [{ path: '/desk', component: TradingDeskView }],
+        routes: deskTestRoutes(),
       })
       await router.push('/desk')
       await router.isReady()
@@ -1360,7 +1468,7 @@ describe('trading workspace routing', () => {
     }
   })
 
-  it('never renders facts from another symbol and keeps refresh errors visible', () => {
+  it('keeps the selected quote visible while a refresh error remains explicit', () => {
     const selectSymbol = vi.fn()
     const wrapper = mount(OverviewWorkspace, {
       props: {
@@ -1370,26 +1478,21 @@ describe('trading workspace routing', () => {
         }],
         selectedSymbol: '600519.SH',
         loading: false,
-        marketError: null,
+        marketError: '新标的行情不可用',
         marketLoadedAt: '2026-07-25T01:00:02Z',
-        sentimentFacts: { symbol: '000001.SZ', requested_at: 'old', facts: [{ source: { data_time: 'old', evidence_ref: 'old-fact' }, fields: [{ name: '旧事实', value: '不应显示' }] }] },
-        sentimentError: '新标的融资事实不可用',
-        informationFacts: null,
-        informationError: null,
         onSelectSymbol: selectSymbol,
         onRefresh: vi.fn(),
       },
     })
 
-    expect(wrapper.text()).not.toContain('不应显示')
-    expect(wrapper.get('[role="alert"]').text()).toContain('新标的融资事实不可用')
+    expect(wrapper.get('[role="alert"]').text()).toContain('新标的行情不可用')
+    expect(wrapper.get('[role="alert"]').text()).toContain('当前保留数据最后成功读取于')
     const instrumentButton = wrapper.get('.index-tab.active')
     expect(instrumentButton.element.tagName).toBe('BUTTON')
     expect(instrumentButton.text()).toContain('贵州茅台')
   })
 
-  it('discloses mock reference data without turning mock news into external links', () => {
-    const generatedAt = '2026-07-25T01:00:00Z'
+  it('keeps a crawler failure visible without injecting local news rows', () => {
     const wrapper = mount(OverviewWorkspace, {
       props: {
         quotes: [],
@@ -1399,49 +1502,15 @@ describe('trading workspace routing', () => {
         marketError: null,
         barsError: null,
         marketLoadedAt: null,
-        sentimentFacts: {
-          provider: 'Finance-God Mock',
-          fact_kind: 'margin_balance',
-          symbol: '600519.SH',
-          requested_at: generatedAt,
-          generated_at: generatedAt,
-          data_mode: 'mock',
-          fallback_reason: '真实市场情绪源暂时不可用。',
-          facts: [{ fields: [{ name: '融资余额', value: null }, { name: '来源', value: 'Finance-God Mock' }] }],
-        },
-        sentimentError: null,
-        informationFacts: {
-          provider: 'Finance-God Mock',
-          fact_kind: 'company_disclosure',
-          symbol: '600519.SH',
-          requested_at: generatedAt,
-          generated_at: generatedAt,
-          data_mode: 'mock',
-          fallback_reason: '真实市场资讯源暂时不可用。',
-          facts: [{
-            fields: [
-              { name: 'title', value: '市场公告示例' },
-              { name: 'source', value: 'Finance-God Mock' },
-              { name: 'sector', value: '公告' },
-              { name: 'url', value: '' },
-            ],
-          }],
-        },
-        informationError: null,
+        marketNews: null,
+        marketNewsError: '公开资讯源暂时不可用',
         onSelectSymbol: vi.fn(),
         onRefresh: vi.fn(),
       },
     })
 
-    const disclosures = wrapper.findAll('.mock-data-disclosure')
-    expect(disclosures).toHaveLength(2)
-    expect(wrapper.text()).toContain('模拟数据')
-    expect(wrapper.text()).toContain('真实市场情绪源暂时不可用')
-    expect(wrapper.text()).toContain('真实市场资讯源暂时不可用')
-    expect(wrapper.text()).toContain('刷新可重试真实数据')
-    expect(wrapper.find('.news-item a').exists()).toBe(false)
-    expect(wrapper.get('.news-item .news-source').text()).toBe('Finance-God Mock')
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('[role="alert"]').text()).toContain('公开资讯源暂时不可用')
+    expect(wrapper.find('.news-item').exists()).toBe(false)
   })
 
   it('renders only HTTP crawler news URLs as isolated external links', () => {
@@ -1524,6 +1593,7 @@ describe('trading workspace routing', () => {
     const wrapper = mount(WatchlistWorkspace, {
       props: {
         groups: [],
+        quotes: [],
         candidates: [],
         loading: false,
         watchlistError: null,
@@ -1544,7 +1614,7 @@ describe('trading workspace routing', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
-  it('presents historical market-fact boundaries as statuses instead of refresh failures', () => {
+  it('presents a news availability boundary as a status instead of a refresh failure', () => {
     const wrapper = mount(OverviewWorkspace, {
       props: {
         quotes: [],
@@ -1554,21 +1624,15 @@ describe('trading workspace routing', () => {
         marketError: null,
         barsError: null,
         marketLoadedAt: null,
-        sentimentFacts: null,
-        sentimentError: null,
-        sentimentNotice: '历史演示不提供时点还原的市场情绪事实。',
-        informationFacts: null,
-        informationError: null,
-        informationNotice: '历史演示不展示现实资讯，避免引入未来信息。',
+        marketNews: null,
+        marketNewsError: null,
+        marketNewsNotice: '当前模式不展示现实资讯。',
         onSelectSymbol: vi.fn(),
         onRefresh: vi.fn(),
       },
     })
 
-    expect(wrapper.findAll('[role="status"]').map((item) => item.text())).toEqual([
-      '历史演示不提供时点还原的市场情绪事实。',
-      '历史演示不展示现实资讯，避免引入未来信息。',
-    ])
+    expect(wrapper.get('[role="status"]').text()).toBe('当前模式不展示现实资讯。')
     expect(wrapper.text()).not.toContain('刷新失败')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
@@ -1576,7 +1640,7 @@ describe('trading workspace routing', () => {
   it('mounts all five workspaces and preserves explicit empty states', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -1608,7 +1672,7 @@ describe('trading workspace routing', () => {
   it('loads orders only once when the trading workspace opens', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -1673,7 +1737,7 @@ describe('trading workspace routing', () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
-        { path: '/desk', component: TradingDeskView },
+        ...deskTestRoutes(),
         { path: '/app/profile-report', component: { template: '<main>画像报告</main>' } },
       ],
     })
@@ -1708,7 +1772,7 @@ describe('trading workspace routing', () => {
   it('keeps the Agent expanded without exposing layout settings', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -1723,7 +1787,7 @@ describe('trading workspace routing', () => {
     expect(labels).toEqual(['总览', '持仓', '自选', '交易', '复盘'])
   })
 
-  it('submits one immediate market trade with only symbol, side, and quantity', async () => {
+  it('submits one immediate market trade with a frozen decision record', async () => {
     const onSubmit = vi.fn()
     const onSelectSymbol = vi.fn()
     const onPeriodChange = vi.fn()
@@ -1751,7 +1815,7 @@ describe('trading workspace routing', () => {
         loading: false, error: null, onLoad: vi.fn(), onSubmit, onSelectSymbol, onPeriodChange,
       },
     })
-    expect(wrapper.text()).toContain('交易股票实时 K 线')
+    expect(wrapper.text()).toContain('平安银行')
     expect(wrapper.text()).toContain('000001.SZ')
     await wrapper.get('input:not([type])').setValue('600519.sh')
     await wrapper.get('input:not([type])').trigger('change')
@@ -1762,11 +1826,35 @@ describe('trading workspace routing', () => {
     await wrapper.get('input:not([type])').setValue('000001.SZ')
     await wrapper.get('input:not([type])').trigger('change')
     await wrapper.get('input[type="number"]').setValue('100')
+    const decisionFields = wrapper.findAll('.decision-record textarea, .decision-record input')
+    const decisionValues = [
+      '估值处于历史低位且盈利改善',
+      '三个月目标收益 10%',
+      '盈利修复不及预期',
+      '行业净息差仍在收窄',
+      '三个月',
+      '中等',
+    ]
+    for (const [index, field] of decisionFields.entries()) {
+      await field.setValue(decisionValues[index])
+    }
     expect(wrapper.text()).toContain('立即买入')
     expect(wrapper.text()).not.toContain('订单草稿')
     expect(wrapper.text()).not.toContain('风险复核')
     await wrapper.get('form').trigger('submit')
-    expect(onSubmit).toHaveBeenCalledWith({ instrumentId: '000001.SZ', side: 'buy', quantity: '100' })
+    expect(onSubmit).toHaveBeenCalledWith({
+      instrumentId: '000001.SZ',
+      side: 'buy',
+      quantity: '100',
+      decisionContext: {
+        thesis: decisionValues[0],
+        expected_return: decisionValues[1],
+        primary_risks: decisionValues[2],
+        contrary_evidence: decisionValues[3],
+        expected_holding_period: decisionValues[4],
+        confidence: decisionValues[5],
+      },
+    })
     expect(wrapper.text()).toContain('真实行情')
     expect(wrapper.text()).toContain('2026-07-25T01:00:00Z')
   })
@@ -1871,7 +1959,7 @@ describe('trading workspace routing', () => {
     expect(wrapper.text()).not.toContain('自动卖出策略')
     expect(wrapper.text()).not.toContain('设止盈止损')
     expect(wrapper.find('th[scope="col"]:last-child').text()).toBe('操作')
-    await wrapper.get('button[aria-label="查看 000001.SZ 的交易页面"]').trigger('click')
+    await wrapper.get('tr[aria-label="点击查看 000001.SZ 的交易页面"]').trigger('click')
     expect(onOpenPosition).toHaveBeenCalledWith(expect.objectContaining({
       instrument_id: '000001.SZ',
     }))
@@ -1924,7 +2012,7 @@ describe('trading workspace routing', () => {
     }))
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()
@@ -1941,7 +2029,7 @@ describe('trading workspace routing', () => {
     vi.mocked(tradingDeskApi.fetchDeskBootstrap).mockRejectedValue(new Error('bootstrap down'))
     const router = createRouter({
       history: createMemoryHistory(),
-      routes: [{ path: '/desk', component: TradingDeskView }],
+      routes: deskTestRoutes(),
     })
     await router.push('/desk')
     await router.isReady()

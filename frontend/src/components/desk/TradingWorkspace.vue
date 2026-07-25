@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import MarketChart, { type ChartQuote, type ChartPeriod } from './MarketChart.vue'
+import TradePlanPanel from './TradePlanPanel.vue'
+import DraftReviewPanel from './DraftReviewPanel.vue'
 import type {
   DeskBar,
   DeskQuote,
   SimulationAccount,
+  SimulationDraft,
   SimulationFill,
   SimulationOrder,
   SimulationPortfolio,
+  TradeDecisionContextInput,
+  TradePlan,
+  TradePlanActionRevision,
 } from '@/services/tradingDesk'
 import { canUseQuoteAsDraftReference, draftReferenceBlockedReason } from '@/services/tradingDesk'
 
@@ -28,6 +34,11 @@ const props = withDefaults(defineProps<{
     source?: 'agent_strategy'
     planId?: string
   } | null
+  activeDraft?: SimulationDraft | null
+  activeTradePlan?: TradePlan | null
+  tradePlanError?: string | null
+  draftLoading?: boolean
+  indexSwitchNotice?: string | null
   loading: boolean
   error: string | null
   onLoad: () => void | Promise<void>
@@ -35,7 +46,20 @@ const props = withDefaults(defineProps<{
   onEnsureQuoteSymbol?: (symbol: string) => void | Promise<void>
   onSelectSymbol?: (symbol: string) => void
   onPeriodChange?: (period: ChartPeriod) => void
-  onSubmit: (input: { instrumentId: string; side: 'buy' | 'sell'; quantity: string }) => void | Promise<void>
+  onSubmit: (input: {
+    instrumentId: string
+    side: 'buy' | 'sell'
+    quantity: string
+    decisionContext: TradeDecisionContextInput
+  }) => void | Promise<void>
+  onReviewDraft?: () => void | Promise<void>
+  onAcknowledgeSoftRisk?: (hash: string) => void | Promise<void>
+  onConfirmDraft?: (hash: string) => void | Promise<void>
+  onSubmitDraft?: () => void | Promise<void>
+  onDismissDraft?: () => void
+  onRevisePlan?: (actions: TradePlanActionRevision[]) => void | Promise<void>
+  onConfirmPlan?: () => void | Promise<void>
+  onDismissPlan?: () => void
 }>(), {
   minutePeriodsAvailable: true,
 })
@@ -43,6 +67,12 @@ const props = withDefaults(defineProps<{
 const instrumentId = ref(props.selectedSymbol)
 const side = ref<'buy' | 'sell'>('buy')
 const quantity = ref('')
+const thesis = ref('')
+const expectedReturn = ref('')
+const primaryRisks = ref('')
+const contraryEvidence = ref('')
+const expectedHoldingPeriod = ref('')
+const confidence = ref('')
 const referenceQuote = computed(() => props.quotes.find((quote) => quote.symbol === instrumentId.value.trim().toUpperCase()) ?? null)
 const chartQuote = computed<ChartQuote | null>(() => {
   const quote = props.quotes.find((item) => item.symbol === props.selectedSymbol)
@@ -69,11 +99,42 @@ const canSubmit = computed(() => Boolean(
   && props.accountState === 'available'
   && !props.loading
   && numericQuantity.value > 0
-  && !quoteBlockedReason.value
-  && !balanceBlockedReason.value,
+  && !balanceBlockedReason.value
+  && thesis.value.trim()
+  && expectedReturn.value.trim()
+  && primaryRisks.value.trim()
+  && contraryEvidence.value.trim()
+  && expectedHoldingPeriod.value.trim()
+  && confidence.value.trim()
 ))
 const latestFill = computed(() => props.receipt?.fills[props.receipt.fills.length - 1] ?? null)
 const recentFills = computed(() => [...props.fills].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)).slice(0, 20))
+
+// --- Position analysis & P/L ---
+const positionQuantity = computed(() => Number(position.value?.quantity ?? 0))
+const positionAvailable = computed(() => Number(position.value?.available_quantity ?? 0))
+const costBasis = computed(() => Number(position.value?.cost_basis_rmb ?? 0))
+const averageCost = computed(() => {
+  const avg = position.value?.average_cost_rmb
+  return avg !== null && avg !== undefined ? Number(avg) : null
+})
+const marketValue = computed(() => {
+  if (numericPrice.value === null || positionQuantity.value <= 0) return null
+  return numericPrice.value * positionQuantity.value
+})
+const unrealizedPnl = computed(() => {
+  if (marketValue.value === null || costBasis.value <= 0) return null
+  return marketValue.value - costBasis.value
+})
+const unrealizedPnlPercent = computed(() => {
+  if (unrealizedPnl.value === null || costBasis.value <= 0) return null
+  return (unrealizedPnl.value / costBasis.value) * 100
+})
+const sellPnlEstimate = computed(() => {
+  if (side.value !== 'sell' || numericPrice.value === null || numericQuantity.value <= 0 || averageCost.value === null) return null
+  return (numericPrice.value - averageCost.value) * numericQuantity.value
+})
+const hasPosition = computed(() => positionQuantity.value > 0)
 
 watch(() => props.selectedSymbol, (next) => { instrumentId.value = next })
 watch(() => props.prefill, (next) => {
@@ -98,12 +159,25 @@ function money(value: number | string | null | undefined): string {
   return `¥${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function pnlClass(value: number | null): string {
+  if (value === null || value === 0) return ''
+  return value > 0 ? 'pnl-positive' : 'pnl-negative'
+}
+
 async function submit() {
   if (!canSubmit.value) return
   await props.onSubmit({
     instrumentId: instrumentId.value.trim().toUpperCase(),
     side: side.value,
     quantity: String(quantity.value),
+    decisionContext: {
+      thesis: thesis.value.trim(),
+      expected_return: expectedReturn.value.trim(),
+      primary_risks: primaryRisks.value.trim(),
+      contrary_evidence: contraryEvidence.value.trim(),
+      expected_holding_period: expectedHoldingPeriod.value.trim(),
+      confidence: confidence.value.trim(),
+    },
   })
 }
 </script>
@@ -115,10 +189,13 @@ async function submit() {
       <button class="refresh-button" type="button" :disabled="loading" @click="onLoad">{{ loading ? '正在刷新' : '刷新' }}</button>
     </header>
 
+    <!-- Index switch notice -->
+    <p v-if="indexSwitchNotice" class="index-switch-notice" role="status">{{ indexSwitchNotice }}</p>
+
     <section class="overview-section trading-chart-section" aria-labelledby="trading-chart-title">
       <header>
-        <h2 id="trading-chart-title">交易股票实时 K 线</h2>
-        <small>{{ selectedSymbol }}</small>
+        <h2 id="trading-chart-title">{{ chartQuote?.name || selectedSymbol }}</h2>
+        <small>{{ selectedSymbol }} · 实时 K 线</small>
       </header>
       <MarketChart
         :quote="chartQuote"
@@ -155,9 +232,34 @@ async function submit() {
           <div><dt>上游时间</dt><dd>{{ referenceQuote.provider_time || '—' }}</dd></div>
           <div><dt>频率 / 新鲜度</dt><dd>{{ referenceQuote.frequency || '—' }} · {{ referenceQuote.freshness }}</dd></div>
         </dl>
-        <p v-if="quoteBlockedReason" class="data-error" role="status">{{ quoteBlockedReason }}</p>
+        <p v-if="quoteBlockedReason" class="workflow-note" role="status">{{ quoteBlockedReason }} 后端将尝试使用可用的历史价格执行。</p>
       </section>
 
+      <!-- Position Analysis & P/L -->
+      <section v-if="hasPosition" class="overview-section position-analysis" aria-labelledby="position-analysis-title">
+        <header>
+          <h2 id="position-analysis-title">当前持仓</h2>
+          <small>模拟 · {{ instrumentId }}</small>
+        </header>
+        <dl class="market-sheet">
+          <div><dt>持有数量</dt><dd>{{ positionQuantity.toLocaleString('zh-CN') }}</dd></div>
+          <div><dt>可卖数量</dt><dd>{{ positionAvailable.toLocaleString('zh-CN') }}</dd></div>
+          <div><dt>成本金额</dt><dd>{{ money(costBasis) }}</dd></div>
+          <div><dt>平均成本</dt><dd>{{ averageCost !== null ? money(averageCost) : '—' }}</dd></div>
+          <div><dt>当前市值</dt><dd>{{ marketValue !== null ? money(marketValue) : '行情不可用' }}</dd></div>
+          <div>
+            <dt>浮动盈亏</dt>
+            <dd :class="pnlClass(unrealizedPnl)">
+              {{ unrealizedPnl !== null ? money(unrealizedPnl) : '—' }}
+              <span v-if="unrealizedPnlPercent !== null" class="pnl-percent">
+                ({{ unrealizedPnlPercent >= 0 ? '+' : '' }}{{ unrealizedPnlPercent.toFixed(2) }}%)
+              </span>
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <!-- Quick Market Order Form -->
       <form class="form-workspace" aria-label="模拟市价交易" @submit.prevent="submit">
         <p v-if="prefill?.source === 'agent_strategy'" class="empty-data" role="status">
           AI 已根据交易计划填写模拟交易单{{ prefill.planId ? `（${prefill.planId}）` : '' }}。
@@ -166,16 +268,57 @@ async function submit() {
         <label>标的<input v-model="instrumentId" required @change="selectTradingSymbol"></label>
         <label>方向<select v-model="side"><option value="buy">买入</option><option value="sell">卖出</option></select></label>
         <label>数量<input v-model="quantity" type="number" min="1" step="1" required></label>
+        <fieldset class="decision-record">
+          <legend>决策记录</legend>
+          <p>以下内容随成交冻结，用于复盘当时的判断。</p>
+          <label>为什么交易<textarea v-model="thesis" maxlength="2000" required></textarea></label>
+          <label>预期收益<input v-model="expectedReturn" type="text" maxlength="1000" required></label>
+          <label>主要风险<textarea v-model="primaryRisks" maxlength="2000" required></textarea></label>
+          <label>反方证据<textarea v-model="contraryEvidence" maxlength="2000" required></textarea></label>
+          <label>预计持有周期<input v-model="expectedHoldingPeriod" type="text" maxlength="500" required></label>
+          <label>信心程度<input v-model="confidence" type="text" maxlength="500" required></label>
+        </fieldset>
         <dl class="market-sheet trade-check">
           <div><dt>预计金额</dt><dd>{{ money(estimatedAmount) }}</dd></div>
           <div v-if="side === 'buy'"><dt>可用现金</dt><dd>{{ money(account.cash_available_rmb) }}</dd></div>
           <div v-else><dt>可卖数量</dt><dd>{{ availableQuantity.toLocaleString('zh-CN') }}</dd></div>
+        </dl>
+        <!-- Sell P/L estimate -->
+        <dl v-if="side === 'sell' && sellPnlEstimate !== null" class="market-sheet sell-pnl">
+          <div>
+            <dt>预估{{ sellPnlEstimate >= 0 ? '盈利' : '亏损' }}</dt>
+            <dd :class="pnlClass(sellPnlEstimate)">{{ money(Math.abs(sellPnlEstimate)) }}</dd>
+          </div>
         </dl>
         <p v-if="balanceBlockedReason" class="data-error" role="status">{{ balanceBlockedReason }}</p>
         <button class="ink-button" type="submit" :disabled="!canSubmit">
           {{ loading ? '正在执行' : side === 'buy' ? '立即买入' : '立即卖出' }}
         </button>
       </form>
+
+      <!-- Trade Plan Panel -->
+      <TradePlanPanel
+        v-if="activeTradePlan"
+        :plan="activeTradePlan"
+        :loading="loading"
+        :error="tradePlanError ?? null"
+        :on-revise="onRevisePlan ?? (async () => {})"
+        :on-confirm="onConfirmPlan ?? (async () => {})"
+        :on-dismiss="onDismissPlan ?? (() => {})"
+      />
+
+      <!-- Draft Review Panel -->
+      <DraftReviewPanel
+        v-if="activeDraft"
+        :draft="activeDraft"
+        :loading="draftLoading ?? false"
+        :error="error"
+        :on-review="onReviewDraft ?? (async () => {})"
+        :on-acknowledge-soft-risk="onAcknowledgeSoftRisk ?? (async () => {})"
+        :on-confirm="onConfirmDraft ?? (async () => {})"
+        :on-submit="onSubmitDraft ?? (async () => {})"
+        :on-dismiss="onDismissDraft ?? (() => {})"
+      />
 
       <section v-if="receipt" class="overview-section" aria-labelledby="receipt-title">
         <header><h2 id="receipt-title">成交回执</h2><small>{{ receipt.order_id }}</small></header>
@@ -213,3 +356,17 @@ async function submit() {
     <p v-if="error" class="data-error" role="alert">{{ error }}</p>
   </section>
 </template>
+
+<style scoped>
+.index-switch-notice { background: var(--paper-light); border: 1px solid var(--rule); padding: 0.5rem 0.75rem; font-size: 0.82rem; color: var(--muted-ink); margin-bottom: 0.75rem; }
+.position-analysis { margin-top: 0.5rem; }
+.pnl-positive { color: var(--positive); font-weight: 600; }
+.pnl-negative { color: var(--risk); font-weight: 600; }
+.pnl-percent { font-size: 0.82rem; font-weight: 400; }
+.sell-pnl { margin-top: 0.25rem; padding-top: 0.25rem; border-top: 1px dashed var(--faint-rule); }
+.decision-record { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem 1rem; margin: 1rem 0; padding: 1rem 0 0; border: 0; border-top: 1px solid var(--rule); }
+.decision-record legend { padding: 0 .7rem 0 0; font-weight: 800; }
+.decision-record > p { grid-column: 1 / -1; margin: 0; color: var(--muted-ink); font-size: .82rem; }
+.decision-record textarea { min-height: 5rem; resize: vertical; }
+@media (max-width: 680px) { .decision-record { grid-template-columns: 1fr; } }
+</style>

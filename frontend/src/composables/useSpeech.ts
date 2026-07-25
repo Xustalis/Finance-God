@@ -1,5 +1,6 @@
 import { ref } from 'vue'
-type RecognitionCtor=new()=>{lang:string;interimResults:boolean;continuous:boolean;start():void;stop():void;onresult:((event:any)=>void)|null;onerror:((event:any)=>void)|null;onend:(()=>void)|null}
+interface RecognitionResultEvent { results: ArrayLike<ArrayLike<{ transcript: string }>> }
+type RecognitionCtor=new()=>{lang:string;interimResults:boolean;continuous:boolean;start():void;stop():void;onresult:((event:RecognitionResultEvent)=>void)|null;onerror:(()=>void)|null;onend:(()=>void)|null}
 interface SpeechEnv{webkitSpeechRecognition?:RecognitionCtor;SpeechRecognition?:RecognitionCtor;speechSynthesis?:SpeechSynthesis;SpeechSynthesisUtterance?:typeof SpeechSynthesisUtterance}
 export function createSpeechController(env:SpeechEnv=globalThis as SpeechEnv){
   const Recognition=env.SpeechRecognition||env.webkitSpeechRecognition;const mode=ref<'text'|'voice'>(Recognition?'voice':'text');const listening=ref(false);const transcript=ref('');const error=ref('');const speaking=ref(true);let recognition:InstanceType<RecognitionCtor>|null=null
