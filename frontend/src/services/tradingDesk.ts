@@ -805,12 +805,24 @@ export function normalizeDeskBars(rawBars: readonly Record<string, unknown>[]): 
     .map(([, bar]) => bar)
 }
 
+export function assertBarFrequency(requested: string | undefined, actual: unknown): void {
+  if (!requested) return
+  const normalizedActual = String(actual ?? '').trim().toLowerCase()
+  const accepted = requested === 'daily'
+    ? new Set(['daily', '1d', '日频'])
+    : new Set(['1m', '1min', '1分钟'])
+  if (!accepted.has(normalizedActual)) {
+    throw new DeskApiError(`K线频率不匹配：请求 ${requested}，服务端返回 ${normalizedActual || '未知频率'}`)
+  }
+}
+
 export async function fetchBars(symbol: string, frequency?: string): Promise<DeskBar[]> {
   const params: Record<string, string> = { symbol }
   if (frequency) params.frequency = frequency
-  const result = await request<{ bars?: Array<Record<string, unknown>> }>(() =>
+  const result = await request<{ frequency?: string; bars?: Array<Record<string, unknown>> }>(() =>
     client.get('/market/bars', { params })
   )
+  assertBarFrequency(frequency, result.frequency)
   return normalizeDeskBars(result.bars ?? [])
 }
 

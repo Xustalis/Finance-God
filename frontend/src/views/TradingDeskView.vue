@@ -131,11 +131,11 @@ onBeforeUnmount(() => {
             :quotes="desk.quotes ?? []" :bars="desk.bars ?? []" :selected-symbol="desk.symbol" :loading="desk.loadingMarket" :market-error="desk.marketError" :bars-error="desk.barsError ?? null"
             :market-loaded-at="desk.marketLoadedAt"
             :sentiment-facts="desk.simulationClock ? null : desk.sentimentFacts" :sentiment-error="desk.simulationClock ? null : desk.sentimentFactsError"
-            :sentiment-notice="desk.simulationClock ? '历史演示不提供时点还原的市场情绪事实。' : null"
+            :sentiment-notice="desk.simulationClock ? '历史演示不提供时点还原的市场情绪事实。' : desk.marketFactsNotice"
             :information-facts="desk.simulationClock ? null : desk.informationFacts" :information-error="desk.simulationClock ? null : desk.informationFactsError"
-            :information-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : null"
+            :information-notice="desk.simulationClock ? '历史演示不展示现实资讯，避免引入未来信息。' : desk.marketFactsNotice"
             :on-select-symbol="desk.setSymbol" :on-refresh="() => desk.refreshMarket({ withBars: true })"
-            :on-period-change="(p: string) => desk.setBarsFrequency(p === 'daily' ? undefined : '1m')"
+            :on-period-change="(frequency: string) => desk.setBarsFrequency(frequency)"
           />
           <PortfolioWorkspace
             v-else-if="desk.section === 'portfolio'"

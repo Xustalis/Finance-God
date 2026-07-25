@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DeskApiError, normalizeDeskBars } from '@/services/tradingDesk'
+import { assertBarFrequency, DeskApiError, normalizeDeskBars } from '@/services/tradingDesk'
 
 describe('normalizeDeskBars', () => {
   it('converts Decimal JSON strings, sorts timestamps, and keeps the latest duplicate', () => {
@@ -53,5 +53,13 @@ describe('normalizeDeskBars', () => {
       close: '10',
       volume: '100',
     }])).toThrow(DeskApiError)
+  })
+
+  it('rejects a minute response for a daily request', () => {
+    expect(() => assertBarFrequency('daily', '1分钟')).toThrow(
+      'K线频率不匹配：请求 daily，服务端返回 1分钟',
+    )
+    expect(() => assertBarFrequency('daily', '日频')).not.toThrow()
+    expect(() => assertBarFrequency('1m', '1分钟')).not.toThrow()
   })
 })

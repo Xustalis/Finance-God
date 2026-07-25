@@ -757,6 +757,106 @@ describe('trading workspace routing', () => {
     })
   })
 
+  it('does not request stock-only facts when the selected instrument is an index', async () => {
+    const store = useTradingDeskStore(createPinia())
+    await store.initialize()
+    expect(tradingDeskApi.fetchInformationFacts).toHaveBeenCalledTimes(1)
+    expect(tradingDeskApi.fetchSentimentFacts).toHaveBeenCalledTimes(1)
+
+    store.setSymbol('000001.SH')
+    await flushPromises()
+
+    expect(tradingDeskApi.fetchInformationFacts).toHaveBeenCalledTimes(1)
+    expect(tradingDeskApi.fetchSentimentFacts).toHaveBeenCalledTimes(1)
+    expect(store.informationFacts).toBeNull()
+    expect(store.sentimentFacts).toBeNull()
+    expect(store.marketFactsNotice).toContain('仅支持 A 股个股')
+  })
+
+  it('requests real daily bars on first load', async () => {
+    const store = useTradingDeskStore(createPinia())
+
+    await store.initialize()
+
+    expect(tradingDeskApi.fetchBars).toHaveBeenCalledWith('000001.SZ', 'daily')
+  })
+
+  it('uses the shared UUID fallback for desk write commands on HTTP', async () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(values: Uint8Array) {
+        values.set(Array.from({ length: values.length }, (_, index) => index))
+        return values
+      },
+    })
+    vi.mocked(tradingDeskApi.createWatchlistGroup).mockResolvedValue({
+      group_id: 'group-http',
+      owner_user_id: 'user-1',
+      name: 'HTTP 自选',
+      description: null,
+      revision: 1,
+      created_at: '2026-07-25T07:00:00Z',
+      updated_at: '2026-07-25T07:00:00Z',
+    })
+    try {
+      const store = useTradingDeskStore(createPinia())
+      await store.createWatchlist('HTTP 自选', null)
+
+      expect(tradingDeskApi.createWatchlistGroup).toHaveBeenCalledWith(
+        { name: 'HTTP 自选', description: null },
+        'watchlist-create-00010203-0405-4607-8809-0a0b0c0d0e0f',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('renders cash and fixed-income direction as a neutral stock-candidate boundary', async () => {
+    const wrapper = mount(WatchlistWorkspace, {
+      props: {
+        groups: [],
+        candidates: [],
+        candidateMeta: {
+          generated_at: '2026-07-25T06:59:46Z',
+          rule_version: 'candidate-v1',
+          profile_version: 1,
+          directions: ['cash_fixed_income'],
+          unavailable_reason: 'NO_SUPPORTED_DIRECTION_CANDIDATES',
+        },
+        loading: false,
+        watchlistError: null,
+        candidateError: null,
+        onLoad: vi.fn(),
+        onCreateGroup: vi.fn(),
+        onRenameGroup: vi.fn(),
+        onDeleteGroup: vi.fn(),
+        onAddInstrument: vi.fn(),
+        onRemoveInstrument: vi.fn(),
+        onIgnoreCandidate: vi.fn(),
+      },
+      global: {
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+
+    const status = wrapper.get('[role="status"]')
+    expect(wrapper.text()).toContain('现金与固收')
+    expect(status.text()).toContain('当前画像方向不生成股票候选')
+    expect(status.classes()).toContain('empty-data')
+    expect(status.classes()).not.toContain('data-error')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      candidateMeta: {
+        generated_at: '2026-07-25T06:59:46Z',
+        rule_version: 'candidate-v1',
+        profile_version: 1,
+        directions: ['cash_fixed_income'],
+        unavailable_reason: 'MARKET_DATA_UNAVAILABLE',
+      },
+    })
+    expect(wrapper.get('[role="status"]').classes()).toContain('data-error')
+  })
+
   it('queues a second formal task while the current workflow remains active', async () => {
     vi.mocked(tradingDeskApi.streamDeskAgentDecision).mockResolvedValue({
       decision_id: 'decision-queued-workflow',

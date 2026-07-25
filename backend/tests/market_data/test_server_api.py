@@ -24,6 +24,7 @@ from finance_god.market_data import (
     MarketDataService,
     PandaCalendarPublishedState,
 )
+from finance_god.market_data.contracts import DataFrequency
 from finance_god.orchestration.workflows import (
     WorkflowCommandRuntime,
     WorkflowCreateCommand,
@@ -153,6 +154,16 @@ class FailingFactService(StubService):
         raise MarketDataError(ErrorKind.TRANSIENT, "facts unavailable")
 
 
+class UnsupportedFactService(StubService):
+    def read_information_facts(self, symbol: str, **kwargs: object):
+        del symbol, kwargs
+        raise MarketDataError(ErrorKind.CAPABILITY, "facts do not apply")
+
+    def read_sentiment_facts(self, symbol: str, **kwargs: object):
+        del symbol, kwargs
+        raise MarketDataError(ErrorKind.CAPABILITY, "facts do not apply")
+
+
 def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -209,6 +220,33 @@ def test_reference_fact_endpoints_return_labeled_non_trading_mock_on_failure(
     assert sentiment_payload["symbol"] == "600519.SH"
 
 
+def test_reference_fact_endpoints_do_not_mock_unsupported_instruments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        server,
+        "_services",
+        lambda: (UnsupportedFactService(), FailingApplication()),
+    )
+    monkeypatch.setattr(server.settings, "market_reference_mock_fallback", True)
+
+    information = asyncio.run(
+        server.information_facts(_request(b"symbol=000001.SH"))
+    )
+    sentiment = asyncio.run(
+        server.sentiment_facts(_request(b"symbol=000001.SH"))
+    )
+    information_payload = _payload(information)
+    sentiment_payload = _payload(sentiment)
+
+    assert information.status_code == 422
+    assert sentiment.status_code == 422
+    assert information_payload["error"]["code"] == "MARKET_DATA_CAPABILITY_UNAVAILABLE"
+    assert sentiment_payload["error"]["code"] == "MARKET_DATA_CAPABILITY_UNAVAILABLE"
+    assert "data_mode" not in information_payload
+    assert "data_mode" not in sentiment_payload
+
+
 def test_reference_fact_endpoints_keep_explicit_error_when_mock_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -237,6 +275,48 @@ def test_reference_fact_endpoints_keep_explicit_error_when_mock_is_disabled(
     assert sentiment.status_code == 502
     assert _payload(information)["error"]["code"] == "MARKET_DATA_UPSTREAM_TEMPORARY"
     assert _payload(sentiment)["error"]["code"] == "MARKET_DATA_UPSTREAM_TEMPORARY"
+
+
+def test_daily_bar_route_uses_adapter_supported_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DailyBarService:
+        def read_bars(
+            self,
+            symbol: str,
+            *,
+            limit: int,
+            frequency_override: DataFrequency | None,
+        ) -> object:
+            captured.update(
+                symbol=symbol,
+                limit=limit,
+                frequency_override=frequency_override,
+            )
+            return SimpleNamespace(
+                frequency="日频",
+                bars=(),
+                quality=SimpleNamespace(model_dump=lambda mode="json": {}),
+            )
+
+    monkeypatch.setattr(
+        server,
+        "_services",
+        lambda: (DailyBarService(), FailingApplication()),
+    )
+
+    response = asyncio.run(
+        server.bars(_request(b"symbol=000001.SZ&frequency=daily"))
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "symbol": "000001.SZ",
+        "limit": 1_000,
+        "frequency_override": DataFrequency.DAILY,
+    }
 
 
 def test_market_api_returns_stable_safe_errors_without_raw_exception_text(

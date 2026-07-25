@@ -91,6 +91,7 @@ from finance_god.market_data import (
     QuoteBatch,
     capability_catalog_summary,
 )
+from finance_god.market_data.errors import ErrorKind
 from finance_god.orchestration.multi_agent import MultiAgentRuntime
 from finance_god.orchestration.workflows import (
     WorkflowCommandPort,
@@ -597,7 +598,7 @@ async def bars(request: Request) -> JSONResponse:
         if frequency_param and frequency_param not in freq_map:
             raise ValueError("unsupported bar frequency")
         frequency_override = freq_map.get(frequency_param) if frequency_param else None
-        limit = 5_000 if frequency_override is DF.DAILY else 500
+        limit = 1_000 if frequency_override is DF.DAILY else 500
         result = await asyncio.to_thread(
             service.read_bars,
             symbol,
@@ -646,13 +647,19 @@ async def information_facts(request: Request) -> JSONResponse:
             status_code=400,
         )
     except MarketDataError as error:
-        if settings.market_reference_mock_fallback:
+        if (
+            settings.market_reference_mock_fallback
+            and error.kind is not ErrorKind.CAPABILITY
+        ):
             _LOGGER.warning(
                 "Information reference source failed; serving labeled mock: %s",
                 type(error).__name__,
             )
             return _mock_information_facts(symbol)
-        return _json({"error": error.public_payload()}, status_code=502)
+        return _json(
+            {"error": error.public_payload()},
+            status_code=422 if error.kind is ErrorKind.CAPABILITY else 502,
+        )
     except Exception:  # noqa: BLE001 - public HTTP error boundary
         return _internal_error()
     return _json(result)
@@ -679,13 +686,19 @@ async def sentiment_facts(request: Request) -> JSONResponse:
             status_code=400,
         )
     except MarketDataError as error:
-        if settings.market_reference_mock_fallback:
+        if (
+            settings.market_reference_mock_fallback
+            and error.kind is not ErrorKind.CAPABILITY
+        ):
             _LOGGER.warning(
                 "Sentiment reference source failed; serving labeled mock: %s",
                 type(error).__name__,
             )
             return _mock_sentiment_facts(symbol)
-        return _json({"error": error.public_payload()}, status_code=502)
+        return _json(
+            {"error": error.public_payload()},
+            status_code=422 if error.kind is ErrorKind.CAPABILITY else 502,
+        )
     except Exception:  # noqa: BLE001 - public HTTP error boundary
         return _internal_error()
     return _json(result)

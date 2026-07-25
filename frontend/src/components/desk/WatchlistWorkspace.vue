@@ -51,16 +51,39 @@ const newGroupDescription = ref('')
 const groupName = ref('')
 const groupDescription = ref('')
 const instrumentId = ref('')
+const directionLabels: Record<string, string> = {
+  cash_fixed_income: '现金与固收',
+  public_funds: '公募基金',
+  equities: '权益（股票）',
+  alternatives: '另类配置',
+  long_term_insurance: '长期储蓄保险',
+}
+const candidateDirectionsText = computed(() => (
+  props.candidateMeta?.directions
+    .map(direction => directionLabels[direction] ?? direction)
+    .join('、') || '方向未就绪'
+))
 const candidateUnavailableText = computed(() => {
   const reason = props.candidateMeta?.unavailable_reason
   if (!reason) return null
   return {
     PROFILE_REQUIRED: '需要先完成投资画像，当前没有生成股票候选。',
     PROFILE_DIRECTIONS_REQUIRED: '画像没有可用的选定或推荐方向。',
-    NO_SUPPORTED_DIRECTION_CANDIDATES: '当前画像方向在股票候选池中没有受支持标的。',
+    NO_SUPPORTED_DIRECTION_CANDIDATES: '当前画像方向不生成股票候选；如需股票研究，可在画像中选择权益方向。',
     MARKET_DATA_UNAVAILABLE: 'PandaData 行情不可用，候选暂不能进入交易计划。',
   }[reason] ?? `候选生成不可用：${reason}`
 })
+const neutralCandidateReasons = new Set([
+  'PROFILE_REQUIRED',
+  'PROFILE_DIRECTIONS_REQUIRED',
+  'NO_SUPPORTED_DIRECTION_CANDIDATES',
+])
+const candidateUnavailableIsError = computed(() => (
+  Boolean(
+    props.candidateMeta?.unavailable_reason
+    && !neutralCandidateReasons.has(props.candidateMeta.unavailable_reason),
+  )
+))
 
 function selectGroup(group: WatchlistGroup) { selectedGroupId.value = group.group_id; groupName.value = group.name; groupDescription.value = group.description ?? '' }
 async function createGroup() { if (!newGroupName.value.trim()) return; await props.onCreateGroup({ name: newGroupName.value.trim(), description: newGroupDescription.value.trim() || null }); newGroupName.value = ''; newGroupDescription.value = '' }
@@ -103,13 +126,20 @@ watch(
         <h2 id="candidate-title">可研究候选</h2>
         <small v-if="candidateMeta">
           画像 v{{ candidateMeta.profile_version ?? '—' }} ·
-          {{ candidateMeta.directions.join('、') || '方向未就绪' }} ·
+          {{ candidateDirectionsText }} ·
           {{ candidateMeta.generated_at }}
         </small>
         <small v-else>画像投影与市场事实的研究入口</small>
       </header>
       <div v-if="candidates.length" class="market-table-wrap candidate-table"><table class="market-table"><thead><tr><th scope="col">标的</th><th scope="col">用途</th><th scope="col">五项解释维度</th><th scope="col">反方证据 / 未知项</th><th scope="col">操作</th></tr></thead><tbody><tr v-for="candidate in candidates" :key="candidate.instrument_id"><th scope="row">{{ candidate.name || candidate.symbol }}<small>{{ candidate.symbol }} · {{ candidate.direction_label }}</small></th><td>{{ candidate.purpose }}<small>{{ candidate.provider || '—' }} · {{ candidate.as_of || '—' }}</small></td><td><ul class="fact-list"><li v-for="dimension in candidate.dimensions.slice(0, 5)" :key="dimension.dimension"><strong>{{ dimension.label }} · {{ dimension.rating }}</strong><span>{{ dimension.detail }}</span></li></ul></td><td><p v-for="exclusion in candidate.exclusions" :key="exclusion.reason_code">{{ exclusion.detail }}</p><p v-for="dimension in candidate.dimensions.filter((item) => item.missing_fields.length)" :key="`${dimension.dimension}-missing`">未知：{{ dimension.missing_fields.join('、') }}</p><span v-if="!candidate.exclusions.length && !candidate.dimensions.some((item) => item.missing_fields.length)">未返回反方证据或未知项。</span></td><td class="candidate-actions"><template v-if="candidate.ignored"><small>已忽略：{{ candidate.ignore_reason || '—' }}</small></template><template v-else><button class="refresh-button" type="button" @click="onIgnoreCandidate({ instrumentId: candidate.instrument_id, reason: 'not_now', note: null })">暂不研究</button><button v-if="onCreateTradePlan" class="refresh-button" type="button" :disabled="candidate.tradable === false" :title="candidate.tradable === false ? '服务端判定该候选暂不可生成交易计划' : '向服务端申请研究型交易计划，不是直接下单'" @click="onCreateTradePlan(candidate.instrument_id)">申请交易计划</button></template></td></tr></tbody></table></div>
-      <p v-else-if="candidateUnavailableText" class="data-error" role="status">{{ candidateUnavailableText }}</p>
+      <p
+        v-else-if="candidateUnavailableText"
+        :class="candidateUnavailableIsError ? 'data-error' : 'empty-data'"
+        role="status"
+      >
+        {{ candidateUnavailableText }}
+        <a v-if="!candidateUnavailableIsError" href="/app/profile-report">调整画像方向</a>
+      </p>
       <p v-else-if="candidateNotice" class="empty-data" role="status">{{ candidateNotice }}</p>
       <p v-else-if="!candidateError" class="empty-data">暂无可研究候选。</p>
       <p v-if="candidateError" class="data-error" role="alert">候选读取失败：{{ candidateError }}</p>

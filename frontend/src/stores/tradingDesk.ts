@@ -95,6 +95,7 @@ import {
 } from '@/services/tradingDesk'
 import type { ProfileWithRecommendations } from '@/types/api'
 import { parseInstrumentId } from '@/domain/instrumentId'
+import { makeRequestId } from '@/utils/requestId'
 
 export type DeskSection = 'information' | 'portfolio' | 'watchlist' | 'trading' | 'review'
 export type DeskAccountState = 'unknown' | 'absent' | 'available' | 'error'
@@ -115,6 +116,7 @@ export type AgentThreadMessage =
 
 const DEFAULT_SYMBOL = '000001.SZ'
 const BASELINE_SYMBOLS = ['000001.SH', '399001.SZ', '000300.SH'] as const
+const INDEX_SYMBOLS = new Set<string>(BASELINE_SYMBOLS)
 const POLL_INTERVAL_MS = 60_000
 const AGENT_THREAD_STORAGE_KEY = 'finance-god:agent-thread:v1'
 const WORKFLOW_QUEUE_STORAGE_KEY = 'finance-god:workflow-queue:v1'
@@ -136,7 +138,7 @@ function isMissingSimulationAccount(errorMessage: string): boolean {
 }
 
 function newIdempotencyKey(scope: string): string {
-  return `${scope}-${crypto.randomUUID()}`
+  return `${scope}-${makeRequestId()}`
 }
 
 function deskContextStorageKey(): string {
@@ -324,7 +326,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
   }
 
   function nextMessageId(kind: string) {
-    return `${kind}-${crypto.randomUUID()}`
+    return `${kind}-${makeRequestId()}`
   }
 
   const portfolioSymbols = computed(() => portfolio.value?.positions.map((item) => item.instrument_id) ?? [])
@@ -610,7 +612,12 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     }
   }
 
-  const barsFrequency = ref<string | undefined>(undefined)
+  const barsFrequency = ref<string | undefined>('daily')
+  const marketFactsNotice = computed(() => (
+    INDEX_SYMBOLS.has(symbol.value)
+      ? '当前标的是指数；融资余额与公司披露事实仅支持 A 股个股。切换至个股后可读取 PandaData 真实数据。'
+      : null
+  ))
 
   function setSymbol(next: string) {
     const normalized = parseInstrumentId(next)
@@ -730,7 +737,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     const requestedSymbol = symbol.value
     informationFactsError.value = null
     sentimentFactsError.value = null
-    if (hasSimulationAccount.value) {
+    if (hasSimulationAccount.value || marketFactsNotice.value) {
       informationFacts.value = null
       sentimentFacts.value = null
       return
@@ -1436,7 +1443,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
       if (decision.mode === 'workflow' && workflowActive.value) {
         queuedWorkflowIntents.value = [
           ...queuedWorkflowIntents.value,
-          { id: crypto.randomUUID(), intent: normalizedIntent, createdAt },
+          { id: makeRequestId(), intent: normalizedIntent, createdAt },
         ]
         persistWorkflowQueue()
         replaceAgentMessage(pendingId, {
@@ -1810,7 +1817,7 @@ export const useTradingDeskStore = defineStore('trading-desk', () => {
     section, symbol, quotes, quoteSymbols, profile, informationFacts, sentimentFacts, bars, notifications,
     account, accountState, simulationClock, portfolio, orders, fills, tradeEpisodes, selectedTradeEpisode, tradeEpisodeDecisions, tradeEpisodeReview, agentLearningSummary, watchlistGroups, watchlistInstruments, selectedWatchlistId, selectedWatchlist,
     selectedWatchlistInstruments, candidates, activeDraft, activeOrder, activeTradePlan, hasSimulationAccount,
-    marketError, profileError, informationFactsError, sentimentFactsError, barsError, notificationError, notificationStreamError, simulationError,
+    marketError, profileError, informationFactsError, sentimentFactsError, marketFactsNotice, barsError, notificationError, notificationStreamError, simulationError,
     accountError, ordersError, fillsError, marketLoadedAt, simulationLoadedAt, watchlistError, candidateError,
     orderError, tradePlanError,
     loadingMarket, loadingSimulation, loadingWatchlists, loadingCandidates, tradeReviewLoading, tradeReviewError, agentLearningLoading, agentLearningError,

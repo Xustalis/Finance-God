@@ -458,6 +458,15 @@ class MarketDataService:
         """Return source-stamped financial-report disclosures, never summaries."""
         _validate_fact_limit(limit)
         instrument = self.resolve(symbol)
+        if (
+            instrument.market is not MarketType.CN
+            or instrument.asset_class.value != "equity"
+        ):
+            raise MarketDataError(
+                ErrorKind.CAPABILITY,
+                "company disclosure facts require a CN equity instrument",
+                endpoint="get_fina_reports",
+            )
         envelope = self._adapter.fetch_financial_report_facts(
             instrument,
             start_quarter=start_quarter,
@@ -492,7 +501,8 @@ class MarketDataService:
             instrument.market is not MarketType.CN
             or instrument.asset_class.value != "equity"
         ):
-            raise MarketDataResponseError(
+            raise MarketDataError(
+                ErrorKind.CAPABILITY,
                 "margin-balance sentiment facts require a CN equity instrument",
                 endpoint="get_margin",
             )

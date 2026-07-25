@@ -249,6 +249,32 @@ def test_service_exposes_raw_margin_facts_without_sentiment_inference() -> None:
     assert all("sentiment" not in field.name for field in result.facts[0].fields)
 
 
+def test_stock_fact_services_reject_index_as_unsupported_capability() -> None:
+    service = MarketDataService(
+        adapter=adapter(FakeSDK()),
+        now=lambda: NOW,
+        published_state=StaticPublishedState(ReleaseState.RELEASED),
+    )
+
+    with pytest.raises(MarketDataError) as information:
+        service.read_information_facts(
+            "000001.SH",
+            start_quarter="2026q1",
+            end_quarter="2026q2",
+        )
+    with pytest.raises(MarketDataError) as sentiment:
+        service.read_sentiment_facts(
+            "000001.SH",
+            start_date="20260701",
+            end_date="20260723",
+        )
+
+    assert information.value.kind is ErrorKind.CAPABILITY
+    assert sentiment.value.kind is ErrorKind.CAPABILITY
+    assert information.value.endpoint == "get_fina_reports"
+    assert sentiment.value.endpoint == "get_margin"
+
+
 def test_market_get_reports_conflict_without_creating_a_workflow() -> None:
     sdk = FakeSDK()
     sdk.responses["get_stock_rt_min"] = [
