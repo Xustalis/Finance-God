@@ -1,0 +1,24 @@
+[Unit]
+Description=Finance-God A2A Gateway (PandaAI track)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/fg-a2a/a2a-gateway
+# 直接对外监听 0.0.0.0:8000（该端口经腾讯云安全组放行），完全隔离于旧应用的 nginx 站点
+Environment=A2A_GATEWAY_HOST=0.0.0.0
+Environment=A2A_GATEWAY_PORT=8000
+# 对外发布地址：裸 IP + HTTP，挂根路径（service-url 与 card-url 两种发现方式都兼容）
+Environment=A2A_PUBLIC_BASE_URL=http://124.221.77.214:8000
+Environment=A2A_ENGINE=auto
+Environment=A2A_RESEARCH=auto
+ExecStart=/home/ubuntu/fg-a2a/.venv/bin/python /home/ubuntu/fg-a2a/a2a-gateway/server.py
+Restart=always
+RestartSec=3
+# 崩溃自愈 + 开机自启，满足赛事“评审期间保持稳定在线”
+StandardOutput=append:/home/ubuntu/fg-a2a/gateway.log
+StandardError=append:/home/ubuntu/fg-a2a/gateway.log
+
+[Install]
+WantedBy=multi-user.target

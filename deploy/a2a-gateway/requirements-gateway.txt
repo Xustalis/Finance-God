@@ -1,0 +1,10 @@
+# Finance-God A2A 网关运行依赖（精简版，仅对话+多智能体编排所需）
+# 要求 Python >= 3.11（代码使用 enum.StrEnum / typing.Self 等 3.11+ 特性）
+# 不含 pandas/pyarrow/fastapi 等重依赖，适配磁盘/内存受限的部署机。
+# research_runtime 源码通过 sys.path 直接引入，无需 pip 安装 vendor 包本身。
+langgraph>=1.0,<2
+openai>=2.0,<3
+pydantic>=2.0,<3
+python-dotenv>=1.0,<2
+# finance_god.orchestration 顶层导入 workflow 栈需要
+sqlalchemy>=2.0,<3
